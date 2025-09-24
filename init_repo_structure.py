@@ -17,10 +17,22 @@ placeholders = {
     "logs/.gitkeep": "",
     "templates/.gitkeep": "",
     "tests/__init__.py": "# Test-Modul-Initialisierung\n",
-    "polling/README.md": "Platzhalter für Trigger-/Polling-Logik.\nHier entsteht die Anbindung für wiederkehrende Prüfungen oder externe Trigger.\n",
-    "extraction/README.md": "Platzhalter für zukünftige Extraktions- und Parsing-Logik.\nHier werden Module zur Datenextraktion ergänzt.\n",
-    "human_in_the_loop/README.md": "Platzhalter für Human-in-the-Loop-Komponenten.\nHier entsteht später z.B. die Integration für manuelle Freigaben oder Rückfragen.\n",
-    "reminders/README.md": "Platzhalter für Reminder- und Eskalations-Workflows.\nHier werden Module für Erinnerungen, automatische Folgeaktionen etc. ergänzt.\n",
+    "polling/README.md": (
+        "Platzhalter für Trigger-/Polling-Logik.\n"
+        "Hier entsteht die Anbindung für wiederkehrende Prüfungen oder externe Trigger.\n"
+    ),
+    "extraction/README.md": (
+        "Platzhalter für zukünftige Extraktions- und Parsing-Logik.\n"
+        "Hier werden Module zur Datenextraktion ergänzt.\n"
+    ),
+    "human_in_the_loop/README.md": (
+        "Platzhalter für Human-in-the-Loop-Komponenten.\n"
+        "Hier entsteht später z.B. die Integration für manuelle Freigaben oder Rückfragen.\n"
+    ),
+    "reminders/README.md": (
+        "Platzhalter für Reminder- und Eskalations-Workflows.\n"
+        "Hier werden Module für Erinnerungen, automatische Folgeaktionen etc. ergänzt.\n"
+    ),
     "README.md": (
         "# Agentic-Intelligence-Research\n\n"
         "Dieses Repository enthält Workflows und Komponenten für agentenbasierte Prozessautomatisierung "

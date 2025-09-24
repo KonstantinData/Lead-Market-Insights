@@ -1,107 +1,79 @@
-import time
+import os
 import logging
-import threading
-import signal
-from typing import Callable, Optional
+import boto3
+from datetime import datetime
+import sys
 
 
-class PollingTrigger:
-    """
-    Live-capable polling and trigger module.
-    Supports interval-based polling with graceful shutdown, logging, and custom polling logic.
-    """
+# Note: This function sets up the logger to write both to a file (with timestamp in /tmp)
+# and to stdout for real-time feedback in CI environments.
+def setup_logger():
+    log_filename = f'polling_trigger_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
+    log_filepath = os.path.join("/tmp", log_filename)
 
-    def __init__(
-        self,
-        poll_logic: Callable[[], None],
-        interval_seconds: int = 60,
-        workflow_log_manager=None,
-        run_id: Optional[str] = None,
-        logger: Optional[logging.Logger] = None,
-    ):
-        """
-        :param poll_logic: Function to execute each polling interval.
-        :param interval_seconds: Seconds between polling runs.
-        :param workflow_log_manager: Optional, for workflow logging (to S3 etc.).
-        :param run_id: Optional, workflow run identifier.
-        :param logger: Optional, custom logger instance.
-        """
-        self.poll_logic = poll_logic
-        self.interval_seconds = interval_seconds
-        self.workflow_log_manager = workflow_log_manager
-        self.run_id = run_id
-        self.logger = logger or logging.getLogger("PollingTrigger")
-        self._running = False
-        self._thread = None
-
-    def _log(self, msg, level=logging.INFO):
-        if self.logger:
-            self.logger.log(level, msg)
-        if self.workflow_log_manager and self.run_id:
-            self.workflow_log_manager.append_log(self.run_id, "polling", msg)
-
-    def _polling_loop(self):
-        self._log("PollingTrigger started.")
-        while self._running:
-            try:
-                self.poll_logic()
-                self._log("Polling iteration complete.")
-            except Exception as e:
-                err_msg = f"Error during polling: {e}"
-                self._log(err_msg, level=logging.ERROR)
-                if self.workflow_log_manager and self.run_id:
-                    self.workflow_log_manager.append_log(
-                        self.run_id, "polling", "Error during polling", error=str(e)
-                    )
-            time.sleep(self.interval_seconds)
-        self._log("PollingTrigger stopped.")
-
-    def start(self):
-        if self._running:
-            self._log("PollingTrigger already running.", level=logging.WARNING)
-            return
-        self._running = True
-        self._thread = threading.Thread(target=self._polling_loop, daemon=True)
-        self._thread.start()
-
-        # Setup signal handlers for graceful shutdown if running in main thread
-        try:
-            signal.signal(signal.SIGTERM, self.stop)
-            signal.signal(signal.SIGINT, self.stop)
-        except Exception:
-            pass  # Might not be supported in all environments
-
-    def stop(self, signum=None, frame=None):
-        if not self._running:
-            return
-        self._log("Stopping PollingTrigger...", level=logging.INFO)
-        self._running = False
-        if self._thread:
-            self._thread.join(timeout=5)
-            self._thread = None
-
-    def is_running(self):
-        return self._running
-
-    def wait(self):
-        """Block until the polling thread finishes"""
-        if self._thread:
-            self._thread.join()
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[logging.FileHandler(log_filepath), logging.StreamHandler(sys.stdout)],
+    )
+    return logging.getLogger(__name__), log_filepath
 
 
-# Example usage:
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-
-    def my_poll_logic():
-        # Insert actual polling logic here, e.g. check for new events
-        print("Polling for new events...")
-
-    # Optionally provide workflow_log_manager and run_id here
-    poller = PollingTrigger(poll_logic=my_poll_logic, interval_seconds=10)
-    poller.start()
+# Note: This function uploads the logfile to an AWS S3 bucket using credentials
+# and bucket name provided via environment variables (set in the GitHub Actions workflow).
+def upload_log_to_s3(log_filepath):
     try:
-        while poller.is_running():
-            time.sleep(1)
-    except KeyboardInterrupt:
-        poller.stop()
+        aws_key = os.environ["AWS_ACCESS_KEY_ID"]
+        aws_secret = os.environ["AWS_SECRET_ACCESS_KEY"]
+        aws_region = os.environ["AWS_DEFAULT_REGION"]
+        bucket_name = os.environ["S3_BUCKET_NAME"]
+    except KeyError as e:
+        print(f"Missing AWS config or bucket env var: {e}")
+        return
+
+    s3_key = f"logs/{os.path.basename(log_filepath)}"
+    try:
+        s3 = boto3.client(
+            "s3",
+            aws_access_key_id=aws_key,
+            aws_secret_access_key=aws_secret,
+            region_name=aws_region,
+        )
+        s3.upload_file(log_filepath, bucket_name, s3_key)
+        print(f"Log uploaded to s3://{bucket_name}/{s3_key}")
+    except Exception as ex:
+        print(f"Log upload to S3 failed: {ex}")
+
+
+# Note: This is the main entry point for the polling script.
+# It reads configuration from environment variables, runs the job logic, and handles logging and cleanup.
+def main():
+    logger, log_filepath = setup_logger()
+    logger.info("Polling Trigger started.")
+
+    # Note: Read lookahead and lookback parameters from environment variables.
+    lookahead_days = int(os.environ.get("CAL_LOOKAHEAD_DAYS", 14))
+    lookback_days = int(os.environ.get("CAL_LOOKBACK_DAYS", 1))
+    logger.info(f"Lookback: {lookback_days} days, Lookahead: {lookahead_days} days")
+
+    # Note: Place your actual polling/data processing logic here.
+    # This is where you would implement the main functionality of your polling job.
+    try:
+        logger.info("Start polling job.")
+        # --- Begin custom business logic ---
+        # Example: simulate a data fetch or operation
+        # result = fetch_data(lookback_days, lookahead_days)
+        logger.info("Polling job finished successfully.")
+        # --- End custom business logic ---
+    except Exception as e:
+        logger.error(f"Error during polling job: {e}", exc_info=True)
+        raise
+    finally:
+        # Note: Always upload the log file to S3 at the end of the script, even if exceptions occur.
+        upload_log_to_s3(log_filepath)
+        logger.info("Logfile uploaded to S3 (if configured).")
+
+
+# Note: Standard Python entry point. Calls the main() function.
+if __name__ == "__main__":
+    main()

@@ -30,7 +30,6 @@ def base_credentials() -> Dict[str, str]:
         "token_uri": "https://example.com/token",
     }
 
-
 def test_init_without_required_env(monkeypatch):
     for key in (
         "GOOGLE_CLIENT_ID",
@@ -78,7 +77,10 @@ def test_list_events_uses_authorized_request(monkeypatch, base_credentials):
         response_payload = {"items": [{"id": "1"}]}
         return FakeResponse(json.dumps(response_payload).encode("utf-8"))
 
-    monkeypatch.setattr("integration.google_calendar_integration.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        "integration.google_calendar_integration.request.urlopen",
+        fake_urlopen
+    )
 
     events = integration.list_events(max_results=5)
 
@@ -86,7 +88,9 @@ def test_list_events_uses_authorized_request(monkeypatch, base_credentials):
 
 
 def test_parse_redirect_uris():
-    raw_value = "https://a.example/return, https://b.example/return ,,https://c.example/return"
+    raw_value = (
+        "https://a.example/return, https://b.example/return, ,https://c.example/return"
+    )
     parsed = GoogleCalendarIntegration._parse_redirect_uris(raw_value)
     assert parsed == (
         "https://a.example/return",

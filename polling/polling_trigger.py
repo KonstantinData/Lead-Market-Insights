@@ -5,75 +5,81 @@ from datetime import datetime
 import sys
 
 
-# Note: This function sets up the logger to write both to a file (with timestamp in /tmp)
-# and to stdout for real-time feedback in CI environments.
-def setup_logger():
-    log_filename = f'polling_trigger_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
-    log_filepath = os.path.join("/tmp", log_filename)
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
-        handlers=[logging.FileHandler(log_filepath), logging.StreamHandler(sys.stdout)],
-    )
-    return logging.getLogger(__name__), log_filepath
-
-
-# Note: This function uploads the logfile to an AWS S3 bucket using credentials
-# and bucket name provided via environment variables (set in the GitHub Actions workflow).
-def upload_log_to_s3(log_filepath):
-    try:
-        aws_key = os.environ["AWS_ACCESS_KEY_ID"]
-        aws_secret = os.environ["AWS_SECRET_ACCESS_KEY"]
-        aws_region = os.environ["AWS_DEFAULT_REGION"]
-        bucket_name = os.environ["S3_BUCKET_NAME"]
-    except KeyError as e:
-        print(f"Missing AWS config or bucket env var: {e}")
-        return
-
-    s3_key = f"logs/{os.path.basename(log_filepath)}"
-    try:
-        s3 = boto3.client(
-            "s3",
-            aws_access_key_id=aws_key,
-            aws_secret_access_key=aws_secret,
-            region_name=aws_region,
+# Note: PollingTrigger encapsulates all logic for polling, logging, and S3 upload,
+# making the script modular and easy to test.
+class PollingTrigger:
+    # Note: Initializes the PollingTrigger with configuration from environment variables.
+    def __init__(self):
+        self.lookahead_days = int(os.environ.get("CAL_LOOKAHEAD_DAYS", 14))
+        self.lookback_days = int(os.environ.get("CAL_LOOKBACK_DAYS", 1))
+        self.aws_key = os.environ.get("AWS_ACCESS_KEY_ID")
+        self.aws_secret = os.environ.get("AWS_SECRET_ACCESS_KEY")
+        self.aws_region = os.environ.get("AWS_DEFAULT_REGION")
+        self.bucket_name = os.environ.get("S3_BUCKET_NAME")
+        # Note: Generate a unique log filename with a timestamp and store in /tmp.
+        self.log_filename = (
+            f'polling_trigger_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
         )
-        s3.upload_file(log_filepath, bucket_name, s3_key)
-        print(f"Log uploaded to s3://{bucket_name}/{s3_key}")
-    except Exception as ex:
-        print(f"Log upload to S3 failed: {ex}")
+        self.log_filepath = os.path.join("/tmp", self.log_filename)
+        self.logger = self.setup_logger()
+
+    # Note: Sets up the logger to write to both a file and stdout.
+    def setup_logger(self):
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(message)s",
+            handlers=[
+                logging.FileHandler(self.log_filepath),
+                logging.StreamHandler(sys.stdout),
+            ],
+        )
+        return logging.getLogger(self.__class__.__name__)
+
+    # Note: Main logic for polling job. Replace the placeholder with real implementation.
+    def run_job(self):
+        self.logger.info("Polling job started.")
+        # --- Begin custom logic ---
+        # Example: simulate some data processing
+        self.logger.info(
+            f"Lookback: {self.lookback_days} days, Lookahead: {self.lookahead_days} days"
+        )
+        # Simulate polling logic here
+        self.logger.info("Polling job finished successfully.")
+        # --- End custom logic ---
+
+    # Note: Uploads the generated log file to the configured AWS S3 bucket.
+    def upload_log_to_s3(self):
+        if not all([self.aws_key, self.aws_secret, self.aws_region, self.bucket_name]):
+            self.logger.warning(
+                "AWS credentials or bucket name not fully configured. Skipping S3 upload."
+            )
+            return
+        s3_key = f"logs/{os.path.basename(self.log_filepath)}"
+        try:
+            s3 = boto3.client(
+                "s3",
+                aws_access_key_id=self.aws_key,
+                aws_secret_access_key=self.aws_secret,
+                region_name=self.aws_region,
+            )
+            s3.upload_file(self.log_filepath, self.bucket_name, s3_key)
+            self.logger.info(f"Log uploaded to s3://{self.bucket_name}/{s3_key}")
+        except Exception as ex:
+            self.logger.error(f"Log upload to S3 failed: {ex}")
+
+    # Note: Runs the complete workflow, including the polling job and log upload.
+    def run(self):
+        try:
+            self.run_job()
+        except Exception as e:
+            self.logger.error(f"Error during polling job: {e}", exc_info=True)
+            raise
+        finally:
+            self.upload_log_to_s3()
+            self.logger.info("Logfile uploaded to S3 (if configured).")
 
 
-# Note: This is the main entry point for the polling script.
-# It reads configuration from environment variables, runs the job logic, and handles logging and cleanup.
-def main():
-    logger, log_filepath = setup_logger()
-    logger.info("Polling Trigger started.")
-
-    # Note: Read lookahead and lookback parameters from environment variables.
-    lookahead_days = int(os.environ.get("CAL_LOOKAHEAD_DAYS", 14))
-    lookback_days = int(os.environ.get("CAL_LOOKBACK_DAYS", 1))
-    logger.info(f"Lookback: {lookback_days} days, Lookahead: {lookahead_days} days")
-
-    # Note: Place your actual polling/data processing logic here.
-    # This is where you would implement the main functionality of your polling job.
-    try:
-        logger.info("Start polling job.")
-        # --- Begin custom business logic ---
-        # Example: simulate a data fetch or operation
-        # result = fetch_data(lookback_days, lookahead_days)
-        logger.info("Polling job finished successfully.")
-        # --- End custom business logic ---
-    except Exception as e:
-        logger.error(f"Error during polling job: {e}", exc_info=True)
-        raise
-    finally:
-        # Note: Always upload the log file to S3 at the end of the script, even if exceptions occur.
-        upload_log_to_s3(log_filepath)
-        logger.info("Logfile uploaded to S3 (if configured).")
-
-
-# Note: Standard Python entry point. Calls the main() function.
+# Note: Standard Python entry point. Instantiates and runs the PollingTrigger.
 if __name__ == "__main__":
-    main()
+    trigger = PollingTrigger()
+    trigger.run()

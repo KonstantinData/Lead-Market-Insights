@@ -44,5 +44,6 @@ class EmailAgent:
 
 
 # Example usage:
-# agent = EmailAgent("smtp.example.com", 465, "user", "pass", "noreply@example.com")
+# agent = EmailAgent("smtp.example.com", 465, "user", "pass",
+# "noreply@example.com")
 # agent.send_email("recipient@example.com", "Subject", "Body")

@@ -1,4 +1,5 @@
-# Notes: Agent responsible for polling events from an external source (e.g. Google Calendar, API, database).
+# Notes: Agent responsible for polling events from an
+# external source (e.g. Google Calendar, API, database).
 class EventPollingAgent:
     def __init__(self, config=None):
         # Notes: Store configuration for later use (API keys, time frame, etc.)

@@ -1,4 +1,5 @@
-# Notes: Agent responsible for detecting if an event matches one of the trigger words.
+# Notes: Agent responsible for detecting if an event m
+# atches one of the trigger words.
 class TriggerDetectionAgent:
     def __init__(self, trigger_words=None):
         # Notes: List of trigger words, can be set via config or directly.

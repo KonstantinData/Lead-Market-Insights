@@ -3,7 +3,8 @@ class ExtractionAgent:
     def extract(self, event):
         """
         Notes:
-        - Extracts required information (e.g., company name, web domain) from the event.
+        - Extracts required information (e.g., company name, web domain)
+        from the event.
         - Returns a dictionary with extracted info and a completeness flag.
         """
         info = {

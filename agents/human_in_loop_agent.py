@@ -2,9 +2,12 @@ class HumanInLoopAgent:
     def request_info(self, event, extracted):
         """
         Notes:
-        - Requests missing info from a human (this is a dummy implementation for demonstration).
-        - In a real scenario, this could send an email, Slack message, or open a web form.
-        - Here, it simulates a user providing the missing information.
+        - Requests missing info from a human (this is a dummy
+        implementation for demonstration).
+        - In a real scenario, this could send an email, Slack
+        message, or open a web form.
+        - Here, it simulates a user providing the missing
+        information.
         """
         print(
             f"Please provide missing info for event {event.get('id', '<unknown>')}: {extracted['info']}"

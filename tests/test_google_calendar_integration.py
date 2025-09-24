@@ -30,6 +30,7 @@ def base_credentials() -> Dict[str, str]:
         "token_uri": "https://example.com/token",
     }
 
+
 def test_init_without_required_env(monkeypatch):
     for key in (
         "GOOGLE_CLIENT_ID",

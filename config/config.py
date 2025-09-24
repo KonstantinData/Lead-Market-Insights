@@ -1,41 +1,43 @@
-from pydantic import BaseSettings, Field
+import os
 from typing import Optional
 
+from dotenv import load_dotenv
 
-class Settings(BaseSettings):
-    # Notes: Number of days to look ahead when polling calendar events
-    cal_lookahead_days: int = Field(
-        14, description="Days to look ahead for polling events"
-    )
-    # Notes: Number of days to look back when polling calendar events
-    cal_lookback_days: int = Field(
-        1, description="Days to look back for polling events"
-    )
 
-    # Notes: AWS/S3 Configuration
-    aws_access_key_id: Optional[str] = Field(None, description="AWS Access Key ID")
-    aws_secret_access_key: Optional[str] = Field(
-        None, description="AWS Secret Access Key"
-    )
-    aws_default_region: Optional[str] = Field(None, description="AWS Region")
-    s3_bucket: Optional[str] = Field(
-        None, description="S3 bucket name for logs or artifacts"
-    )
+def _get_env_var(name: str) -> Optional[str]:
+    """Return an environment variable using the conventional uppercase name."""
 
-    # Notes: Comma-separated list of trigger words (for event/meeting detection)
-    trigger_words: Optional[str] = Field(
-        None, description="Comma-separated list of trigger words"
-    )
+    return os.getenv(name)
 
-    # Notes: Add further configuration options as needed (e.g., email recipients, logging levels, etc.)
-    # Example:
-    # email_recipient: Optional[str] = Field(None, description="Notification email recipient")
-    # log_level: Optional[str] = Field("INFO", description="Logging level")
 
-    class Config:
-        # Notes: Load environment variables from .env file and support UTF-8 encoding
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+def _get_int_env(name: str, default: int) -> int:
+    """Fetch an integer environment variable with fallback to a default value."""
+
+    raw_value = _get_env_var(name)
+    if raw_value is None or raw_value == "":
+        return default
+
+    try:
+        return int(raw_value)
+    except ValueError as exc:  # pragma: no cover - defensive programming branch
+        raise ValueError(f"Environment variable {name} must be an integer.") from exc
+
+
+class Settings:
+    """Application configuration loaded from environment variables or defaults."""
+
+    def __init__(self) -> None:
+        load_dotenv()
+
+        self.cal_lookahead_days: int = _get_int_env("CAL_LOOKAHEAD_DAYS", 14)
+        self.cal_lookback_days: int = _get_int_env("CAL_LOOKBACK_DAYS", 1)
+
+        self.aws_access_key_id: Optional[str] = _get_env_var("AWS_ACCESS_KEY_ID")
+        self.aws_secret_access_key: Optional[str] = _get_env_var("AWS_SECRET_ACCESS_KEY")
+        self.aws_default_region: Optional[str] = _get_env_var("AWS_DEFAULT_REGION")
+        self.s3_bucket: Optional[str] = _get_env_var("S3_BUCKET")
+
+        self.trigger_words: Optional[str] = _get_env_var("TRIGGER_WORDS")
 
 
 # Notes: Singleton instance for importing settings in other modules

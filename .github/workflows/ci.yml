@@ -1,14 +1,15 @@
-name: CI
+name: Polling Workflow CI
 
 on:
   push:
-    branches: [main]
+    branches: [ "main" ]
   pull_request:
-    branches: [main]
+    branches: [ "main" ]
 
 jobs:
-  poller:
+  build-and-test:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -23,18 +24,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Lint with flake8
+        run: |
+          pip install flake8
+          flake8 .
+
       - name: Run tests
         run: |
           pytest
-
-      - name: Run Polling Trigger
-        if: success() # nur wenn vorherige Schritte erfolgreich!
-        env:
-          CAL_LOOKAHEAD_DAYS: ${{ vars.CAL_LOOKAHEAD_DAYS }}
-          CAL_LOOKBACK_DAYS: ${{ vars.CAL_LOOKBACK_DAYS }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-          S3_BUCKET: ${{ secrets.S3_BUCKET }}
-        run: |
-          python -u polling/polling_trigger.py

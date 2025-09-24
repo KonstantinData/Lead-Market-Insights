@@ -1,31 +1,36 @@
-name: Polling Trigger
+name: Polling Trigger Scheduled Run
 
 on:
-  schedule:
-    - cron: '0 6-19 * * 1-5'  # Jede volle Stunde, Mo-Fr, 08–21 Uhr MESZ/MEZ (entspricht 06–19 Uhr UTC)
   workflow_dispatch:
+  schedule:
+    - cron: '0 5 * * *'  # Runs every day at 05:00 UTC
 
 jobs:
-  poller:
+  run-polling-trigger:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-    - name: Run Polling Trigger
-      env:
-        CAL_LOOKAHEAD_DAYS: ${{ vars.CAL_LOOKAHEAD_DAYS }}
-        CAL_LOOKBACK_DAYS: ${{ vars.CAL_LOOKBACK_DAYS }}
-      run: |
-        python -u polling/polling_trigger.py
+      - name: Run polling trigger
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          CAL_LOOKAHEAD_DAYS: 14
+          CAL_LOOKBACK_DAYS: 1
+          TRIGGER_WORDS: "Demo,Test,Triggerword"
+        run: |
+          python -m polling.polling_trigger

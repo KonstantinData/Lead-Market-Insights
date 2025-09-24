@@ -1,85 +1,91 @@
-import os
 import logging
-import boto3
-from datetime import datetime
 import sys
 
+from config.config import settings
+from agents.event_polling_agent import EventPollingAgent
+from agents.trigger_detection_agent import TriggerDetectionAgent
+from agents.extraction_agent import ExtractionAgent
+from agents.human_in_loop_agent import HumanInLoopAgent
+from agents.s3_storage_agent import S3StorageAgent
 
-# Note: PollingTrigger encapsulates all logic for polling, logging, and S3 upload,
-# making the script modular and easy to test.
-class PollingTrigger:
-    # Note: Initializes the PollingTrigger with configuration from environment variables.
-    def __init__(self):
-        self.lookahead_days = int(os.environ.get("CAL_LOOKAHEAD_DAYS", 14))
-        self.lookback_days = int(os.environ.get("CAL_LOOKBACK_DAYS", 1))
-        self.aws_key = os.environ.get("AWS_ACCESS_KEY_ID")
-        self.aws_secret = os.environ.get("AWS_SECRET_ACCESS_KEY")
-        self.aws_region = os.environ.get("AWS_DEFAULT_REGION")
-        self.bucket_name = os.environ.get("S3_BUCKET")
-        # Note: Generate a unique log filename with a timestamp and store in /tmp.
-        self.log_filename = (
-            f'polling_trigger_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
+# Notes: Set up basic logging to both file and stdout
+log_filename = f"polling_trigger.log"
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    handlers=[
+        logging.FileHandler(log_filename),
+        logging.StreamHandler(sys.stdout),
+    ],
+)
+logger = logging.getLogger("PollingTrigger")
+
+
+def main():
+    # Notes: Initialize all agents with required configuration
+    event_agent = EventPollingAgent(config=settings)
+    trigger_agent = TriggerDetectionAgent(
+        trigger_words=(
+            settings.trigger_words.split(",") if settings.trigger_words else []
         )
-        self.log_filepath = os.path.join("/tmp", self.log_filename)
-        self.logger = self.setup_logger()
+    )
+    extraction_agent = ExtractionAgent()
+    human_agent = HumanInLoopAgent()
 
-    # Note: Sets up the logger to write to both a file and stdout.
-    def setup_logger(self):
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s %(levelname)s %(message)s",
-            handlers=[
-                logging.FileHandler(self.log_filepath),
-                logging.StreamHandler(sys.stdout),
-            ],
+    # Notes: S3 agent is optional, only initialized if all config values are present
+    s3_agent = None
+    if all(
+        [
+            settings.aws_access_key_id,
+            settings.aws_secret_access_key,
+            settings.aws_default_region,
+            settings.s3_bucket,
+        ]
+    ):
+        s3_agent = S3StorageAgent(
+            aws_access_key_id=settings.aws_access_key_id,
+            aws_secret_access_key=settings.aws_secret_access_key,
+            region_name=settings.aws_default_region,
+            bucket_name=settings.s3_bucket,
+            logger=logger,
         )
-        return logging.getLogger(self.__class__.__name__)
 
-    # Note: Main logic for polling job. Replace the placeholder with real implementation.
-    def run_job(self):
-        self.logger.info("Polling job started.")
-        # --- Begin custom logic ---
-        # Example: simulate some data processing
-        self.logger.info(
-            f"Lookback: {self.lookback_days} days, Lookahead: {self.lookahead_days} days"
-        )
-        # Simulate polling logic here
-        self.logger.info("Polling job finished successfully.")
-        # --- End custom logic ---
+    logger.info("Polling workflow started.")
 
-    # Note: Uploads the generated log file to the configured AWS S3 bucket.
-    def upload_log_to_s3(self):
-        if not all([self.aws_key, self.aws_secret, self.aws_region, self.bucket_name]):
-            self.logger.warning(
-                "AWS credentials or bucket name not fully configured. Skipping S3 upload."
-            )
-            return
-        s3_key = f"logs/{os.path.basename(self.log_filepath)}"
-        try:
-            s3 = boto3.client(
-                "s3",
-                aws_access_key_id=self.aws_key,
-                aws_secret_access_key=self.aws_secret,
-                region_name=self.aws_region,
-            )
-            s3.upload_file(self.log_filepath, self.bucket_name, s3_key)
-            self.logger.info(f"Log uploaded to s3://{self.bucket_name}/{s3_key}")
-        except Exception as ex:
-            self.logger.error(f"Log upload to S3 failed: {ex}")
+    for event in event_agent.poll():
+        logger.info(f"Polled event: {event}")
+        if trigger_agent.check(event):
+            logger.info(f"Trigger detected in event {event.get('id')}")
+            extracted = extraction_agent.extract(event)
+            if not extracted["is_complete"]:
+                logger.info(
+                    f"Missing information detected for event {event.get('id')}, requesting human input."
+                )
+                filled = human_agent.request_info(event, extracted)
+                logger.info(f"Finalized event info: {filled}")
+            else:
+                logger.info(
+                    f"All required information extracted for event {event.get('id')}: {extracted}"
+                )
+        else:
+            logger.info(f"No trigger detected for event {event.get('id')}")
 
-    # Note: Runs the complete workflow, including the polling job and log upload.
-    def run(self):
-        try:
-            self.run_job()
-        except Exception as e:
-            self.logger.error(f"Error during polling job: {e}", exc_info=True)
-            raise
-        finally:
-            self.upload_log_to_s3()
-            self.logger.info("Logfile uploaded to S3 (if configured).")
+    logger.info("Polling workflow finished.")
+
+    # Notes: Upload the log file to S3 if agent is available
+    if s3_agent:
+        logger.info("Uploading log file to S3...")
+        success = s3_agent.upload_file(log_filename, f"logs/{log_filename}")
+        if success:
+            logger.info("Log file uploaded successfully.")
+        else:
+            logger.warning("Log file upload failed.")
+    else:
+        logger.warning("S3 agent not configured. Skipping log upload.")
 
 
-# Note: Standard Python entry point. Instantiates and runs the PollingTrigger.
 if __name__ == "__main__":
-    trigger = PollingTrigger()
-    trigger.run()
+    try:
+        main()
+    except Exception as e:
+        logger.error(f"Polling workflow failed: {e}", exc_info=True)

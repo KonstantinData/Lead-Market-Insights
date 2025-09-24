@@ -1,6 +1,7 @@
 import logging
 import sys
 import threading
+from pathlib import Path
 from typing import Callable, Optional
 
 from config.config import settings
@@ -9,6 +10,7 @@ from agents.trigger_detection_agent import TriggerDetectionAgent
 from agents.extraction_agent import ExtractionAgent
 from agents.human_in_loop_agent import HumanInLoopAgent
 from agents.s3_storage_agent import S3StorageAgent
+from utils.trigger_loader import load_trigger_words
 
 # Notes: Set up basic logging to both file and stdout
 log_filename = "polling_trigger.log"
@@ -114,11 +116,14 @@ class PollingTrigger:
 def main():
     # Notes: Initialize all agents with required configuration
     event_agent = EventPollingAgent(config=settings)
-    trigger_agent = TriggerDetectionAgent(
-        trigger_words=(
-            settings.trigger_words.split(",") if settings.trigger_words else []
-        )
+
+    trigger_words_file = (
+        Path(__file__).resolve().parents[1] / "config" / "trigger_words.txt"
     )
+    trigger_words = load_trigger_words(
+        settings.trigger_words, triggers_file=trigger_words_file, logger=logger
+    )
+    trigger_agent = TriggerDetectionAgent(trigger_words=trigger_words)
     extraction_agent = ExtractionAgent()
     human_agent = HumanInLoopAgent()
 

@@ -16,8 +16,8 @@ jobs:
       AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
       SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
       SMTP_PORT: ${{ secrets.SMTP_PORT }}
-      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
-      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      SMTP_USER: ${{ secrets.SMTP_USERNAME }}
+      SMTP_PASS: ${{ secrets.SMTP_PASSWORD }}
       SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
       S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
 

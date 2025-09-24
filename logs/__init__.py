@@ -9,14 +9,17 @@ __all__ = ["EventLogManager", "get_event_log_manager"]
 
 try:  # pragma: no cover - optional dependency import
     from dotenv import load_dotenv
-except ImportError:  # pragma: no cover - fallback if python-dotenv is unavailable
+except ImportError:  # pragma: no cover - fallback if python-dotenv is
+    # unavailable
     load_dotenv = None
 
 if load_dotenv is not None:
     load_dotenv()
 
 
-def get_event_log_manager(bucket_name: Optional[str] = None) -> EventLogManager:
+def get_event_log_manager(
+    bucket_name: Optional[str] = None
+) -> EventLogManager:
     """Return an :class:`EventLogManager` configured for the S3 bucket.
 
     Parameters
@@ -24,7 +27,8 @@ def get_event_log_manager(bucket_name: Optional[str] = None) -> EventLogManager:
     bucket_name:
         Optional explicit bucket name. When omitted, the value is read from the
         ``S3_BUCKET_NAME`` environment variable. The repository uses
-        ``python-dotenv`` to allow configuring this variable via a ``.env`` file.
+        ``python-dotenv`` to allow configuring this variable via a
+        ``.env`` file.
 
     Raises
     ------

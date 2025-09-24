@@ -31,7 +31,10 @@ def main():
     logging.basicConfig(level=logging.INFO)
     workflow_log_manager = DummyWorkflowLogManager()
 
-    print("\n--- Test 1: Start and Stop PollingTrigger with successful poll logic ---")
+    print(
+        "\n--- Test 1: Start and Stop PollingTrigger with successful "
+        "poll logic ---"
+    )
     poller = PollingTrigger(
         poll_logic=successful_poll_logic,
         interval_seconds=2,
@@ -54,7 +57,9 @@ def main():
     poller.start()
     time.sleep(3)  # Only one iteration needed to trigger error
     poller.stop()
-    error_logs = [log for log in workflow_log_manager.logs if log["error"] is not None]
+    error_logs = [
+        log for log in workflow_log_manager.logs if log["error"] is not None
+    ]
     assert error_logs, "Should log errors from failing polling logic."
     print("Test 2 passed.\n")
 

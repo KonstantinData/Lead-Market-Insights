@@ -54,7 +54,9 @@ class EventLogManager:
         Delete the event log from S3.
         """
         try:
-            self.s3.delete_object(Bucket=self.bucket, Key=self._object_key(event_id))
+            self.s3.delete_object(
+                Bucket=self.bucket, Key=self._object_key(event_id)
+            )
             logging.info(f"Event log deleted: {event_id}")
         except ClientError as e:
             logging.error(f"Error deleting event log: {e}")

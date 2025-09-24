@@ -32,7 +32,8 @@ def main():
     extraction_agent = ExtractionAgent()
     human_agent = HumanInLoopAgent()
 
-    # Notes: S3 agent is optional, only initialized if all config values are present
+    # Notes: S3 agent is optional, only initialized if all config values
+    # are present
     s3_agent = None
     if all(
         [
@@ -59,13 +60,15 @@ def main():
             extracted = extraction_agent.extract(event)
             if not extracted["is_complete"]:
                 logger.info(
-                    f"Missing information detected for event {event.get('id')}, requesting human input."
+                    f"Missing information detected for event "
+                    f"{event.get('id')}, requesting human input."
                 )
                 filled = human_agent.request_info(event, extracted)
                 logger.info(f"Finalized event info: {filled}")
             else:
                 logger.info(
-                    f"All required information extracted for event {event.get('id')}: {extracted}"
+                    f"All required information extracted for event "
+                    f"{event.get('id')}: {extracted}"
                 )
         else:
             logger.info(f"No trigger detected for event {event.get('id')}")

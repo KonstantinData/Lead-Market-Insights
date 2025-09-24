@@ -10,7 +10,8 @@ class HumanInLoopAgent:
         information.
         """
         print(
-            f"Please provide missing info for event {event.get('id', '<unknown>')}: {extracted['info']}"
+            f"Please provide missing info for event "
+            f"{event.get('id', '<unknown>')}: {extracted['info']}"
         )
         # Simulate human response for demo purposes:
         extracted["info"]["company_name"] = (

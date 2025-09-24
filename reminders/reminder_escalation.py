@@ -26,7 +26,8 @@ class ReminderEscalation:
             logging.error(f"Error sending reminder: {e}")
             if self.workflow_log_manager and self.run_id:
                 self.workflow_log_manager.append_log(
-                    self.run_id, "reminder", "Exception during reminder", error=str(e)
+                    self.run_id, "reminder", "Exception during reminder",
+                    error=str(e)
                 )
             raise
 

@@ -10,7 +10,8 @@ class EmailAgent:
     SMTP configuration is set during instantiation.
     """
 
-    def __init__(self, smtp_server, smtp_port, username, password, sender_email):
+    def __init__(self, smtp_server, smtp_port, username, password,
+                 sender_email):
         self.smtp_server = smtp_server
         self.smtp_port = smtp_port
         self.username = username

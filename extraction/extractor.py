@@ -3,8 +3,8 @@ import logging
 
 class Extractor:
     """
-    Module for data extraction (e.g., extracting meeting details from event data).
-    Implement your custom extraction logic here.
+    Module for data extraction (e.g., extracting meeting details from event
+    data). Implement your custom extraction logic here.
     """
 
     def __init__(self):

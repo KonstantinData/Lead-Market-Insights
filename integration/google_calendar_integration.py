@@ -43,7 +43,9 @@ class GoogleCalendarIntegration:
         token_leeway: int = 60,
     ) -> None:
         self.scopes = tuple(scopes) if scopes else (self.DEFAULT_SCOPE,)
-        self.calendar_id = calendar_id or os.getenv("GOOGLE_CALENDAR_ID", "primary")
+        self.calendar_id = calendar_id or os.getenv(
+            "GOOGLE_CALENDAR_ID", "primary"
+        )
         self._credentials = self._prepare_credentials(credentials)
         self.request_timeout = request_timeout
         self.token_leeway = max(token_leeway, 0)
@@ -53,15 +55,23 @@ class GoogleCalendarIntegration:
     # ------------------------------------------------------------------
     # Credential helpers
     # ------------------------------------------------------------------
-    def _prepare_credentials(self, credentials: Optional[Dict[str, str]]) -> OAuthCredentials:
+    def _prepare_credentials(
+        self, credentials: Optional[Dict[str, str]]
+    ) -> OAuthCredentials:
         if credentials is None:
             credentials = self._load_credentials_from_env()
 
-        required_keys = {"client_id", "client_secret", "refresh_token", "token_uri"}
-        missing = [key for key in required_keys if key not in credentials or not credentials[key]]
+        required_keys = {
+            "client_id", "client_secret", "refresh_token", "token_uri"
+        }
+        missing = [
+            key for key in required_keys
+            if key not in credentials or not credentials[key]
+        ]
         if missing:
             raise EnvironmentError(
-                "Missing required Google OAuth credentials: " + ", ".join(sorted(missing))
+                "Missing required Google OAuth credentials: "
+                + ", ".join(sorted(missing))
             )
 
         return OAuthCredentials(
@@ -100,14 +110,17 @@ class GoogleCalendarIntegration:
             if value:
                 credentials[key] = value
 
-        auth_provider_key = os.getenv("GOOGLE_AUTH_PROVIDER_X509_CERT_URL") or os.getenv(
-            "GHOOGLE_AUTH_PROVIDER_X509_CERT_URL"
+        auth_provider_key = (
+            os.getenv("GOOGLE_AUTH_PROVIDER_X509_CERT_URL")
+            or os.getenv("GHOOGLE_AUTH_PROVIDER_X509_CERT_URL")
         )
         if auth_provider_key:
             credentials["auth_provider_x509_cert_url"] = auth_provider_key
 
         if redirect_uris := credentials.get("redirect_uris"):
-            credentials["redirect_uris"] = self._parse_redirect_uris(redirect_uris)
+            credentials["redirect_uris"] = self._parse_redirect_uris(
+                redirect_uris
+            )
 
         return credentials
 
@@ -150,23 +163,31 @@ class GoogleCalendarIntegration:
         )
 
         try:
-            with request.urlopen(token_request, timeout=self.request_timeout) as response:
+            with request.urlopen(
+                token_request, timeout=self.request_timeout
+            ) as response:
                 token_payload = json.load(response)
         except HTTPError as exc:  # pragma: no cover - network interaction
             logging.error("Google OAuth token refresh failed: %s", exc)
             raise
         except URLError as exc:  # pragma: no cover - network interaction
-            logging.error("Unable to reach Google OAuth token endpoint: %s", exc)
+            logging.error(
+                "Unable to reach Google OAuth token endpoint: %s", exc
+            )
             raise
 
         access_token = token_payload.get("access_token")
         if not access_token:
-            raise RuntimeError("Google OAuth response did not include an access token")
+            raise RuntimeError(
+                "Google OAuth response did not include an access token"
+            )
 
         expires_in = token_payload.get("expires_in")
         expiry: Optional[datetime] = None
         if expires_in:
-            expiry = datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
+            expiry = datetime.now(timezone.utc) + timedelta(
+                seconds=int(expires_in)
+            )
             expiry -= timedelta(seconds=self.token_leeway)
 
         self._access_token = access_token
@@ -208,9 +229,14 @@ class GoogleCalendarIntegration:
 
         encoded_params = parse.urlencode(parameters)
         calendar_encoded = parse.quote(self.calendar_id, safe="@")
-        url = f"{self.GOOGLE_CALENDAR_API_URL}/calendars/{calendar_encoded}/events?{encoded_params}"
+        url = (
+            f"{self.GOOGLE_CALENDAR_API_URL}/calendars/{calendar_encoded}/"
+            f"events?{encoded_params}"
+        )
 
-        logging.info("Listing Google Calendar events from '%s'", self.calendar_id)
+        logging.info(
+            "Listing Google Calendar events from '%s'", self.calendar_id
+        )
 
         try:
             response = self._authorized_request(url)
@@ -231,7 +257,9 @@ class GoogleCalendarIntegration:
             headers={"Authorization": f"Bearer {self._access_token}"},
         )
 
-        with request.urlopen(request_obj, timeout=self.request_timeout) as response:
+        with request.urlopen(
+            request_obj, timeout=self.request_timeout
+        ) as response:
             return json.load(response)
 
     @staticmethod

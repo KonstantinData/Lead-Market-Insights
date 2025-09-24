@@ -12,7 +12,8 @@ class HumanInTheLoop:
 
     def request_approval(self, data):
         try:
-            # TODO: Implement interaction logic (e.g., send approval email, wait for input)
+            # TODO: Implement interaction logic (e.g., send approval email,
+            # wait for input)
             logging.info("Requesting human approval...")
             approved = True  # Placeholder for approval logic
             return approved

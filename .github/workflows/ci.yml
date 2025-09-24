@@ -23,7 +23,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Run tests
+        run: |
+          pytest
+
       - name: Run Polling Trigger
+        if: success() # nur wenn vorherige Schritte erfolgreich!
         env:
           CAL_LOOKAHEAD_DAYS: ${{ vars.CAL_LOOKAHEAD_DAYS }}
           CAL_LOOKBACK_DAYS: ${{ vars.CAL_LOOKBACK_DAYS }}
@@ -33,7 +38,3 @@ jobs:
           S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
         run: |
           python -u polling/polling_trigger.py
-
-      - name: Run tests
-        run: |
-          pytest

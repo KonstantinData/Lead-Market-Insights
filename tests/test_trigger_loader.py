@@ -1,4 +1,5 @@
 from pathlib import Path
+from textwrap import dedent
 
 import pytest
 
@@ -10,15 +11,17 @@ from utils.text_normalization import normalize_text
 def trigger_file(tmp_path: Path) -> Path:
     file_path = tmp_path / "trigger_words.txt"
     file_path.write_text(
-        """
-        # Comment line should be ignored
-         Trigger
-        demo
-        TRIGGER
-        küche
-        
-        meeting
-        """,
+        dedent(
+            """
+            # Comment line should be ignored
+            Trigger
+            demo
+            TRIGGER
+            küche
+
+            meeting
+            """
+        ),
         encoding="utf-8",
     )
     return file_path

@@ -15,7 +15,7 @@ class PollingTrigger:
         self.aws_key = os.environ.get("AWS_ACCESS_KEY_ID")
         self.aws_secret = os.environ.get("AWS_SECRET_ACCESS_KEY")
         self.aws_region = os.environ.get("AWS_DEFAULT_REGION")
-        self.bucket = os.environ.get("S3_BUCKET")
+        self.bucket_name = os.environ.get("S3_BUCKET")
         # Note: Generate a unique log filename with a timestamp and store in /tmp.
         self.log_filename = (
             f'polling_trigger_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'

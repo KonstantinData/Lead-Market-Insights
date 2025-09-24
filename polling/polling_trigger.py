@@ -9,7 +9,7 @@ from agents.human_in_loop_agent import HumanInLoopAgent
 from agents.s3_storage_agent import S3StorageAgent
 
 # Notes: Set up basic logging to both file and stdout
-log_filename = f"polling_trigger.log"
+log_filename = "polling_trigger.log"
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",

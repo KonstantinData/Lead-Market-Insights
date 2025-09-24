@@ -7,8 +7,9 @@ from typing import Dict
 
 import pytest
 
+# Add parent directory to sys.path for local imports
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
+# flake8: noqa: E402
 from integration.google_calendar_integration import GoogleCalendarIntegration
 
 

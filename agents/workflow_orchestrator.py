@@ -24,7 +24,7 @@ class WorkflowOrchestrator:
         try:
             self.master_agent.process_all_events()
             logger.info("Workflow completed successfully.")
-        except Exception as e:
+        except Exception:
             logger.exception("Workflow failed with exception:")
         finally:
             self._finalize()
@@ -33,7 +33,7 @@ class WorkflowOrchestrator:
         # Optional: Upload log file to S3, etc.
         try:
             self.master_agent.upload_log_to_s3()
-        except Exception as e:
-            logger.error(f"Failed to upload log file to S3: {e}")
+        except Exception:
+            logger.error("Failed to upload log file to S3", exc_info=True)
 
         logger.info("Orchestration finalized.")

@@ -7,7 +7,8 @@ MasterWorkflowAgent: Pure logic agent for polling and event-processing.
 # - All business logic is encapsulated here, orchestration is handled in WorkflowOrchestrator.
 """
 
-from typing import Any, Dict, Optional
+import logging
+from typing import Dict, Any, List
 
 from agents.event_polling_agent import EventPollingAgent
 from agents.trigger_detection_agent import TriggerDetectionAgent
@@ -17,7 +18,6 @@ from agents.s3_storage_agent import S3StorageAgent
 from config.config import settings
 from utils.trigger_loader import load_trigger_words
 
-import logging
 from pathlib import Path
 
 logger = logging.getLogger("MasterWorkflowAgent")
@@ -120,7 +120,6 @@ class MasterWorkflowAgent:
         # Delegates to trigger agent, checks both summary and description
         text_fields = ["summary", "description"]
         for field in text_fields:
-            text = event.get(field, "")
             match = self.trigger_agent.check(event)
             if match and match.get("matched_field") == field:
                 return {

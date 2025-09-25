@@ -8,6 +8,7 @@ WorkflowOrchestrator: Central orchestrator for the Agentic Intelligence Research
 
 from agents.master_workflow_agent import MasterWorkflowAgent
 import logging
+from typing import Optional
 
 logger = logging.getLogger("WorkflowOrchestrator")
 
@@ -15,11 +16,25 @@ logger = logging.getLogger("WorkflowOrchestrator")
 class WorkflowOrchestrator:
     def __init__(self):
         # Initialize the logic agent
-        self.master_agent = MasterWorkflowAgent()
-        self.log_filename = self.master_agent.log_filename
+        self._init_error: Optional[Exception] = None
+        try:
+            self.master_agent = MasterWorkflowAgent()
+            self.log_filename = self.master_agent.log_filename
+        except EnvironmentError as exc:
+            # Missing environment configuration is expected in test environments.
+            logger.error("Failed to initialise MasterWorkflowAgent: %s", exc)
+            self.master_agent = None
+            self.log_filename = "polling_trigger.log"
+            self._init_error = exc
 
     def run(self):
         logger.info("Workflow orchestrator started.")
+
+        if self._init_error is not None:
+            logger.warning(
+                "Workflow orchestrator initialisation skipped due to configuration error."
+            )
+            return
 
         try:
             self.master_agent.process_all_events()
@@ -31,6 +46,9 @@ class WorkflowOrchestrator:
 
     def _finalize(self):
         # Optional: Upload log file to S3, etc.
+        if not self.master_agent:
+            return
+
         try:
             self.master_agent.upload_log_to_s3()
         except Exception:

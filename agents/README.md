@@ -9,14 +9,14 @@ environments.
 
 | File | Responsibility |
 |------|----------------|
-| [`email_agent.py`](email_agent.py) | Sends transactional emails via SMTP using plain text and optional HTML bodies. Provides basic logging around delivery success/failure. |
-| [`event_polling_agent.py`](event_polling_agent.py) | Connects to Google Calendar and Google Contacts to poll upcoming events and related organiser data while filtering out noise such as birthday reminders. |
-| [`extraction_agent.py`](extraction_agent.py) | Extracts core metadata (company name, web domain) from events and flags whether the information set is complete. Designed to be extended with richer parsing. |
-| [`human_in_loop_agent.py`](human_in_loop_agent.py) | Facilitates human-in-the-loop interactions for gathering missing event data and confirming dossier creation. Works with a pluggable communication backend or a built-in simulator. |
-| [`master_workflow_agent.py`](master_workflow_agent.py) | Implements the end-to-end business logic: polls events, detects triggers, performs extraction, coordinates with humans, and hands confirmed events to downstream systems. |
-| [`s3_storage_agent.py`](s3_storage_agent.py) | Uploads files (typically generated logs) to Amazon S3 using the configured credentials. |
-| [`trigger_detection_agent.py`](trigger_detection_agent.py) | Detects hard and soft trigger phrases in event summaries/descriptions using normalised keyword matching. |
-| [`workflow_orchestrator.py`](workflow_orchestrator.py) | High-level orchestrator that initialises the `MasterWorkflowAgent`, handles error resilience, and finalises runs (e.g., optional S3 log upload). |
+| [`email_agent.py`](email_agent.py) | Sends transactional emails via SMTP using plain text and optional HTML bodies while logging delivery success or failure. |
+| [`event_polling_agent.py`](event_polling_agent.py) | Connects to Google Calendar and Google Contacts to poll upcoming events, related organiser data, and filters out noise such as birthday reminders. |
+| [`extraction_agent.py`](extraction_agent.py) | Extracts core metadata (company name, web domain) from events and flags whether the information set is complete, ready for richer parsing extensions. |
+| [`human_in_loop_agent.py`](human_in_loop_agent.py) | Facilitates human-in-the-loop interactions for gathering missing event data and confirming dossier creation via a pluggable communication backend or built-in simulator. |
+| [`master_workflow_agent.py`](master_workflow_agent.py) | Implements the end-to-end business logic: polls events, detects triggers, performs extraction, coordinates with humans, and forwards confirmed events downstream. |
+| [`s3_storage_agent.py`](s3_storage_agent.py) | Uploads generated files to Amazon S3 using the configured credentials. |
+| [`trigger_detection_agent.py`](trigger_detection_agent.py) | Detects hard and soft trigger phrases in event summaries and descriptions using normalised keyword matching. |
+| [`workflow_orchestrator.py`](workflow_orchestrator.py) | High-level orchestrator that initialises the `MasterWorkflowAgent`, handles error resilience, and finalises runs such as optional S3 log uploads. |
 
 ## Extending agents
 

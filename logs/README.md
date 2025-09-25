@@ -8,8 +8,8 @@ Amazon S3 for centralised auditing.
 
 | File | Description |
 |------|-------------|
-| [`event_log_manager.py`](event_log_manager.py) | Provides `get_event_log_manager` to create a ready-to-use log manager that writes structured JSON lines for event activity. Includes S3 upload support when configured. |
-| [`workflow_log_manager.py`](workflow_log_manager.py) | Supplies a `WorkflowLogManager` class for appending run-level log entries (success, failure, escalation) with optional error payloads. |
+| [`event_log_manager.py`](event_log_manager.py) | Provides `get_event_log_manager` to create a ready-to-use log manager that writes structured JSON lines for event activity with optional S3 upload support. |
+| [`workflow_log_manager.py`](workflow_log_manager.py) | Supplies a `WorkflowLogManager` class for appending run-level log entries such as success, failure, or escalation with optional error payloads. |
 | [`__init__.py`](__init__.py) | Exposes convenience factories for importing the log managers directly from the package. |
 
 ## Usage

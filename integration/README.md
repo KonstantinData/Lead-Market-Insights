@@ -7,7 +7,7 @@ Google Workspace APIs used for polling calendar events and related contacts.
 
 | File | Purpose |
 |------|---------|
-| [`google_calendar_integration.py`](google_calendar_integration.py) | Handles OAuth credential loading, access-token refresh, and REST calls to the Google Calendar API. Provides `list_events` for polling events within configurable windows. |
+| [`google_calendar_integration.py`](google_calendar_integration.py) | Handles OAuth credential loading, access-token refresh, and REST calls to the Google Calendar API, including a `list_events` helper for polling events within configurable windows. |
 | [`google_contacts_integration.py`](google_contacts_integration.py) | Provides a read-only wrapper around the Google People API to fetch organiser contact details using an existing access token. |
 
 Both integrations rely on the configuration documented in [`config/README.md`](../config/README.md).

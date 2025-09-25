@@ -8,7 +8,7 @@ MasterWorkflowAgent: Pure logic agent for polling and event-processing.
 """
 
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 from agents.event_polling_agent import EventPollingAgent
 from agents.trigger_detection_agent import TriggerDetectionAgent

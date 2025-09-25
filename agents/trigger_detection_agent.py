@@ -3,8 +3,11 @@ from typing import List, Optional, Dict, Any
 
 
 def normalize_text(text: str) -> str:
-    """Normalize text for trigger matching (case/lower and strip)."""
-    return text.lower().strip()
+    text = text.lower().strip()
+    # Umlaute ersetzen
+    return (
+        text.replace("ü", "ue").replace("ä", "ae").replace("ö", "oe").replace("ß", "ss")
+    )
 
 
 class TriggerDetectionAgent:

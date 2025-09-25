@@ -3,21 +3,22 @@ import importlib
 import pytest
 
 
-@pytest.fixture(autouse=True)
-def reload_logs_module(monkeypatch):
-    """Ensure a clean logs module for each test."""
-    # Reload the module to reset any previous monkeypatches or state.
-    import logs
+def reload_modules():
+    """Reload configuration and logging modules to pick up env changes."""
 
-    yield
+    config_module = importlib.import_module("config.config")
+    importlib.reload(config_module)
 
-    importlib.reload(logs)
+    logs_module = importlib.import_module("logs")
+    importlib.reload(logs_module)
+
+    return logs_module
 
 
 def test_get_event_log_manager_uses_env(monkeypatch):
     monkeypatch.setenv("S3_BUCKET_NAME", "agentic-intelligence-research-logs")
 
-    import logs
+    logs = reload_modules()
 
     class DummyManager:
         def __init__(self, bucket):
@@ -34,7 +35,7 @@ def test_get_event_log_manager_uses_env(monkeypatch):
 def test_get_event_log_manager_missing_bucket(monkeypatch):
     monkeypatch.delenv("S3_BUCKET_NAME", raising=False)
 
-    import logs
+    logs = reload_modules()
 
     with pytest.raises(EnvironmentError):
         logs.get_event_log_manager()
@@ -43,7 +44,7 @@ def test_get_event_log_manager_missing_bucket(monkeypatch):
 def test_get_event_log_manager_prefers_argument(monkeypatch):
     monkeypatch.setenv("S3_BUCKET_NAME", "from-env")
 
-    import logs
+    logs = reload_modules()
 
     class DummyManager:
         def __init__(self, bucket):

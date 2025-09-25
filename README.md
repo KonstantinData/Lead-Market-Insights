@@ -36,7 +36,7 @@ This repository contains workflows and components for agent-based process automa
    - `AWS_ACCESS_KEY_ID`
    - `AWS_SECRET_ACCESS_KEY`
    - `AWS_DEFAULT_REGION`
-   - `S3_BUCKET_NAME`
+  - `S3_BUCKET_NAME` (the legacy alias `S3_BUCKET` is still accepted)
 2. Ensure the environment variables are available when running the project (either through the `.env` file or your CI configuration).
 3. Use the helper in `logs` to obtain a ready-to-use manager:
 
@@ -47,6 +47,6 @@ This repository contains workflows and components for agent-based process automa
    event_log_manager.write_event_log("event-id", {"status": "started"})
    ```
 
-The helper automatically loads environment variables via `python-dotenv` and raises an error if `S3_BUCKET_NAME` is missing.
+The helper automatically loads environment variables via `python-dotenv` and raises an error if `S3_BUCKET_NAME` (or the legacy `S3_BUCKET`) is missing.
 
 Further documentation will follow as the functionality grows.

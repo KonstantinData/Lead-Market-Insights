@@ -1,13 +1,27 @@
 import os
-from typing import Optional
+from typing import Optional, Tuple
 
 from dotenv import load_dotenv
 
 
-def _get_env_var(name: str) -> Optional[str]:
-    """Return an environment variable using the conventional uppercase name."""
+def _get_env_var(name: str, *, aliases: Tuple[str, ...] = ()) -> Optional[str]:
+    """Return an environment variable using the conventional uppercase name.
 
-    return os.getenv(name)
+    Parameters
+    ----------
+    name:
+        The primary environment variable name to resolve.
+    aliases:
+        Optional alternative variable names evaluated when the primary value is
+        unset. The first defined value is returned.
+    """
+
+    for candidate in (name, *aliases):
+        value = os.getenv(candidate)
+        if value is not None:
+            return value
+
+    return None
 
 
 def _get_int_env(name: str, default: int) -> int:
@@ -35,7 +49,9 @@ class Settings:
         self.aws_access_key_id: Optional[str] = _get_env_var("AWS_ACCESS_KEY_ID")
         self.aws_secret_access_key: Optional[str] = _get_env_var("AWS_SECRET_ACCESS_KEY")
         self.aws_default_region: Optional[str] = _get_env_var("AWS_DEFAULT_REGION")
-        self.s3_bucket: Optional[str] = _get_env_var("S3_BUCKET")
+        self.s3_bucket: Optional[str] = _get_env_var(
+            "S3_BUCKET_NAME", aliases=("S3_BUCKET",)
+        )
 
         self.trigger_words: Optional[str] = _get_env_var("TRIGGER_WORDS")
 

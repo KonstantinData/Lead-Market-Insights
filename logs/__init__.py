@@ -1,9 +1,9 @@
 """Utility helpers for initializing log managers."""
 
-import os
 from typing import Optional
 
 from .event_log_manager import EventLogManager
+from config.config import settings
 
 __all__ = ["EventLogManager", "get_event_log_manager"]
 
@@ -32,11 +32,11 @@ def get_event_log_manager(bucket_name: Optional[str] = None) -> EventLogManager:
         If no bucket name can be determined.
     """
 
-    target_bucket = bucket_name or os.getenv("S3_BUCKET_NAME")
+    target_bucket = bucket_name or settings.s3_bucket
     if not target_bucket:
         raise EnvironmentError(
             "S3 bucket name missing. Provide 'bucket_name' or set the "
-            "S3_BUCKET_NAME environment variable."
+            "S3_BUCKET_NAME (or legacy S3_BUCKET) environment variable."
         )
 
     return EventLogManager(target_bucket)

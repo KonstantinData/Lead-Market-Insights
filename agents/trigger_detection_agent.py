@@ -1,59 +1,35 @@
-"""Agent responsible for checking events against configured trigger words."""
-
-from __future__ import annotations
-
-from typing import Iterable, Sequence
-
-from utils.text_normalization import normalize_text
-
-_DEFAULT_TRIGGER_WORDS: Sequence[str] = ("trigger word", "demo")
+import re
+from typing import List, Optional, Dict, Any
 
 
-def _prepare_trigger_words(trigger_words: Iterable[str] | None) -> tuple[str, ...]:
-    """Return a tuple of normalised trigger words with duplicates removed."""
-
-    cleaned = []
-    seen = set()
-
-    if trigger_words:
-        for word in trigger_words:
-            normalised = normalize_text(word)
-            if not normalised or normalised in seen:
-                continue
-            seen.add(normalised)
-            cleaned.append(normalised)
-
-    if not cleaned:
-        for word in _DEFAULT_TRIGGER_WORDS:
-            normalised = normalize_text(word)
-            if normalised not in seen:
-                seen.add(normalised)
-                cleaned.append(normalised)
-
-    return tuple(cleaned)
+def normalize_text(text: str) -> str:
+    """Normalize text for trigger matching (case/lower and strip)."""
+    return text.lower().strip()
 
 
 class TriggerDetectionAgent:
-    """Simple keyword-based trigger detection implementation."""
+    def __init__(self, trigger_words: Optional[List[str]] = None):
+        if trigger_words:
+            self.trigger_words = tuple(normalize_text(word) for word in trigger_words)
+        else:
+            # Default trigger words, falls keine übergeben wurden
+            self.trigger_words = ("trigger word",)
 
-    def __init__(self, trigger_words: Iterable[str] | None = None) -> None:
-        self.trigger_words = _prepare_trigger_words(trigger_words)
+    def check(self, event: Dict[str, Any]) -> bool:
+        """
+        Prüft, ob eines der Trigger-Wörter im Event-Summary vorkommt.
 
-    def check(self, event: dict) -> dict | None:
+        Gibt True zurück, wenn ein Treffer gefunden wurde, sonst False.
         """
-        Returns a dict with trigger match info if a trigger word is found
-        in the event's 'summary' or 'description', else returns None.
-        """
-        # Check both summary and description
-        for field in ("summary", "description"):
-            text = normalize_text(event.get(field, ""))
-            for word in self.trigger_words:
-                if word in text:
-                    # Optionally, you can distinguish hard/soft triggers here
-                    # For now, type is simply "hard"
-                    return {
-                        "type": "hard",  # or "soft", if you implement logic
-                        "matched_word": word,
-                        "matched_field": field,
-                    }
-        return None
+        summary = event.get("summary")
+        if not summary:
+            return False
+        normalized_summary = normalize_text(summary)
+        for word in self.trigger_words:
+            # Optional: auch einfache Wortgrenzen prüfen (z.B. "Küche" innerhalb "Die KUCHE ist bereit")
+            if re.search(rf"\b{re.escape(word)}\b", normalized_summary):
+                return True
+            # Oder als Substring (wie bisher)
+            if word in normalized_summary:
+                return True
+        return False

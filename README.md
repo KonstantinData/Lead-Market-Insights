@@ -1,52 +1,91 @@
+# Agentic Intelligence Research
 
-# Agentic-Intelligence-Research
+This repository contains a modular toolkit for building agent-based process automation
+workflows.  The components focus on orchestrating calendar-driven business processes,
+collecting the necessary context, requesting human confirmation when required, and
+handing off curated events to downstream systems such as CRMs or knowledge bases.
 
-This repository contains workflows and components for agent-based process automation (e.g., around Google Calendar, event handling, logging, communication).
+The codebase is organised as a set of focused agents, supporting utilities, and
+integration helpers that can be combined to automate a variety of follow-up tasks after
+calendar events are created.
 
-## Prerequisites
+## Getting started
 
-- **Python**: Install [Python 3.8+](https://www.python.org/downloads/) for your system (e.g., Windows).
-- **Virtual environment** (recommended):
-  ```batch
-  python -m venv .venv
-  .venv\Scripts\activate
-  ```
-- **Install dependencies**:
-  After activating the environment:
-  ```batch
-  pip install -r requirements.txt
-  ```
+### 1. Create a Python environment
 
-## Structure
+```bash
+python -m venv .venv
+source .venv/bin/activate  # On Windows use: .venv\Scripts\activate
+```
 
-- `agents/`: Central agents (e.g., email agent)
-- `logs/`: Logging modules for events, workflows, etc.
-- `templates/`: Central templates for emails and other communication
-- `polling/`, `extraction/`, `human_in_the_loop/`, `reminders/`: Placeholders for planned extensions
-- `tests/`: Unit tests and test scripts
+### 2. Install dependencies
 
-## Notes
+```bash
+pip install -r requirements.txt
+```
 
-- The AWS integration (boto3/botocore) requires valid AWS credentials if logging to S3 is used.
-- For secure handling of environment variables, `python-dotenv` is recommended. Create a `.env` file and set your configuration values there (e.g., for mail server, AWS, etc.).
+### 3. Configure environment variables
 
-## Configuring S3 logging
+All configuration is driven through environment variables or a `.env` file.  The
+[`config/README.md`](config/README.md) file describes every supported setting, including
+Google OAuth credentials, AWS keys, and optional trigger word overrides.
 
-1. Ensure your `.env` file (or environment configuration) defines the AWS credentials and bucket details required for logging:
-   - `AWS_ACCESS_KEY_ID`
-   - `AWS_SECRET_ACCESS_KEY`
-   - `AWS_DEFAULT_REGION`
-  - `S3_BUCKET_NAME` (the legacy alias `S3_BUCKET` is still accepted)
-2. Ensure the environment variables are available when running the project (either through the `.env` file or your CI configuration).
-3. Use the helper in `logs` to obtain a ready-to-use manager:
+### 4. Run the orchestrator
 
-   ```python
-   from logs import get_event_log_manager
+The orchestrator wires the agents together and coordinates polling, enrichment, and
+escalation flows:
 
-   event_log_manager = get_event_log_manager()
-   event_log_manager.write_event_log("event-id", {"status": "started"})
-   ```
+```bash
+python -m agents.workflow_orchestrator
+```
 
-The helper automatically loads environment variables via `python-dotenv` and raises an error if `S3_BUCKET_NAME` (or the legacy `S3_BUCKET`) is missing.
+Individual agents can also be instantiated and exercised directly for targeted tests or
+integrations.
 
-Further documentation will follow as the functionality grows.
+## Repository structure
+
+| Path | Description |
+|------|-------------|
+| [`agents/`](agents/README.md) | Core workflow agents responsible for polling, trigger detection, extraction, human-in-the-loop coordination, S3 uploads, and orchestration. |
+| [`integration/`](integration/README.md) | Google Calendar and Google Contacts API integrations, including OAuth token handling. |
+| [`config/`](config/README.md) | Centralised configuration loader and trigger word resources. |
+| [`logs/`](logs/README.md) | Helpers for structured event/workflow logging with optional S3 upload support. |
+| [`utils/`](utils/README.md) | Cross-cutting utilities for text normalisation, trigger loading, and duplicate detection. |
+| [`templates/`](templates/README.md) | Shared communication templates (emails, notifications). |
+| [`extraction/`](extraction/README.md) | Extension point for advanced data extraction pipelines. |
+| [`human_in_the_loop/`](human_in_the_loop/README.md) | Modules dedicated to manual review, approval, and confirmation flows. |
+| [`polling/`](polling/README.md) | Scheduling and trigger polling concepts that feed the automation workflows. |
+| [`reminders/`](reminders/README.md) | Reminder and escalation helpers built on top of the email agent. |
+| [`tests/`](tests/README.md) | Automated test suite covering core agents, integrations, and utilities. |
+| [`ARCHIVE/`](ARCHIVE/Readme.md) | Legacy experiments retained for reference. |
+
+## Development workflow
+
+1. **Implement automation logic** within the relevant agent or module.
+2. **Update configuration** defaults in `config/config.py` and document any new variables.
+3. **Add templates or logging** helpers as required.
+4. **Extend or write tests** in `tests/` to capture the expected behaviour.
+5. **Run the test suite** (see `tests/README.md` for commands) before opening a pull request.
+
+## Logging and observability
+
+The repository provides dedicated log managers in [`logs/`](logs/README.md) that can persist
+event and workflow logs locally or upload them to Amazon S3.  The `MasterWorkflowAgent`
+exposes an `upload_log_to_s3` helper that is triggered by the orchestrator when AWS
+credentials are configured.
+
+## Human-in-the-loop interactions
+
+Human feedback is requested through the `HumanInLoopAgent`, which can work with a
+pluggable communication backend (email, Slack, etc.) or fall back to simulated responses.
+The [`human_in_the_loop/`](human_in_the_loop/README.md) directory documents patterns for
+custom manual review steps.
+
+## Further reading
+
+* Detailed agent responsibilities: [`agents/README.md`](agents/README.md)
+* Google integrations and credential requirements: [`integration/README.md`](integration/README.md)
+* Testing guidance: [`tests/README.md`](tests/README.md)
+
+Contributions are welcome—please open issues or pull requests with proposed improvements or
+bug fixes.

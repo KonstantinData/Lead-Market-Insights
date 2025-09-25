@@ -1,38 +1,67 @@
 import re
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 
-
-def normalize_text(text: str) -> str:
-    text = text.lower().strip()
-    # Umlaute ersetzen
-    return (
-        text.replace("ü", "ue").replace("ä", "ae").replace("ö", "oe").replace("ß", "ss")
-    )
+from utils.text_normalization import normalize_text
 
 
 class TriggerDetectionAgent:
     def __init__(self, trigger_words: Optional[List[str]] = None):
         if trigger_words:
-            self.trigger_words = tuple(normalize_text(word) for word in trigger_words)
+            normalised = [normalize_text(word) for word in trigger_words]
+            # Remove duplicates while preserving order
+            self.trigger_words = tuple(dict.fromkeys(normalised))
         else:
             # Default trigger words, falls keine übergeben wurden
-            self.trigger_words = ("trigger word",)
+            self.trigger_words = (normalize_text("trigger word"),)
 
-    def check(self, event: Dict[str, Any]) -> bool:
-        """
-        Prüft, ob eines der Trigger-Wörter im Event-Summary vorkommt.
+        self._patterns: Tuple[re.Pattern[str], ...] = tuple(
+            re.compile(rf"\b{re.escape(word)}\b") for word in self.trigger_words
+        )
 
-        Gibt True zurück, wenn ein Treffer gefunden wurde, sonst False.
+    def check(self, event: Dict[str, Any]) -> Dict[str, Any]:
         """
-        summary = event.get("summary")
-        if not summary:
-            return False
-        normalized_summary = normalize_text(summary)
-        for word in self.trigger_words:
-            # Optional: auch einfache Wortgrenzen prüfen (z.B. "Küche" innerhalb "Die KUCHE ist bereit")
-            if re.search(rf"\b{re.escape(word)}\b", normalized_summary):
-                return True
-            # Oder als Substring (wie bisher)
-            if word in normalized_summary:
-                return True
-        return False
+        Prüft, ob eines der Trigger-Wörter im Event-Summary oder in der
+        Event-Beschreibung vorkommt und liefert strukturierte Informationen
+        zum Treffer zurück.
+        """
+
+        for field_name in ("summary", "description"):
+            text = event.get(field_name)
+            result = self._check_text_field(text, field_name)
+            if result["trigger"]:
+                return result
+
+        return self._default_response()
+
+    def check_field(self, text: Optional[str], field_name: str) -> Dict[str, Any]:
+        """Öffentliche Hilfsmethode für Einzel-Feld-Prüfungen."""
+
+        return self._check_text_field(text, field_name)
+
+    def _check_text_field(
+        self, text: Optional[str], field_name: str
+    ) -> Dict[str, Any]:
+        if not text:
+            return self._default_response()
+
+        normalized_text = normalize_text(text)
+
+        for word, pattern in zip(self.trigger_words, self._patterns):
+            if pattern.search(normalized_text):
+                trigger_type = "hard" if field_name == "summary" else "soft"
+                return {
+                    "trigger": True,
+                    "type": trigger_type,
+                    "matched_word": word,
+                    "matched_field": field_name,
+                }
+
+        return self._default_response()
+
+    def _default_response(self) -> Dict[str, Any]:
+        return {
+            "trigger": False,
+            "type": None,
+            "matched_word": None,
+            "matched_field": None,
+        }

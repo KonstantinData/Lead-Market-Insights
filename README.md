@@ -44,20 +44,18 @@ Individual agents can also be instantiated and exercised directly for targeted t
 
 ## Repository structure
 
-| Path | Highlights |
-| --- | --- |
-| [`agents/`](agents/README.md) | Core workflow agents for polling, trigger detection, extraction, human-in-the-loop coordination, S3 uploads, and orchestration. |
-| [`integration/`](integration/README.md) | Google Calendar and Google Contacts API integrations, including OAuth token handling. |
-| [`config/`](config/README.md) | Centralised configuration loader and trigger word resources. |
-| [`logs/`](logs/README.md) | Structured event/workflow logging with optional S3 upload support. |
-| [`utils/`](utils/README.md) | Cross-cutting utilities for text normalisation, trigger loading, and duplicate detection. |
-| [`templates/`](templates/README.md) | Shared communication templates (emails, notifications). |
-| [`extraction/`](extraction/README.md) | Extension point for advanced data extraction pipelines. |
-| [`human_in_the_loop/`](human_in_the_loop/README.md) | Modules dedicated to manual review, approval, and confirmation flows. |
-| [`polling/`](polling/README.md) | Scheduling and trigger polling concepts that feed the automation workflows. |
-| [`reminders/`](reminders/README.md) | Reminder and escalation helpers built on top of the email agent. |
-| [`tests/`](tests/README.md) | Automated test suite covering core agents, integrations, and utilities. |
-| [`ARCHIVE/`](ARCHIVE/Readme.md) | Legacy experiments retained for reference. |
+- **[`agents/`](agents/README.md):** Core workflow agents for polling, trigger detection, extraction, human-in-the-loop coordination, S3 uploads, and orchestration.
+- **[`integration/`](integration/README.md):** Google Calendar and Google Contacts API integrations, including OAuth token handling.
+- **[`config/`](config/README.md):** Centralised configuration loader and trigger word resources.
+- **[`logs/`](logs/README.md):** Structured event/workflow logging with optional S3 upload support.
+- **[`utils/`](utils/README.md):** Cross-cutting utilities for text normalisation, trigger loading, and duplicate detection.
+- **[`templates/`](templates/README.md):** Shared communication templates (emails, notifications).
+- **[`extraction/`](extraction/README.md):** Extension point for advanced data extraction pipelines.
+- **[`human_in_the_loop/`](human_in_the_loop/README.md):** Modules dedicated to manual review, approval, and confirmation flows.
+- **[`polling/`](polling/README.md):** Scheduling and trigger polling concepts that feed the automation workflows.
+- **[`reminders/`](reminders/README.md):** Reminder and escalation helpers built on top of the email agent.
+- **[`tests/`](tests/README.md):** Automated test suite covering core agents, integrations, and utilities.
+- **[`ARCHIVE/`](ARCHIVE/Readme.md):** Legacy experiments retained for reference.
 
 ## Development workflow
 

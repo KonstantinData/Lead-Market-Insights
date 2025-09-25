@@ -1,20 +1,41 @@
-# Notes: Agent responsible for polling events from an
-# external source (e.g. Google Calendar, API, database).
+import logging
+from integration.google_calendar_integration import GoogleCalendarIntegration
+from integration.google_contacts_integration import GoogleContactsIntegration
+
+logger = logging.getLogger(__name__)
+
+
 class EventPollingAgent:
     def __init__(self, config=None):
-        # Notes: Store configuration for later use (API keys, time frame, etc.)
         self.config = config
+        self.calendar = GoogleCalendarIntegration()
+        # Access token wird per Calendar-Integration gemanaged
+        self.contacts = None
 
     def poll(self):
+        """Polls calendar events (read-only) and logs them."""
+        try:
+            events = self.calendar.list_events(max_results=100)
+            for event in events:
+                logger.info(f"Polled calendar event: {event}")
+                yield event
+        except Exception as e:
+            logger.error(f"Google Calendar polling failed: {e}")
+            raise
+
+    def poll_contacts(self):
         """
-        Notes:
-        - Polls events from the intended data source.
-        - Replace the dummy events below with actual API/database calls.
-        - Yields each event as a dictionary.
+        Polls contacts (read-only) and logs them.
         """
-        dummy_events = [
-            {"id": 1, "summary": "Customer meeting with trigger word"},
-            {"id": 2, "summary": "Team call with no trigger"},
-        ]
-        for event in dummy_events:
-            yield event
+        # Stelle sicher, dass Access Token gültig ist
+        self.calendar._ensure_access_token()
+        if not self.contacts:
+            self.contacts = GoogleContactsIntegration(self.calendar._access_token)
+        try:
+            contacts = self.contacts.list_contacts(page_size=10)
+            for contact in contacts:
+                logger.info(f"Polled contact: {contact}")
+                yield contact
+        except Exception as e:
+            logger.error(f"Google Contacts polling failed: {e}")
+            raise

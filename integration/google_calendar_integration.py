@@ -43,7 +43,9 @@ class GoogleCalendarIntegration:
         token_leeway: int = 60,
     ) -> None:
         self.scopes = tuple(scopes) if scopes else (self.DEFAULT_SCOPE,)
-        self.calendar_id = calendar_id or os.getenv("GOOGLE_CALENDAR_ID", "primary")
+        self.calendar_id = calendar_id or os.getenv(
+            "GOOGLE_CALENDAR_ID", "info@condata.io"
+        )
         self._credentials = self._prepare_credentials(credentials)
         self.request_timeout = request_timeout
         self.token_leeway = max(token_leeway, 0)
@@ -53,15 +55,22 @@ class GoogleCalendarIntegration:
     # ------------------------------------------------------------------
     # Credential helpers
     # ------------------------------------------------------------------
-    def _prepare_credentials(self, credentials: Optional[Dict[str, str]]) -> OAuthCredentials:
+    def _prepare_credentials(
+        self, credentials: Optional[Dict[str, str]]
+    ) -> OAuthCredentials:
         if credentials is None:
             credentials = self._load_credentials_from_env()
 
         required_keys = {"client_id", "client_secret", "refresh_token", "token_uri"}
-        missing = [key for key in required_keys if key not in credentials or not credentials[key]]
+        missing = [
+            key
+            for key in required_keys
+            if key not in credentials or not credentials[key]
+        ]
         if missing:
             raise EnvironmentError(
-                "Missing required Google OAuth credentials: " + ", ".join(sorted(missing))
+                "Missing required Google OAuth credentials: "
+                + ", ".join(sorted(missing))
             )
 
         return OAuthCredentials(
@@ -79,8 +88,9 @@ class GoogleCalendarIntegration:
             "client_id": "GOOGLE_CLIENT_ID",
             "client_secret": "GOOGLE_CLIENT_SECRET",
             "refresh_token": "GOOGLE_REFRESH_TOKEN",
-            "token_uri": "GOOGLE_TOKEN_URI",
-            "token": "GOOGLE_ACCESS_TOKEN",
+            # `token_uri` kannst du hardcoden (Standard) oder optional aus ENV laden:
+            "token_uri": "GOOGLE_TOKEN_URI",  # optional; Standard s.u.
+            # KEIN persistenter Access-Token in ENV!
         }
 
         credentials = {
@@ -100,9 +110,9 @@ class GoogleCalendarIntegration:
             if value:
                 credentials[key] = value
 
-        auth_provider_key = os.getenv("GOOGLE_AUTH_PROVIDER_X509_CERT_URL") or os.getenv(
-            "GHOOGLE_AUTH_PROVIDER_X509_CERT_URL"
-        )
+        auth_provider_key = os.getenv(
+            "GOOGLE_AUTH_PROVIDER_X509_CERT_URL"
+        ) or os.getenv("GHOOGLE_AUTH_PROVIDER_X509_CERT_URL")
         if auth_provider_key:
             credentials["auth_provider_x509_cert_url"] = auth_provider_key
 
@@ -115,11 +125,7 @@ class GoogleCalendarIntegration:
     def _parse_redirect_uris(raw_value: str) -> Sequence[str]:
         """Return a cleaned list of redirect URIs."""
 
-        return tuple(
-            uri.strip()
-            for uri in raw_value.split(",")
-            if uri.strip()
-        )
+        return tuple(uri.strip() for uri in raw_value.split(",") if uri.strip())
 
     # ------------------------------------------------------------------
     # Access token helpers
@@ -150,7 +156,9 @@ class GoogleCalendarIntegration:
         )
 
         try:
-            with request.urlopen(token_request, timeout=self.request_timeout) as response:
+            with request.urlopen(
+                token_request, timeout=self.request_timeout
+            ) as response:
                 token_payload = json.load(response)
         except HTTPError as exc:  # pragma: no cover - network interaction
             logging.error("Google OAuth token refresh failed: %s", exc)

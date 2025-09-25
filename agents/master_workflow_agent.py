@@ -121,13 +121,21 @@ class MasterWorkflowAgent:
         text_fields = ["summary", "description"]
         for field in text_fields:
             text = event.get(field, "")
-            match = self.trigger_agent.check(text)
-            if match:
+            match = self.trigger_agent.check(event)
+            if match and match.get("matched_field") == field:
                 return {
                     "trigger": True,
                     "type": match["type"],
                     "matched_word": match["matched_word"],
                     "matched_field": field,
+                }
+            elif match:
+                # If trigger_agent returns matched_field, honor it
+                return {
+                    "trigger": True,
+                    "type": match["type"],
+                    "matched_word": match["matched_word"],
+                    "matched_field": match.get("matched_field", field),
                 }
         return {"trigger": False}
 

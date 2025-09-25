@@ -39,8 +39,21 @@ class TriggerDetectionAgent:
     def __init__(self, trigger_words: Iterable[str] | None = None) -> None:
         self.trigger_words = _prepare_trigger_words(trigger_words)
 
-    def check(self, event: dict) -> bool:
-        """Return ``True`` when *event* contains one of the trigger words."""
-
-        summary = normalize_text(event.get("summary", ""))
-        return any(word in summary for word in self.trigger_words)
+    def check(self, event: dict) -> dict | None:
+        """
+        Returns a dict with trigger match info if a trigger word is found
+        in the event's 'summary' or 'description', else returns None.
+        """
+        # Check both summary and description
+        for field in ("summary", "description"):
+            text = normalize_text(event.get(field, ""))
+            for word in self.trigger_words:
+                if word in text:
+                    # Optionally, you can distinguish hard/soft triggers here
+                    # For now, type is simply "hard"
+                    return {
+                        "type": "hard",  # or "soft", if you implement logic
+                        "matched_word": word,
+                        "matched_field": field,
+                    }
+        return None

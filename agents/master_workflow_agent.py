@@ -118,25 +118,7 @@ class MasterWorkflowAgent:
 
     def _detect_trigger(self, event: Dict[str, Any]) -> Dict[str, Any]:
         # Delegates to trigger agent, checks both summary and description
-        text_fields = ["summary", "description"]
-        for field in text_fields:
-            match = self.trigger_agent.check(event)
-            if match and match.get("matched_field") == field:
-                return {
-                    "trigger": True,
-                    "type": match["type"],
-                    "matched_word": match["matched_word"],
-                    "matched_field": field,
-                }
-            elif match:
-                # If trigger_agent returns matched_field, honor it
-                return {
-                    "trigger": True,
-                    "type": match["type"],
-                    "matched_word": match["matched_word"],
-                    "matched_field": match.get("matched_field", field),
-                }
-        return {"trigger": False}
+        return self.trigger_agent.check(event)
 
     def _send_to_crm_agent(self, event: Dict[str, Any], info: Dict[str, Any]) -> None:
         # TODO: Replace with real CRM agent logic

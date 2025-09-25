@@ -87,8 +87,8 @@ class MasterWorkflowAgent:
                 continue
 
             logger.info(
-                f"{trigger_result['type'].capitalize()} trigger detected in event {event_id}
-                (matched: {trigger_result['matched_word']} in {trigger_result['matched_field']})"
+                f"{trigger_result['type'].capitalize()} trigger detected in event {event_id} "
+                f"(matched: {trigger_result['matched_word']} in {trigger_result['matched_field']})"
             )
 
             # Step 2: Extraction of required info (company_name, web_domain)

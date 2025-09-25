@@ -6,22 +6,26 @@ WorkflowOrchestrator: Central orchestrator for the Agentic Intelligence Research
 - Calls the MasterWorkflowAgent and sub-agents as pure logic modules.
 """
 
-from agents.master_workflow_agent import MasterWorkflowAgent
 import logging
 from typing import Optional
+from agents.master_workflow_agent import MasterWorkflowAgent
 
 logger = logging.getLogger("WorkflowOrchestrator")
 
 
 class WorkflowOrchestrator:
-    def __init__(self):
-        # Initialize the logic agent
+    def __init__(self, communication_backend=None):
+        # Track init errors so run() can short-circuit gracefully.
         self._init_error: Optional[Exception] = None
+
         try:
-            self.master_agent = MasterWorkflowAgent()
+            # Support passing through the communication backend.
+            self.master_agent = MasterWorkflowAgent(
+                communication_backend=communication_backend
+            )
             self.log_filename = self.master_agent.log_filename
         except EnvironmentError as exc:
-            # Missing environment configuration is expected in test environments.
+            # Missing env/config is expected in some (e.g., test) environments.
             logger.error("Failed to initialise MasterWorkflowAgent: %s", exc)
             self.master_agent = None
             self.log_filename = "polling_trigger.log"

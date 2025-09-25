@@ -8,7 +8,7 @@ MasterWorkflowAgent: Pure logic agent for polling and event-processing.
 """
 
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from agents.event_polling_agent import EventPollingAgent
 from agents.trigger_detection_agent import TriggerDetectionAgent
@@ -24,18 +24,26 @@ logger = logging.getLogger("MasterWorkflowAgent")
 
 
 class MasterWorkflowAgent:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        communication_backend: Optional[Any] = None,
+        event_agent: Optional[EventPollingAgent] = None,
+        trigger_agent: Optional[TriggerDetectionAgent] = None,
+        extraction_agent: Optional[ExtractionAgent] = None,
+    ) -> None:
         # Initialize configuration and all agents.
-        self.event_agent = EventPollingAgent(config=settings)
+        self.event_agent = event_agent or EventPollingAgent(config=settings)
         trigger_words_file = (
             Path(__file__).resolve().parents[1] / "config" / "trigger_words.txt"
         )
         self.trigger_words = load_trigger_words(
             settings.trigger_words, triggers_file=trigger_words_file, logger=logger
         )
-        self.trigger_agent = TriggerDetectionAgent(trigger_words=self.trigger_words)
-        self.extraction_agent = ExtractionAgent()
-        self.human_agent = HumanInLoopAgent()
+        self.trigger_agent = trigger_agent or TriggerDetectionAgent(
+            trigger_words=self.trigger_words
+        )
+        self.extraction_agent = extraction_agent or ExtractionAgent()
+        self.human_agent = HumanInLoopAgent(communication_backend=communication_backend)
 
         # S3 agent setup (optional)
         self.s3_agent = None
@@ -90,9 +98,18 @@ class MasterWorkflowAgent:
                 # Human-in-the-loop: Ask organizer if dossier is needed
                 response = self.human_agent.request_dossier_confirmation(event, info)
                 if response.get("dossier_required"):
+                    logger.info(
+                        "Organizer approved dossier for event %s: %s",
+                        event_id,
+                        response.get("details"),
+                    )
                     self._send_to_crm_agent(event, info)
                 else:
-                    logger.info(f"Organizer declined dossier for event {event_id}.")
+                    logger.info(
+                        "Organizer declined dossier for event %s: %s",
+                        event_id,
+                        response.get("details"),
+                    )
             elif trigger_result["type"] == "hard" and not is_complete:
                 # Human-in-the-loop: Ask for missing company_name/web_domain
                 filled = self.human_agent.request_info(event, extracted)
@@ -104,6 +121,11 @@ class MasterWorkflowAgent:
                 # Human-in-the-loop: First ask organizer, then ask for missing info if needed
                 response = self.human_agent.request_dossier_confirmation(event, info)
                 if response.get("dossier_required"):
+                    logger.info(
+                        "Organizer approved dossier for event %s: %s",
+                        event_id,
+                        response.get("details"),
+                    )
                     filled = self.human_agent.request_info(event, extracted)
                     if filled.get("is_complete"):
                         self._send_to_crm_agent(event, filled.get("info", {}))
@@ -112,7 +134,11 @@ class MasterWorkflowAgent:
                             f"Required info still missing after HITL for event {event_id}."
                         )
                 else:
-                    logger.info(f"Organizer declined dossier for event {event_id}.")
+                    logger.info(
+                        "Organizer declined dossier for event %s: %s",
+                        event_id,
+                        response.get("details"),
+                    )
             else:
                 logger.warning(f"Unhandled trigger/info state for event {event_id}")
 

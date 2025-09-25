@@ -1,15 +1,12 @@
 """
-MasterWorkflowAgent: Central agent orchestrating the entire polling and event-processing workflow.
+MasterWorkflowAgent: Pure logic agent for polling and event-processing.
 
 # Notes:
-# - This agent is responsible for supervising the full Google Calendar polling, trigger detection,
-#   extraction, human-in-the-loop, and logging/upload process.
-# - It coordinates all sub-agents and manages the full decision tree as described in the requirements.
-# - All processing logic, including hard/soft trigger matching, info extraction, HITL, and S3 upload,
-#   is encapsulated here.
+# - This agent contains only the polling, trigger detection, extraction, human-in-the-loop, and CRM logic.
+# - It exposes process_all_events(), but does NOT handle orchestration, status, or logging setup.
+# - All business logic is encapsulated here, orchestration is handled in WorkflowOrchestrator.
 """
 
-from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from agents.event_polling_agent import EventPollingAgent
@@ -23,19 +20,12 @@ from utils.trigger_loader import load_trigger_words
 import logging
 from pathlib import Path
 
-# Notes: Set up logging (could be further parameterized)
 logger = logging.getLogger("MasterWorkflowAgent")
 
 
 class MasterWorkflowAgent:
-    """
-    # Notes:
-    # - Orchestrates all sub-agents and the full business logic.
-    # - Implements the full workflow as a single entrypoint for polling and event handling.
-    """
-
     def __init__(self) -> None:
-        # Notes: Initialize configuration and all agents.
+        # Initialize configuration and all agents.
         self.event_agent = EventPollingAgent(config=settings)
         trigger_words_file = (
             Path(__file__).resolve().parents[1] / "config" / "trigger_words.txt"
@@ -47,7 +37,7 @@ class MasterWorkflowAgent:
         self.extraction_agent = ExtractionAgent()
         self.human_agent = HumanInLoopAgent()
 
-        # Notes: S3 agent setup (optional: only if all credentials are present)
+        # S3 agent setup (optional)
         self.s3_agent = None
         if all(
             [
@@ -64,17 +54,14 @@ class MasterWorkflowAgent:
                 bucket_name=settings.s3_bucket,
                 logger=logger,
             )
-
         self.log_filename = "polling_trigger.log"
 
-    def run_workflow(self) -> None:
+    def process_all_events(self) -> None:
         """
-        # Notes:
-        # - Main entry for running the polling and processing workflow.
-        # - Loops through all events, applies trigger detection, extraction, HITL, and logging.
-        # - Decision tree follows the requirements (hard/soft trigger, info completeness, etc).
+        Loops through all events, applies trigger detection, extraction, HITL, and CRM logic.
+        Decision tree follows the requirements (hard/soft trigger, info completeness, etc).
         """
-        logger.info("Master workflow started.")
+        logger.info("MasterWorkflowAgent: Processing events...")
 
         for event in self.event_agent.poll():
             logger.info(f"Polled event: {event}")
@@ -110,94 +97,52 @@ class MasterWorkflowAgent:
                 # Human-in-the-loop: Ask for missing company_name/web_domain
                 filled = self.human_agent.request_info(event, extracted)
                 if filled.get("is_complete"):
-                    self._send_to_crm_agent(event, filled["info"])
+                    self._send_to_crm_agent(event, filled.get("info", {}))
                 else:
-                    logger.warning(
-                        f"Event {event_id} missing required info after HITL, skipping."
-                    )
+                    logger.warning(f"Required info still missing for event {event_id}.")
             elif trigger_result["type"] == "soft" and not is_complete:
-                # Human-in-the-loop: Ask if dossier needed, and for missing info
-                response = self.human_agent.request_dossier_and_info(event, extracted)
-                if response.get("dossier_required") and response.get("is_complete"):
-                    self._send_to_crm_agent(event, response["info"])
+                # Human-in-the-loop: First ask organizer, then ask for missing info if needed
+                response = self.human_agent.request_dossier_confirmation(event, info)
+                if response.get("dossier_required"):
+                    filled = self.human_agent.request_info(event, extracted)
+                    if filled.get("is_complete"):
+                        self._send_to_crm_agent(event, filled.get("info", {}))
+                    else:
+                        logger.warning(
+                            f"Required info still missing after HITL for event {event_id}."
+                        )
                 else:
-                    logger.info(
-                        f"Soft trigger event {event_id} did not result in CRM action."
-                    )
+                    logger.info(f"Organizer declined dossier for event {event_id}.")
             else:
-                logger.info(
-                    f"Unhandled event type for event {event_id} (should not occur)."
-                )
-
-        logger.info("Master workflow finished.")
-        self._upload_log_to_s3()
+                logger.warning(f"Unhandled trigger/info state for event {event_id}")
 
     def _detect_trigger(self, event: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        # Notes:
-        # - Checks both summary and description for hard or soft trigger matches.
-        # - Returns a dict reporting trigger status, type, matched word, and field.
-        """
-        summary = event.get("summary", "")
-        description = event.get("description", "")
-
-        # Notes: Hard trigger (exact match, normalized)
-        for field_name, value in [("summary", summary), ("description", description)]:
-            if self.trigger_agent.check({field_name: value}):
+        # Delegates to trigger agent, checks both summary and description
+        text_fields = ["summary", "description"]
+        for field in text_fields:
+            text = event.get(field, "")
+            match = self.trigger_agent.check(text)
+            if match:
                 return {
                     "trigger": True,
-                    "type": "hard",
-                    "matched_word": self._find_matched_word(value),
-                    "matched_field": field_name,
+                    "type": match["type"],
+                    "matched_word": match["matched_word"],
+                    "matched_field": field,
                 }
-
-        # Notes: Soft trigger placeholder (to be replaced by fuzzy/NLP logic)
-        # For now, this always returns False until soft matching is implemented.
-        # If you implement soft matching, set type="soft" and provide the best match.
-        return {
-            "trigger": False,
-            "type": None,
-            "matched_word": None,
-            "matched_field": None,
-        }
-
-    def _find_matched_word(self, text: str) -> Optional[str]:
-        """
-        # Notes:
-        # - Returns the first trigger word (normalized) found in the given text.
-        # - Used for logging and audit purposes.
-        """
-        from utils.text_normalization import normalize_text
-
-        norm_text = normalize_text(text)
-        for word in self.trigger_agent.trigger_words:
-            if word in norm_text:
-                return word
-        return None
+        return {"trigger": False}
 
     def _send_to_crm_agent(self, event: Dict[str, Any], info: Dict[str, Any]) -> None:
-        """
-        # Notes:
-        # - Placeholder for CRM integration logic.
-        # - This should send event and info to the CRM agent/system.
-        # - Currently logs the action.
-        """
-        logger.info(f"Sending event {event.get('id')} with info {info} to CRM agent.")
-        # TODO: Implement actual CRM integration here.
+        # TODO: Replace with real CRM agent logic
+        logger.info(f"Sending event {event.get('id')} to CRM with info: {info}")
 
-    def _upload_log_to_s3(self) -> None:
-        """
-        # Notes:
-        # - Uploads the workflow log file to S3 if S3 agent is configured.
-        # - Logs the result.
-        """
-        if not self.s3_agent:
-            logger.warning("S3 agent not configured. Skipping log upload.")
-            return
-        success = self.s3_agent.upload_file(
-            self.log_filename, f"logs/{self.log_filename}"
-        )
-        if success:
-            logger.info("Log file uploaded successfully.")
+    def upload_log_to_s3(self) -> None:
+        if self.s3_agent:
+            success = self.s3_agent.upload_file(
+                self.log_filename, f"logs/{self.log_filename}"
+            )
+            if success:
+                logger.info(f"Log file uploaded to S3: {self.log_filename}")
+            else:
+                logger.warning("Log file upload to S3 failed.")
         else:
-            logger.warning("Log file upload failed.")
+            logger.warning("S3 agent not configured. Skipping log upload.")

@@ -2,12 +2,12 @@
 Entrypoint for the Agentic Intelligence Research workflow.
 
 # Notes:
-# - This script initializes and starts the MasterWorkflowAgent, which orchestrates the entire polling and event-processing workflow.
-# - All business logic is encapsulated in the MasterWorkflowAgent.
+# - This script initializes and starts the WorkflowOrchestrator, which orchestrates the entire polling and event-processing workflow.
+# - All orchestration, error handling, and logging is now handled in WorkflowOrchestrator.
 """
 
 import logging
-from agents.master_workflow_agent import MasterWorkflowAgent
+from agents.workflow_orchestrator import WorkflowOrchestrator
 
 if __name__ == "__main__":
     # Set up logging (optional: customize as needed)
@@ -15,5 +15,5 @@ if __name__ == "__main__":
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
     )
 
-    agent = MasterWorkflowAgent()
-    agent.run_workflow()
+    orchestrator = WorkflowOrchestrator()
+    orchestrator.run()

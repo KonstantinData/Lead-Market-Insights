@@ -8,7 +8,6 @@ google-auth>=2.0,<3.0
 google-auth-oauthlib>=1.0,<2.0
 
 # Email and communications (for HITL, reminders)
-smtplib2>=1.0,<2.0            # For sending emails (pure Python) - or use built-in smtplib if preferred
 email-validator>=2.0,<3.0     # Validate email addresses
 
 # Scheduling and background jobs

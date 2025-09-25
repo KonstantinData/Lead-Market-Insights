@@ -6,6 +6,10 @@ Entrypoint for the Agentic Intelligence Research workflow.
 # - All orchestration, error handling, and logging is now handled in WorkflowOrchestrator.
 """
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import logging
 from agents.workflow_orchestrator import WorkflowOrchestrator
 

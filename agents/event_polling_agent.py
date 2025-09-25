@@ -13,10 +13,16 @@ class EventPollingAgent:
         self.contacts = None
 
     def poll(self):
-        """Polls calendar events (read-only) and logs them."""
+        """Polls calendar events (read-only) and logs them. Filters out birthday events."""
         try:
             events = self.calendar.list_events(max_results=100)
             for event in events:
+                # Sperre für birthday-Einträge:
+                if event.get("eventType") == "birthday":
+                    logger.debug(
+                        f"Skipping birthday event: {event.get('summary', '')} ({event.get('id', '')})"
+                    )
+                    continue  # Geburtstage überspringen!
                 logger.info(f"Polled calendar event: {event}")
                 yield event
         except Exception as e:

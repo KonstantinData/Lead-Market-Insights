@@ -6,14 +6,16 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 from typing import Dict, Iterable, Optional, Sequence
 from urllib import parse, request
 from urllib.error import HTTPError, URLError
+from datetime import datetime, timedelta, timezone  # <--- HIER: timezone ergänzt!
 
 from dotenv import load_dotenv
 
 load_dotenv()
+CAL_LOOKBACK_DAYS = int(os.getenv("CAL_LOOKBACK_DAYS", "1"))
+CAL_LOOKAHEAD_DAYS = int(os.getenv("CAL_LOOKAHEAD_DAYS", "14"))
 
 
 @dataclass
@@ -186,7 +188,7 @@ class GoogleCalendarIntegration:
     def list_events(
         self,
         *,
-        max_results: int = 10,
+        max_results: int = 20,
         time_min: Optional[datetime] = None,
         time_max: Optional[datetime] = None,
         query: Optional[str] = None,

@@ -13,9 +13,9 @@ logger = logging.getLogger("WorkflowOrchestrator")
 
 
 class WorkflowOrchestrator:
-    def __init__(self):
+    def __init__(self, communication_backend=None):
         # Initialize the logic agent
-        self.master_agent = MasterWorkflowAgent()
+        self.master_agent = MasterWorkflowAgent(communication_backend=communication_backend)
         self.log_filename = self.master_agent.log_filename
 
     def run(self):

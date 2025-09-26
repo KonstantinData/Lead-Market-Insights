@@ -63,6 +63,8 @@ _run_counter = None
 _trigger_counter = None
 _hitl_counter = None
 _latency_histogram = None
+_cost_spend_counter = None
+_cost_event_counter = None
 
 _log_record_factory_installed = False
 _original_log_record_factory = logging.getLogRecordFactory()
@@ -314,6 +316,39 @@ def record_hitl_outcome(kind: str, outcome: str) -> None:
     _hitl_counter.add(1, attributes=attributes)
 
 
+def record_cost_spend(service: str, amount: float) -> None:
+    if not _configured:
+        configure_observability()
+
+    if _cost_spend_counter is None:
+        return
+
+    attributes = {"service": service or "unknown"}
+    try:
+        _cost_spend_counter.add(float(amount), attributes=attributes)
+    except Exception:  # pragma: no cover - defensive guard around metric emission
+        _logger.exception("Failed to record cost spend metric")
+
+
+def record_cost_limit_event(
+    event: str, service: str, *, limit: Optional[float] = None
+) -> None:
+    if not _configured:
+        configure_observability()
+
+    if _cost_event_counter is None:
+        return
+
+    attributes: Dict[str, object] = {"service": service or "unknown", "event": event}
+    if limit is not None:
+        attributes["limit"] = float(limit)
+
+    try:
+        _cost_event_counter.add(1, attributes=attributes)
+    except Exception:  # pragma: no cover - defensive guard around metric emission
+        _logger.exception("Failed to record cost limit event metric")
+
+
 def get_current_run_id() -> Optional[str]:
     return _run_id_var.get()
 
@@ -338,9 +373,11 @@ def _record_operation_latency(
 
 def _reset_instruments() -> None:
     global _run_counter, _trigger_counter, _hitl_counter, _latency_histogram
+    global _cost_spend_counter, _cost_event_counter
 
     if not _OTEL_AVAILABLE or metrics is None:
         _run_counter = _trigger_counter = _hitl_counter = _latency_histogram = None
+        _cost_spend_counter = _cost_event_counter = None
         return
 
     meter = metrics.get_meter(_TRACER_NAME)
@@ -360,6 +397,14 @@ def _reset_instruments() -> None:
         "workflow_operation_duration_ms",
         description="Latency distribution for workflow operations.",
         unit="ms",
+    )
+    _cost_spend_counter = meter.create_counter(
+        "workflow_cost_spend_usd_total",
+        description="Total spend recorded by the workflow cost guard.",
+    )
+    _cost_event_counter = meter.create_counter(
+        "workflow_cost_guard_events_total",
+        description="Count of budget guard events (warnings, breaches, rate limits).",
     )
 
 

@@ -24,6 +24,9 @@ to poll events.
 | `COMPLIANCE_MODE` | Controls default masking rules; accepts `standard` or `strict`. | `standard` |
 | `MASK_PII_IN_LOGS` | Explicit toggle to mask personal data in logs regardless of compliance mode. | `true` |
 | `MASK_PII_IN_MESSAGES` | Explicit toggle to mask personal data in HITL messages. | `false` (`true` when `COMPLIANCE_MODE=strict`) |
+| `DAILY_COST_CAP` | Aggregate daily workflow spend limit (USD) used by the runtime cost guard. | `50.0` |
+| `MONTHLY_COST_CAP` | Aggregate monthly workflow spend limit (USD) used by the runtime cost guard. | `1000.0` |
+| `SERVICE_RATE_LIMIT_*` | Per-service request ceilings evaluated by the cost guard (e.g. `SERVICE_RATE_LIMIT_OPENAI=60` for 60 calls/min). | _optional_ |
 | `PII_FIELD_WHITELIST` | Comma-separated list of additional business fields that should never be redacted. | see `config.config` defaults |
 | `LLM_CONFIDENCE_THRESHOLD_TRIGGER` | Minimum trigger-detection confidence required to treat an LLM response as authoritative. | `0.6` |
 | `LLM_CONFIDENCE_THRESHOLD_EXTRACTION` | Minimum extraction confidence before using the structured payload. | `0.55` |

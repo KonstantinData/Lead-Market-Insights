@@ -240,6 +240,12 @@ class Settings:
             "MASK_PII_IN_MESSAGES", default_mask_messages
         )
 
+        self.daily_cost_cap: float = _get_float_env("DAILY_COST_CAP", 50.0)
+        self.monthly_cost_cap: float = _get_float_env("MONTHLY_COST_CAP", 1000.0)
+        self.service_rate_limits: Dict[str, int] = _prefixed_env_mapping(
+            "SERVICE_RATE_LIMIT_", int
+        )
+
         whitelist_env = _get_env_var("PII_FIELD_WHITELIST")
         whitelist = {
             "company_name",

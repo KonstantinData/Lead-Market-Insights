@@ -115,4 +115,3 @@ class EventLogManager:
 # Example:
 # manager = EventLogManager("postgresql://user:pass@localhost/db")
 # manager.write_event_log("123", {"status": "done"})
-

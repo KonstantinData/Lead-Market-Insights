@@ -89,4 +89,3 @@ class Settings:
 
 # Notes: Singleton instance for importing settings in other modules
 settings = Settings()
-

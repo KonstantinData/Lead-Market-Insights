@@ -40,4 +40,3 @@ def test_postgres_table_defaults(monkeypatch):
     assert settings.postgres_event_log_table == "event_logs"
     assert settings.postgres_workflow_log_table == "workflow_logs"
     assert settings.postgres_file_log_table == "workflow_log_files"
-

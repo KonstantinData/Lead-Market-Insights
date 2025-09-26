@@ -87,4 +87,3 @@ class WorkflowLogManager:
 # Example:
 # wlm = WorkflowLogManager("postgresql://user:pass@localhost/db")
 # wlm.append_log("run42", "start", "Workflow started", event_id="evt123")
-

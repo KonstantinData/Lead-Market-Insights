@@ -21,4 +21,3 @@ class S3StorageAgent:
         raise RuntimeError(
             "S3 storage has been disabled. Configure PostgresStorageAgent instead."
         )
-

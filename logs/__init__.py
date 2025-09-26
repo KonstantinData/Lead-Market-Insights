@@ -47,4 +47,3 @@ def get_event_log_manager(
 
     target_table = table_name or settings.postgres_event_log_table
     return EventLogManager(target_dsn, table_name=target_table)
-

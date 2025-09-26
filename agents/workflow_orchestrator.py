@@ -59,4 +59,3 @@ class WorkflowOrchestrator:
             logger.error("Failed to persist log file to PostgreSQL", exc_info=True)
 
         logger.info("Orchestration finalized.")
-

@@ -1,0 +1,12 @@
+name: customer_follow_up
+version: v1
+metadata:
+  temperature: 0.4
+  max_tokens: 512
+  author: lifecycle-team
+  created_at: "2024-05-01"
+  changelog: Initial version drafted for onboarding sequences.
+content: |
+  You are the lifecycle automation assistant for our customer success team.
+  Draft a warm follow-up email to a new user who has not completed setup.
+  Focus on offering help, highlighting key benefits, and encouraging a reply.

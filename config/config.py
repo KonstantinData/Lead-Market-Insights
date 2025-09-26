@@ -168,6 +168,15 @@ def _prefixed_env_mapping(prefix: str, cast: Callable[[str], Any]) -> Dict[str, 
     return result
 
 
+def _cast_non_empty_str(value: Any) -> str:
+    """Cast a value to a stripped non-empty string."""
+
+    text = str(value).strip()
+    if not text:
+        raise ValueError("Expected a non-empty string value.")
+    return text
+
+
 def _coerce_mapping(
     mapping: Optional[Mapping[str, Any]], cast: Callable[[Any], Any]
 ) -> Dict[str, Any]:
@@ -208,6 +217,10 @@ class Settings:
         )
         self.run_log_dir: Path = _get_path_env(
             "RUN_LOG_DIR", self.log_storage_dir / "runs"
+        )
+
+        self.prompt_directory: Path = _get_path_env(
+            "PROMPT_DIRECTORY", project_root / "templates" / "prompts"
         )
 
         self.trigger_words: Optional[str] = _get_env_var("TRIGGER_WORDS")
@@ -261,6 +274,7 @@ class Settings:
         self.llm_confidence_thresholds: Dict[str, float] = {}
         self.llm_cost_caps: Dict[str, float] = {}
         self.llm_retry_budgets: Dict[str, int] = {}
+        self.prompt_versions: Dict[str, str] = {}
 
         agent_config_path = _get_env_var("AGENT_CONFIG_FILE")
         if agent_config_path:
@@ -288,6 +302,7 @@ class Settings:
         )
 
         self._load_llm_configuration(self._raw_agent_config)
+        self._load_prompt_configuration(self._raw_agent_config)
 
     def _load_llm_configuration(self, config_data: Mapping[str, Any]) -> None:
         """Populate LLM configuration dictionaries from env defaults and YAML overrides."""
@@ -334,6 +349,23 @@ class Settings:
         self.llm_cost_caps = cost_caps
         self.llm_retry_budgets = retry_budgets
 
+    def _load_prompt_configuration(self, config_data: Mapping[str, Any]) -> None:
+        """Populate prompt version overrides from environment variables and config files."""
+
+        prompt_versions = _prefixed_env_mapping("PROMPT_VERSION_", _cast_non_empty_str)
+
+        prompts_section = (
+            config_data.get("prompts")
+            if isinstance(config_data, Mapping)
+            else None
+        )
+        if isinstance(prompts_section, Mapping):
+            prompt_versions.update(
+                _coerce_mapping(prompts_section, _cast_non_empty_str)
+            )
+
+        self.prompt_versions = prompt_versions
+
     def refresh_llm_configuration(self) -> None:
         """Reload LLM configuration from the configured sources."""
 
@@ -350,6 +382,7 @@ class Settings:
             self._raw_agent_config = {}
 
         self._load_llm_configuration(self._raw_agent_config)
+        self._load_prompt_configuration(self._raw_agent_config)
 
 
 # Notes: Singleton instance for importing settings in other modules

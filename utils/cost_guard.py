@@ -322,4 +322,3 @@ class CostGuard:
             self.alert_agent.send_alert(message, severity, context=context)
         except Exception:  # pragma: no cover - defensive alerting
             self.logger.exception("Failed to dispatch %s alert", severity.value)
-

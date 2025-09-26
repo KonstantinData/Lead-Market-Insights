@@ -19,7 +19,7 @@ from config.config import settings
 from utils.trigger_loader import load_trigger_words
 
 from pathlib import Path
-import datetime
+from datetime import UTC, datetime
 
 logger = logging.getLogger("MasterWorkflowAgent")
 
@@ -64,7 +64,7 @@ class MasterWorkflowAgent:
                 logger=logger,
             )
         # Use a unique log filename per run using current UTC timestamp
-        timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%SZ")
+        timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
         self.log_filename = f"polling_trigger_{timestamp}.log"
 
         # ADD THIS: configure logger to write to the unique per-run file

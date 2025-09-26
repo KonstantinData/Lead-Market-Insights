@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import Optional, Tuple
 
 from dotenv import load_dotenv
@@ -19,8 +20,8 @@ def _get_env_var(name: str, *, aliases: Tuple[str, ...] = ()) -> Optional[str]:
     """Return an environment variable using the conventional uppercase name.
 
     When aliases are provided, values defined in the pre-dotenv environment take
-    precedence. This ensures runtime overrides such as ``DATABASE_URL`` can win
-    even if ``.env`` supplies the primary key.
+    precedence. This ensures runtime overrides can win even if ``.env`` supplies
+    the primary key.
     """
 
     if aliases:
@@ -57,6 +58,15 @@ def _get_int_env(name: str, default: int) -> int:
         raise ValueError(f"Environment variable {name} must be an integer.") from exc
 
 
+def _get_path_env(name: str, default: Path) -> Path:
+    """Return the path from an environment variable or a default."""
+
+    raw_value = _get_env_var(name)
+    if raw_value:
+        return Path(raw_value).expanduser().resolve()
+    return default
+
+
 class Settings:
     """Application configuration loaded from environment variables or defaults."""
 
@@ -64,25 +74,19 @@ class Settings:
         self.cal_lookahead_days: int = _get_int_env("CAL_LOOKAHEAD_DAYS", 14)
         self.cal_lookback_days: int = _get_int_env("CAL_LOOKBACK_DAYS", 1)
 
-        self.aws_access_key_id: Optional[str] = _get_env_var("AWS_ACCESS_KEY_ID")
-        self.aws_secret_access_key: Optional[str] = _get_env_var("AWS_SECRET_ACCESS_KEY")
-        self.aws_default_region: Optional[str] = _get_env_var("AWS_DEFAULT_REGION")
-        self.s3_bucket: Optional[str] = _get_env_var(
-            "S3_BUCKET_NAME", aliases=("S3_BUCKET",)
-        )
+        project_root = Path(__file__).resolve().parents[1]
+        default_log_root = project_root / "logs" / "run_history"
 
-        self.postgres_dsn: Optional[str] = _get_env_var(
-            "POSTGRES_DSN", aliases=("DATABASE_URL",)
+        self.log_storage_dir: Path = _get_path_env("LOG_STORAGE_DIR", default_log_root)
+        self.event_log_dir: Path = _get_path_env(
+            "EVENT_LOG_DIR", self.log_storage_dir / "events"
         )
-        self.postgres_event_log_table: str = _get_env_var(
-            "POSTGRES_EVENT_LOG_TABLE"
-        ) or "event_logs"
-        self.postgres_workflow_log_table: str = _get_env_var(
-            "POSTGRES_WORKFLOW_LOG_TABLE"
-        ) or "workflow_logs"
-        self.postgres_file_log_table: str = _get_env_var(
-            "POSTGRES_FILE_LOG_TABLE"
-        ) or "workflow_log_files"
+        self.workflow_log_dir: Path = _get_path_env(
+            "WORKFLOW_LOG_DIR", self.log_storage_dir / "workflows"
+        )
+        self.run_log_dir: Path = _get_path_env(
+            "RUN_LOG_DIR", self.log_storage_dir / "runs"
+        )
 
         self.trigger_words: Optional[str] = _get_env_var("TRIGGER_WORDS")
 

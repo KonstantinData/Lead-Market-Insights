@@ -1,47 +1,34 @@
+import json
 import logging
-from typing import Optional
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, Optional
 
-import psycopg
-from psycopg import sql
+_SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
+def _sanitise(identifier: str) -> str:
+    cleaned = _SAFE_NAME.sub("_", identifier)
+    cleaned = cleaned.strip("._")
+    return cleaned or "workflow"
 
 
 class WorkflowLogManager:
-    """Logging for complete workflows stored in PostgreSQL."""
+    """Logging for complete workflows stored as JSON lines locally."""
 
     def __init__(
         self,
-        dsn: str,
+        base_path: Path,
         *,
-        table_name: str = "workflow_logs",
         logger: Optional[logging.Logger] = None,
     ) -> None:
-        if not dsn:
-            raise ValueError("PostgreSQL DSN is required for WorkflowLogManager.")
-
-        self.dsn = dsn
-        self.table_name = table_name
+        self.base_path = Path(base_path)
+        self.base_path.mkdir(parents=True, exist_ok=True)
         self.logger = logger or logging.getLogger(self.__class__.__name__)
-        self._ensure_table()
 
-    def _ensure_table(self) -> None:
-        create_statement = sql.SQL(
-            """
-            CREATE TABLE IF NOT EXISTS {table} (
-                id BIGSERIAL PRIMARY KEY,
-                run_id TEXT NOT NULL,
-                step TEXT NOT NULL,
-                message TEXT NOT NULL,
-                event_id TEXT,
-                error TEXT,
-                logged_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            """
-        ).format(table=sql.Identifier(self.table_name))
-
-        with psycopg.connect(self.dsn) as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(create_statement)
-            connection.commit()
+    def _log_file(self, run_id: str) -> Path:
+        return self.base_path / f"{_sanitise(run_id)}.jsonl"
 
     def append_log(
         self,
@@ -53,37 +40,25 @@ class WorkflowLogManager:
     ) -> None:
         """Append a log entry to the workflow log."""
 
-        statement = sql.SQL(
-            """
-            INSERT INTO {table} (run_id, step, message, event_id, error)
-            VALUES (%s, %s, %s, %s, %s)
-            """
-        ).format(table=sql.Identifier(self.table_name))
+        entry: Dict[str, Optional[str]] = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "run_id": run_id,
+            "step": step,
+            "message": message,
+            "event_id": event_id,
+            "error": error,
+        }
 
-        try:
-            with psycopg.connect(self.dsn) as connection:
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        statement, (run_id, step, message, event_id, error)
-                    )
-                connection.commit()
-            if self.logger:
-                self.logger.info(
-                    "Workflow log appended for run %s (step: %s)",
-                    run_id,
-                    step,
-                )
-        except psycopg.Error as exc:
-            if self.logger:
-                self.logger.error(
-                    "Error in workflow logging for run %s (step: %s): %s",
-                    run_id,
-                    step,
-                    exc,
-                )
-            raise
+        log_file = self._log_file(run_id)
+        with log_file.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+        if self.logger:
+            self.logger.info(
+                "Workflow log appended for run %s (step: %s)", run_id, step
+            )
 
 
 # Example:
-# wlm = WorkflowLogManager("postgresql://user:pass@localhost/db")
+# wlm = WorkflowLogManager(Path("logs/run_history/workflows"))
 # wlm.append_log("run42", "start", "Workflow started", event_id="evt123")

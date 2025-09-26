@@ -1,7 +1,5 @@
 import importlib
 
-import pytest
-
 
 def reload_modules():
     """Reload configuration and logging modules to pick up env changes."""
@@ -15,54 +13,40 @@ def reload_modules():
     return logs_module
 
 
-def test_get_event_log_manager_uses_env(monkeypatch):
+def test_get_event_log_manager_uses_env(monkeypatch, tmp_path):
     monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
-    monkeypatch.setenv("POSTGRES_DSN", "postgresql://user:pass@localhost/db")
-    monkeypatch.setenv("POSTGRES_EVENT_LOG_TABLE", "custom_events")
+    storage_root = tmp_path / "storage"
+    monkeypatch.setenv("LOG_STORAGE_DIR", str(storage_root))
 
     logs = reload_modules()
-
-    class DummyManager:
-        def __init__(self, dsn, *, table_name="event_logs"):
-            self.dsn = dsn
-            self.table_name = table_name
-
-    monkeypatch.setattr(logs, "EventLogManager", DummyManager)
-
     manager = logs.get_event_log_manager()
 
-    assert isinstance(manager, DummyManager)
-    assert manager.dsn == "postgresql://user:pass@localhost/db"
-    assert manager.table_name == "custom_events"
+    assert manager.base_path == storage_root.resolve() / "events"
 
 
-def test_get_event_log_manager_missing_dsn(monkeypatch):
+def test_get_event_log_manager_prefers_argument(monkeypatch, tmp_path):
     monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
-    monkeypatch.delenv("POSTGRES_DSN", raising=False)
-    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("LOG_STORAGE_DIR", str(tmp_path / "storage"))
 
     logs = reload_modules()
 
-    with pytest.raises(EnvironmentError):
-        logs.get_event_log_manager()
+    custom_path = tmp_path / "custom-events"
+    manager = logs.get_event_log_manager(custom_path)
+
+    assert manager.base_path == custom_path.resolve()
 
 
-def test_get_event_log_manager_prefers_argument(monkeypatch):
+def test_event_log_manager_roundtrip(monkeypatch, tmp_path):
     monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
-    monkeypatch.setenv("POSTGRES_DSN", "postgresql://env/db")
+    logs_module = reload_modules()
+    manager = logs_module.EventLogManager(tmp_path)
 
-    logs = reload_modules()
+    manager.write_event_log("evt-1", {"status": "done"})
+    stored = manager.read_event_log("evt-1")
 
-    class DummyManager:
-        def __init__(self, dsn, *, table_name="event_logs"):
-            self.dsn = dsn
-            self.table_name = table_name
+    assert stored is not None
+    assert stored["status"] == "done"
+    assert "last_updated" in stored
 
-    monkeypatch.setattr(logs, "EventLogManager", DummyManager)
-
-    manager = logs.get_event_log_manager(
-        "postgresql://explicit/db", table_name="explicit_table"
-    )
-
-    assert manager.dsn == "postgresql://explicit/db"
-    assert manager.table_name == "explicit_table"
+    manager.delete_event_log("evt-1")
+    assert manager.read_event_log("evt-1") is None

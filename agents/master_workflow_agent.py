@@ -16,7 +16,7 @@ from agents.event_polling_agent import EventPollingAgent
 from agents.trigger_detection_agent import TriggerDetectionAgent
 from agents.extraction_agent import ExtractionAgent
 from agents.human_in_loop_agent import HumanInLoopAgent
-from agents.postgres_storage_agent import PostgresStorageAgent
+from agents.local_storage_agent import LocalStorageAgent
 from config.config import settings
 from utils.trigger_loader import load_trigger_words
 
@@ -45,26 +45,18 @@ class MasterWorkflowAgent:
         self.extraction_agent = extraction_agent or ExtractionAgent()
         self.human_agent = HumanInLoopAgent(communication_backend=communication_backend)
 
-        # Optional PostgreSQL-backed storage for log artefacts
-        self.storage_agent: Optional[PostgresStorageAgent] = None
-        if settings.postgres_dsn:
-            try:
-                self.storage_agent = PostgresStorageAgent(
-                    dsn=settings.postgres_dsn,
-                    table_name=settings.postgres_file_log_table,
-                    logger=logger,
-                )
-            except Exception:  # pragma: no cover - depends on DB connectivity
-                logger.exception("Failed to initialise PostgresStorageAgent.")
-                self.storage_agent = None
+        # Local storage for log artefacts
+        self.storage_agent = LocalStorageAgent(settings.run_log_dir, logger=logger)
 
-        # Use a unique log filename per run using current UTC timestamp
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
-        self.log_filename = f"polling_trigger_{timestamp}.log"
+        # Use a unique log directory per run using current UTC timestamp
+        self.run_id = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+        self.run_directory = self.storage_agent.create_run_directory(self.run_id)
+        self.log_file_path = self.run_directory / "polling_trigger.log"
+        self.log_filename = str(self.log_file_path)
 
         # Configure logger to write to the unique per-run file
         file_handler = logging.FileHandler(
-            self.log_filename, mode="w", encoding="utf-8"
+            self.log_file_path, mode="w", encoding="utf-8"
         )
         formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
         file_handler.setFormatter(formatter)
@@ -156,17 +148,15 @@ class MasterWorkflowAgent:
         # TODO: Replace with real CRM agent logic
         logger.info(f"Sending event {event.get('id')} to CRM with info: {info}")
 
-    def persist_log_to_database(self) -> None:
-        if self.storage_agent:
-            success = self.storage_agent.upload_file(self.log_filename)
-            if success:
-                logger.info(
-                    "Log file stored in PostgreSQL: %s",
-                    self.log_filename,
-                )
-            else:
-                logger.warning("Log file storage in PostgreSQL failed.")
-        else:
-            logger.warning(
-                "PostgreSQL storage not configured. Skipping log persistence."
-            )
+    def finalize_run_logs(self) -> None:
+        """Persist metadata about the generated log file to local storage."""
+
+        log_size = 0
+        if self.log_file_path.exists():
+            log_size = self.log_file_path.stat().st_size
+
+        self.storage_agent.record_run(
+            self.run_id,
+            self.log_file_path,
+            metadata={"log_size_bytes": log_size},
+        )

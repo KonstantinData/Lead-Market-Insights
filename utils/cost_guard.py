@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Deque, Dict, List, Mapping, MutableMapping, Optional
 
 from agents.alert_agent import AlertAgent, AlertSeverity
@@ -14,7 +14,7 @@ from utils import observability
 
 
 def _utc_now() -> datetime:
-    return datetime.now(UTC)
+    return datetime.now(timezone.utc)
 
 
 class BudgetExceededError(RuntimeError):

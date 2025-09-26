@@ -17,7 +17,7 @@ to poll events.
 | `GOOGLE_TOKEN_URI` | Token endpoint URL; defaults to Google's standard OAuth token URI when not provided. | _optional_ |
 | `GOOGLE_CALENDAR_ID` | Calendar identifier to poll (e.g., `primary` or an email address). | `info@condata.io` |
 | `TRIGGER_WORDS` | Comma-separated list of trigger words that override the default list and the contents of `trigger_words.txt`. | _optional_ |
-| `LOG_STORAGE_DIR` | Root directory for storing workflow run artefacts. | `<repo>/logs/run_history` |
+| `LOG_STORAGE_DIR` | Root directory for storing workflow run artefacts. | `<repo>/log_storage/run_history` |
 | `EVENT_LOG_DIR` | Override for event log storage (defaults to a subdirectory of `LOG_STORAGE_DIR`). | `<LOG_STORAGE_DIR>/events` |
 | `WORKFLOW_LOG_DIR` | Override for workflow log storage. | `<LOG_STORAGE_DIR>/workflows` |
 | `RUN_LOG_DIR` | Override for per-run log files. | `<LOG_STORAGE_DIR>/runs` |

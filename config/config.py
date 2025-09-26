@@ -75,7 +75,7 @@ class Settings:
         self.cal_lookback_days: int = _get_int_env("CAL_LOOKBACK_DAYS", 1)
 
         project_root = Path(__file__).resolve().parents[1]
-        default_log_root = project_root / "logs" / "run_history"
+        default_log_root = project_root / "log_storage" / "run_history"
 
         self.log_storage_dir: Path = _get_path_env("LOG_STORAGE_DIR", default_log_root)
         self.event_log_dir: Path = _get_path_env(

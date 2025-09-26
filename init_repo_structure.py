@@ -3,6 +3,7 @@ import os
 folders = [
     "agents",
     "logs",
+    "log_storage",
     "templates",
     "polling",
     "extraction",
@@ -15,6 +16,7 @@ folders = [
 placeholders = {
     "agents/.gitkeep": "",
     "logs/.gitkeep": "",
+    "log_storage/.gitkeep": "",
     "templates/.gitkeep": "",
     "tests/__init__.py": "# Test-Modul-Initialisierung\n",
     "polling/README.md": (

@@ -11,6 +11,7 @@ from typing import Dict, Optional
 
 from agents.alert_agent import AlertAgent, AlertSeverity
 from agents.master_workflow_agent import MasterWorkflowAgent
+from utils.observability import configure_observability, generate_run_id, workflow_run
 
 logger = logging.getLogger("WorkflowOrchestrator")
 
@@ -30,6 +31,9 @@ class WorkflowOrchestrator:
         self.failure_threshold = max(1, failure_threshold)
         self._failure_key = "workflow_run"
         self._failure_counts: Dict[str, int] = {}
+        self._last_run_id: Optional[str] = None
+
+        configure_observability()
 
         try:
             # Support passing through the communication backend.
@@ -48,29 +52,38 @@ class WorkflowOrchestrator:
             self._handle_exception(exc, handled=True, context={"phase": "initialisation"})
 
     def run(self):
-        logger.info("Workflow orchestrator started.")
+        run_id = generate_run_id()
+        with workflow_run(run_id=run_id) as run_context:
+            self._last_run_id = run_context.run_id
+            logger.info("Workflow orchestrator started.")
 
-        if self._init_error is not None:
-            logger.warning(
-                "Workflow orchestrator initialisation skipped due to configuration error."
-            )
-            return
+            if self._init_error is not None:
+                logger.warning(
+                    "Workflow orchestrator initialisation skipped due to configuration error."
+                )
+                run_context.mark_status("skipped")
+                return
 
-        try:
-            self.master_agent.process_all_events()
-        except Exception as exc:
-            logger.exception("Workflow failed with exception:")
-            self._handle_exception(
-                exc,
-                handled=False,
-                context={"phase": "run"},
-                track_failure=True,
-            )
-        else:
-            logger.info("Workflow completed successfully.")
-            self._reset_failure_count(self._failure_key)
-        finally:
-            self._finalize()
+            try:
+                if self.master_agent:
+                    if hasattr(self.master_agent, "initialize_run"):
+                        self.master_agent.initialize_run(run_context.run_id)
+                    self.master_agent.process_all_events()
+            except Exception as exc:
+                run_context.mark_failure(exc)
+                logger.exception("Workflow failed with exception:")
+                self._handle_exception(
+                    exc,
+                    handled=False,
+                    context={"phase": "run"},
+                    track_failure=True,
+                )
+            else:
+                run_context.mark_success()
+                logger.info("Workflow completed successfully.")
+                self._reset_failure_count(self._failure_key)
+            finally:
+                self._finalize()
 
     def _finalize(self):
         if not self.master_agent:

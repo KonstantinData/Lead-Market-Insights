@@ -69,7 +69,35 @@ Individual agents can also be instantiated and exercised directly for targeted t
 
 ## Logging and observability
 
+Every workflow execution now receives a globally unique **run ID** that is injected into logs, audit artefacts, and OpenTelemetry spans. When tailing `polling_trigger.log` files or centralised logging backends you can search for `run_id=<value>` to correlate events across agents.
+
 Dedicated log managers in [`logs/`](logs/README.md) persist event and workflow logs on the local filesystem. Generated log artefacts default to [`log_storage/run_history`](log_storage/README.md), keeping them out of the repository root. The `MasterWorkflowAgent` exposes a `finalize_run_logs` helper that the orchestrator calls after each run to record log metadata.
+
+In addition to structured logs the orchestrator emits OpenTelemetry metrics and traces:
+
+- `workflow_runs_total` – labelled by success/failure/skipped run status.
+- `workflow_trigger_matches_total` – trigger detections grouped by trigger type.
+- `workflow_hitl_outcomes_total` – HITL request outcomes (`dossier` vs. `missing_info`).
+- `workflow_operation_duration_ms` – histogram covering run-level, trigger, extraction, HITL, and CRM latencies.
+
+Traces are exported with spans for the overall run (`workflow.run`) and each sub-operation (e.g. `workflow.trigger_detection`, `workflow.crm_dispatch`). All spans carry the same `workflow.run_id` attribute, making it straightforward to correlate telemetry with filesystem logs or downstream incident tooling.
+
+### Deployment guidance
+
+Telemetry exporters default to the OTLP/gRPC protocol and honour the standard OpenTelemetry environment variables. To stream metrics and traces to a local collector:
+
+```bash
+docker run --rm -p 4317:4317 -p 4318:4318 otel/opentelemetry-collector:latest
+```
+
+Then start the orchestrator with the OTLP endpoint configured (the collector listens on `4317` by default):
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+python -m agents.workflow_orchestrator
+```
+
+For production deployments, point `OTEL_EXPORTER_OTLP_ENDPOINT` (and, if required, `OTEL_EXPORTER_OTLP_HEADERS`) at your chosen backend such as Grafana Tempo, Honeycomb, Datadog, or a Prometheus Pushgateway that fronts an OTLP collector. The instrumentation uses a batch span processor and periodic metric reader by default, so no additional configuration is required unless you need to adjust export intervals.
 
 ## Data handling and compliance
 

@@ -7,6 +7,7 @@ __all__ = [
     "human_in_loop_agent",
     "workflow_orchestrator",
     "email_agent",
+    "alert_agent",
     "extraction_agent",
     "local_storage_agent",
     "crm_agent",

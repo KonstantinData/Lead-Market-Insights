@@ -20,6 +20,7 @@ class LocalStorageAgent:
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.logger = logger or logging.getLogger(self.__class__.__name__)
         self._index_file = self.base_dir / "index.json"
+        self._failure_state_file = self.base_dir / "failure_state.json"
 
     def create_run_directory(self, run_id: str) -> Path:
         """Create (or return) the directory for a given run."""
@@ -73,3 +74,44 @@ class LocalStorageAgent:
             json.dump(existing, handle, ensure_ascii=False, indent=2)
 
         self.logger.info("Recorded run %s in index with log %s", run_id, log_reference)
+
+    # ------------------------------------------------------------------
+    # Failure tracking helpers
+    # ------------------------------------------------------------------
+    def increment_failure_count(self, key: str) -> int:
+        """Increment and persist the failure counter for *key*."""
+
+        state = self._load_failure_state()
+        new_value = int(state.get(key, 0)) + 1
+        state[key] = new_value
+        self._write_failure_state(state)
+        return new_value
+
+    def reset_failure_count(self, key: str) -> None:
+        """Reset the stored failure counter for *key*."""
+
+        state = self._load_failure_state()
+        if key in state:
+            del state[key]
+            self._write_failure_state(state)
+
+    def _load_failure_state(self) -> Dict[str, int]:
+        if not self._failure_state_file.exists():
+            return {}
+
+        try:
+            raw = json.loads(self._failure_state_file.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            self.logger.warning(
+                "Failure state file %s was invalid JSON. Resetting state.",
+                self._failure_state_file,
+            )
+            return {}
+
+        return {k: int(v) for k, v in raw.items()}
+
+    def _write_failure_state(self, state: Dict[str, int]) -> None:
+        self._failure_state_file.write_text(
+            json.dumps(state, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )

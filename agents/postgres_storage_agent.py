@@ -96,4 +96,3 @@ class PostgresStorageAgent:
                     "Failed to store '%s' in PostgreSQL: %s", target_name, error
                 )
             return False
-

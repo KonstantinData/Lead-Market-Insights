@@ -10,4 +10,3 @@ __all__ = [
     "extraction_agent",
     "postgres_storage_agent",
 ]
-

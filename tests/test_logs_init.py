@@ -66,4 +66,3 @@ def test_get_event_log_manager_prefers_argument(monkeypatch):
 
     assert manager.dsn == "postgresql://explicit/db"
     assert manager.table_name == "explicit_table"
-

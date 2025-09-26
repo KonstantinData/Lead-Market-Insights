@@ -8,6 +8,7 @@ integrations.
 | File | Description |
 |------|-------------|
 | [`duplicate_checker.py`](duplicate_checker.py) | Provides a simple `DuplicateChecker` class for determining whether an event ID has already been processed while remaining open to richer deduplication strategies. |
+| [`pii.py`](pii.py) | Centralises masking helpers that redact personal information (emails, phone numbers, names) before data is logged or surfaced to human reviewers. |
 | [`text_normalization.py`](text_normalization.py) | Offers Unicode-aware normalisation utilities that strip diacritics, collapse whitespace, and perform case folding with memoisation. |
 | [`trigger_loader.py`](trigger_loader.py) | Loads trigger words from environment variables and fallback files, normalises them, and removes duplicates before they reach the trigger detection agent. |
 

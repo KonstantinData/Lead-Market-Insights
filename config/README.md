@@ -21,6 +21,10 @@ to poll events.
 | `EVENT_LOG_DIR` | Override for event log storage (defaults to a subdirectory of `LOG_STORAGE_DIR`). | `<LOG_STORAGE_DIR>/events` |
 | `WORKFLOW_LOG_DIR` | Override for workflow log storage. | `<LOG_STORAGE_DIR>/workflows` |
 | `RUN_LOG_DIR` | Override for per-run log files. | `<LOG_STORAGE_DIR>/runs` |
+| `COMPLIANCE_MODE` | Controls default masking rules; accepts `standard` or `strict`. | `standard` |
+| `MASK_PII_IN_LOGS` | Explicit toggle to mask personal data in logs regardless of compliance mode. | `true` |
+| `MASK_PII_IN_MESSAGES` | Explicit toggle to mask personal data in HITL messages. | `false` (`true` when `COMPLIANCE_MODE=strict`) |
+| `PII_FIELD_WHITELIST` | Comma-separated list of additional business fields that should never be redacted. | see `config.config` defaults |
 | `LLM_CONFIDENCE_THRESHOLD_TRIGGER` | Minimum trigger-detection confidence required to treat an LLM response as authoritative. | `0.6` |
 | `LLM_CONFIDENCE_THRESHOLD_EXTRACTION` | Minimum extraction confidence before using the structured payload. | `0.55` |
 | `LLM_COST_CAP_DAILY` | Daily spend limit (USD) for LLM usage across all agents. | `25.0` |
@@ -67,6 +71,14 @@ llm:
 When watchdog is available, the application monitors the `.env` file and the optional YAML/JSON
 configuration for changes. Updates are applied live to the running `MasterWorkflowAgent` and any
 other consumer of `settings`, avoiding the need to restart long-lived processes.
+
+### Compliance modes and masking
+
+PII masking is enabled by default for log files and can be tightened for human-facing messages when
+regulatory requirements demand it. Use the environment variables above to switch the deployment into
+`strict` mode or to add business-specific fields (for example, `account_manager`) to the whitelist.
+The [`utils/pii.py`](../utils/pii.py) module centralises the masking logic so all agents share the
+same redaction rules.
 
 ## Usage
 

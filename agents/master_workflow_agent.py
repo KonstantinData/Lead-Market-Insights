@@ -33,6 +33,7 @@ from agents.local_storage_agent import LocalStorageAgent
 from config.config import settings
 from config.watcher import LlmConfigurationWatcher
 from utils.trigger_loader import load_trigger_words
+from utils.pii import mask_pii
 from utils.audit_log import AuditLog
 
 logger = logging.getLogger("MasterWorkflowAgent")
@@ -135,7 +136,8 @@ class MasterWorkflowAgent:
         logger.info("MasterWorkflowAgent: Processing events...")
 
         for event in self.event_agent.poll():
-            logger.info(f"Polled event: {event}")
+            masked_event = self._mask_for_logging(event)
+            logger.info("Polled event: %s", masked_event)
             event_id = event.get("id")
 
             # Step 1: Trigger detection (check both summary and description, hard/soft)
@@ -152,9 +154,13 @@ class MasterWorkflowAgent:
                 logger.info(f"No trigger detected for event {event_id}")
                 continue
 
+            masked_trigger = self._mask_for_logging(trigger_result)
             logger.info(
-                f"{trigger_result['type'].capitalize()} trigger detected in event {event_id} "
-                f"(matched: {trigger_result['matched_word']} in {trigger_result['matched_field']})"
+                "%s trigger detected in event %s (matched: %s in %s)",
+                masked_trigger.get("type", "").capitalize(),
+                event_id,
+                masked_trigger.get("matched_word"),
+                masked_trigger.get("matched_field"),
             )
 
             # Step 2: Extraction of required info (company_name, web_domain)
@@ -182,7 +188,7 @@ class MasterWorkflowAgent:
                         "Organizer approved dossier for event %s [audit_id=%s]: %s",
                         event_id,
                         audit_id or "n/a",
-                        response.get("details"),
+                        self._mask_for_logging(response.get("details")),
                     )
                     self._send_to_crm_agent(event, info)
                 else:
@@ -190,7 +196,7 @@ class MasterWorkflowAgent:
                         "Organizer declined dossier for event %s [audit_id=%s]: %s",
                         event_id,
                         audit_id or "n/a",
-                        response.get("details"),
+                        self._mask_for_logging(response.get("details")),
                     )
             elif trigger_result["type"] == "hard" and not is_complete:
                 # Human-in-the-loop: Ask for missing company_name/web_domain
@@ -218,7 +224,7 @@ class MasterWorkflowAgent:
                         "Organizer approved dossier for event %s [audit_id=%s]: %s",
                         event_id,
                         audit_id or "n/a",
-                        response.get("details"),
+                        self._mask_for_logging(response.get("details")),
                     )
                     filled = self.human_agent.request_info(event, extracted)
                     fill_audit_id = filled.get("audit_id")
@@ -240,7 +246,7 @@ class MasterWorkflowAgent:
                         "Organizer declined dossier for event %s [audit_id=%s]: %s",
                         event_id,
                         audit_id or "n/a",
-                        response.get("details"),
+                        self._mask_for_logging(response.get("details")),
                     )
             else:
                 logger.warning(f"Unhandled trigger/info state for event {event_id}")
@@ -315,3 +321,12 @@ class MasterWorkflowAgent:
                 key,
             )
             return True
+
+    def _mask_for_logging(self, payload: Any) -> Any:
+        if not getattr(settings, "mask_pii_in_logs", False):
+            return payload
+        return mask_pii(
+            payload,
+            whitelist=getattr(settings, "pii_field_whitelist", None),
+            mode=getattr(settings, "compliance_mode", "standard"),
+        )

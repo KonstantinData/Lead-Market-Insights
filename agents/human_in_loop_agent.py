@@ -4,7 +4,9 @@ from typing import Any, Dict, Optional
 
 from agents.factory import register_agent
 from agents.interfaces import BaseHumanAgent
+from config.config import settings
 from utils.audit_log import AuditLog
+from utils.pii import mask_pii
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +59,8 @@ class HumanInLoopAgent(BaseHumanAgent):
             The extracted dictionary with all info fields completed.
         """
         contact = self._extract_organizer_contact(event)
+        masked_event = self._mask_for_message(event)
+        masked_initial_info = self._mask_for_message(extracted.get("info", {}))
         requested_fields = [
             key
             for key, value in extracted.get("info", {}).items()
@@ -65,16 +69,22 @@ class HumanInLoopAgent(BaseHumanAgent):
         audit_id: Optional[str] = None
         if self.audit_log:
             audit_id = self.audit_log.record(
-                event_id=event.get("id"),
+                event_id=masked_event.get("id"),
                 request_type="missing_info",
                 stage="request",
-                responder=self._format_contact_label(contact),
+                responder=self._format_contact_label(self._mask_for_message(contact)),
                 outcome="pending",
-                payload={"requested_fields": requested_fields},
+                payload={
+                    "requested_fields": requested_fields,
+                    "event": masked_event,
+                    "info": masked_initial_info,
+                },
             )
 
         print(
-            f"Please provide missing info for event {event.get('id', '<unknown>')}: {extracted['info']}"
+            "Please provide missing info for event {}: {}".format(
+                masked_event.get("id", "<unknown>"), masked_initial_info
+            )
         )
         # Notes: Simulate human response for demo purposes.
         extracted["info"]["company_name"] = (
@@ -86,13 +96,14 @@ class HumanInLoopAgent(BaseHumanAgent):
         extracted["is_complete"] = True
 
         if self.audit_log:
+            masked_completed_info = self._mask_for_message(extracted.get("info", {}))
             response_payload = {
-                "info": extracted.get("info", {}),
+                "info": masked_completed_info,
                 "is_complete": extracted.get("is_complete"),
             }
             outcome = "completed" if extracted.get("is_complete") else "incomplete"
             audit_id = self.audit_log.record(
-                event_id=event.get("id"),
+                event_id=masked_event.get("id"),
                 request_type="missing_info",
                 stage="response",
                 responder="simulation",
@@ -132,18 +143,21 @@ class HumanInLoopAgent(BaseHumanAgent):
             }
         """
         contact = self._extract_organizer_contact(event)
-        subject = self._build_subject(event)
-        message = self._build_message(event, info)
-        payload = {"event": event, "info": info}
+        masked_event = self._mask_for_message(event)
+        masked_info = self._mask_for_message(info)
+        subject = self._build_subject(masked_event)
+        message = self._build_message(masked_event, masked_info)
+        payload = {"event": masked_event, "info": masked_info}
 
         backend_response: Optional[Any] = None
         handler = self._resolve_backend_handler()
         responder_label = self._backend_label(handler)
-        contact_label = self._format_contact_label(contact)
+        masked_contact = self._mask_for_message(contact)
+        contact_label = self._format_contact_label(masked_contact)
         audit_id: Optional[str] = None
         if self.audit_log:
             audit_id = self.audit_log.record(
-                event_id=event.get("id"),
+                event_id=masked_event.get("id"),
                 request_type="dossier_confirmation",
                 stage="request",
                 responder=contact_label,
@@ -151,7 +165,7 @@ class HumanInLoopAgent(BaseHumanAgent):
                 payload={
                     "subject": subject,
                     "message": message,
-                    "contact": contact,
+                    "contact": masked_contact,
                 },
             )
         if handler:
@@ -175,7 +189,7 @@ class HumanInLoopAgent(BaseHumanAgent):
         details = normalized.get("details", {})
         if not isinstance(details, dict):
             details = {"raw_response": details}
-        details.setdefault("contact", contact)
+        details.setdefault("contact", masked_contact)
         details.setdefault("subject", subject)
         details.setdefault("message", message)
         normalized["details"] = details
@@ -187,7 +201,7 @@ class HumanInLoopAgent(BaseHumanAgent):
                 "response": backend_response,
             }
             audit_id = self.audit_log.record(
-                event_id=event.get("id"),
+                event_id=masked_event.get("id"),
                 request_type="dossier_confirmation",
                 stage="response",
                 responder=responder_label,
@@ -302,7 +316,8 @@ class HumanInLoopAgent(BaseHumanAgent):
         Simulates dossier confirmation (used for tests or when no backend is available).
         """
         logger.info(
-            "Simulating dossier confirmation for organiser %s", contact.get("email")
+            "Simulating dossier confirmation for organiser %s",
+            self._mask_for_message(contact).get("email"),
         )
         return {
             "dossier_required": True,
@@ -341,3 +356,12 @@ class HumanInLoopAgent(BaseHumanAgent):
             "dossier_required": bool(response),
             "details": {"raw_response": response},
         }
+
+    def _mask_for_message(self, payload: Any) -> Any:
+        if not getattr(settings, "mask_pii_in_messages", False):
+            return payload
+        return mask_pii(
+            payload,
+            whitelist=getattr(settings, "pii_field_whitelist", None),
+            mode=getattr(settings, "compliance_mode", "standard"),
+        )

@@ -33,6 +33,7 @@ from agents.local_storage_agent import LocalStorageAgent
 from config.config import settings
 from config.watcher import LlmConfigurationWatcher
 from utils.trigger_loader import load_trigger_words
+from utils.audit_log import AuditLog
 
 logger = logging.getLogger("MasterWorkflowAgent")
 
@@ -91,6 +92,12 @@ class MasterWorkflowAgent:
         self.run_directory = self.storage_agent.create_run_directory(self.run_id)
         self.log_file_path = self.run_directory / "polling_trigger.log"
         self.log_filename = str(self.log_file_path)
+
+        # Structured audit trail for HITL interactions
+        audit_log_path = self.storage_agent.get_audit_log_path(self.run_id)
+        self.audit_log = AuditLog(audit_log_path, logger=logger)
+        if hasattr(self.human_agent, "set_audit_log"):
+            self.human_agent.set_audit_log(self.audit_log)
 
         # Configure logger to write to the unique per-run file
         file_handler = logging.FileHandler(
@@ -159,46 +166,70 @@ class MasterWorkflowAgent:
             elif trigger_result["type"] == "soft" and is_complete:
                 # Human-in-the-loop: Ask organizer if dossier is needed
                 response = self.human_agent.request_dossier_confirmation(event, info)
+                audit_id = response.get("audit_id")
                 if response.get("dossier_required"):
                     logger.info(
-                        "Organizer approved dossier for event %s: %s",
+                        "Organizer approved dossier for event %s [audit_id=%s]: %s",
                         event_id,
+                        audit_id or "n/a",
                         response.get("details"),
                     )
                     self._send_to_crm_agent(event, info)
                 else:
                     logger.info(
-                        "Organizer declined dossier for event %s: %s",
+                        "Organizer declined dossier for event %s [audit_id=%s]: %s",
                         event_id,
+                        audit_id or "n/a",
                         response.get("details"),
                     )
             elif trigger_result["type"] == "hard" and not is_complete:
                 # Human-in-the-loop: Ask for missing company_name/web_domain
                 filled = self.human_agent.request_info(event, extracted)
+                audit_id = filled.get("audit_id")
                 if filled.get("is_complete"):
+                    logger.info(
+                        "Missing info provided for event %s [audit_id=%s]",
+                        event_id,
+                        audit_id or "n/a",
+                    )
                     self._send_to_crm_agent(event, filled.get("info", {}))
                 else:
-                    logger.warning(f"Required info still missing for event {event_id}.")
+                    logger.warning(
+                        "Required info still missing for event %s [audit_id=%s]",
+                        event_id,
+                        audit_id or "n/a",
+                    )
             elif trigger_result["type"] == "soft" and not is_complete:
                 # Human-in-the-loop: First ask organizer, then ask for missing info if needed
                 response = self.human_agent.request_dossier_confirmation(event, info)
+                audit_id = response.get("audit_id")
                 if response.get("dossier_required"):
                     logger.info(
-                        "Organizer approved dossier for event %s: %s",
+                        "Organizer approved dossier for event %s [audit_id=%s]: %s",
                         event_id,
+                        audit_id or "n/a",
                         response.get("details"),
                     )
                     filled = self.human_agent.request_info(event, extracted)
+                    fill_audit_id = filled.get("audit_id")
                     if filled.get("is_complete"):
+                        logger.info(
+                            "Missing info provided for event %s [audit_id=%s]",
+                            event_id,
+                            fill_audit_id or "n/a",
+                        )
                         self._send_to_crm_agent(event, filled.get("info", {}))
                     else:
                         logger.warning(
-                            f"Required info still missing after HITL for event {event_id}."
+                            "Required info still missing after HITL for event %s [audit_id=%s]",
+                            event_id,
+                            fill_audit_id or "n/a",
                         )
                 else:
                     logger.info(
-                        "Organizer declined dossier for event %s: %s",
+                        "Organizer declined dossier for event %s [audit_id=%s]: %s",
                         event_id,
+                        audit_id or "n/a",
                         response.get("details"),
                     )
             else:
@@ -218,10 +249,24 @@ class MasterWorkflowAgent:
         if self.log_file_path.exists():
             log_size = self.log_file_path.stat().st_size
 
+        audit_path = self.storage_agent.get_audit_log_path(self.run_id)
+        audit_entries = []
+        if audit_path.exists():
+            try:
+                audit_entries = self.audit_log.load_entries()
+            except Exception:  # pragma: no cover - defensive guard for corrupted log
+                logger.warning("Unable to read audit log at %s during finalization", audit_path)
+
+        metadata = {
+            "log_size_bytes": log_size,
+            "audit_log_path": audit_path.as_posix(),
+            "audit_entry_count": len(audit_entries),
+        }
+
         self.storage_agent.record_run(
             self.run_id,
             self.log_file_path,
-            metadata={"log_size_bytes": log_size},
+            metadata=metadata,
         )
 
         if hasattr(self, "_config_watcher"):

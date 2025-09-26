@@ -30,6 +30,34 @@ class LocalStorageAgent:
         self.logger.debug("Initialised run directory at %s", run_dir)
         return run_dir
 
+    def get_audit_log_path(self, run_id: str) -> Path:
+        """Return the filesystem path for the run's audit log."""
+
+        run_dir = self.create_run_directory(run_id)
+        return run_dir / "audit_log.jsonl"
+
+    def load_audit_entries(self, run_id: str) -> list[Dict[str, object]]:
+        """Load audit log entries for a run as structured dictionaries."""
+
+        path = self.get_audit_log_path(run_id)
+        if not path.exists():
+            return []
+
+        entries = []
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    self.logger.warning(
+                        "Skipping invalid audit log line in %s: %s", path, line
+                    )
+
+        return entries
+
     def record_run(
         self,
         run_id: str,

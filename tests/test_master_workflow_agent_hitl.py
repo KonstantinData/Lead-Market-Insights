@@ -1,6 +1,7 @@
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Optional
 
 from agents.master_workflow_agent import MasterWorkflowAgent
+from config.config import settings
 
 
 class DummyBackend:
@@ -113,3 +114,109 @@ def test_soft_trigger_dossier_request_declined() -> None:
     assert agent._send_calls == []
     assert len(backend.requests) == 1
     assert backend.requests[0]["info"]["company_name"] == "Example Corp"
+
+
+def test_audit_log_records_dossier_acceptance(tmp_path) -> None:
+    backend = DummyBackend(
+        {"dossier_required": True, "details": {"note": "Yes, please prepare it."}}
+    )
+    original_run_dir = settings.run_log_dir
+    temp_run_dir = tmp_path / "runs"
+    temp_run_dir.mkdir()
+    agent: Optional[MasterWorkflowAgent] = None
+    try:
+        settings.run_log_dir = temp_run_dir
+        agent = _prepare_agent(backend)
+
+        agent.process_all_events()
+
+        entries = agent.audit_log.load_entries()
+        assert len(entries) == 2
+        assert {entry["stage"] for entry in entries} == {"request", "response"}
+        assert len({entry["audit_id"] for entry in entries}) == 1
+        response_entry = next(entry for entry in entries if entry["stage"] == "response")
+        assert response_entry["outcome"] == "approved"
+        assert response_entry["request_type"] == "dossier_confirmation"
+        assert response_entry["responder"] == "DummyBackend"
+    finally:
+        if agent is not None:
+            agent.finalize_run_logs()
+        settings.run_log_dir = original_run_dir
+
+
+def test_audit_log_records_dossier_decline(tmp_path) -> None:
+    backend = DummyBackend(
+        {"dossier_required": False, "details": {"note": "No dossier required."}}
+    )
+    original_run_dir = settings.run_log_dir
+    temp_run_dir = tmp_path / "runs"
+    temp_run_dir.mkdir()
+    agent: Optional[MasterWorkflowAgent] = None
+    try:
+        settings.run_log_dir = temp_run_dir
+        agent = _prepare_agent(backend)
+
+        agent.process_all_events()
+
+        entries = agent.audit_log.load_entries()
+        assert len(entries) == 2
+        assert {entry["stage"] for entry in entries} == {"request", "response"}
+        response_entry = next(entry for entry in entries if entry["stage"] == "response")
+        assert response_entry["outcome"] == "declined"
+    finally:
+        if agent is not None:
+            agent.finalize_run_logs()
+        settings.run_log_dir = original_run_dir
+
+
+def test_audit_log_records_missing_info_flow(tmp_path) -> None:
+    original_run_dir = settings.run_log_dir
+    temp_run_dir = tmp_path / "runs"
+    temp_run_dir.mkdir()
+    agent: Optional[MasterWorkflowAgent] = None
+    try:
+        settings.run_log_dir = temp_run_dir
+        event = {
+            "id": "event-hard-1",
+            "summary": "Hard trigger missing info",
+            "organizer": {
+                "email": "organizer@example.com",
+                "displayName": "Org",
+            },
+        }
+        extracted = {
+            "info": {"company_name": None, "web_domain": ""},
+            "is_complete": False,
+        }
+        agent = MasterWorkflowAgent(
+            communication_backend=None,
+            event_agent=DummyEventAgent([event]),
+            trigger_agent=DummyTriggerAgent(
+                {
+                    "trigger": True,
+                    "type": "hard",
+                    "matched_word": "briefing",
+                    "matched_field": "summary",
+                }
+            ),
+            extraction_agent=DummyExtractionAgent(extracted),
+        )
+        agent._send_calls = []  # type: ignore[attr-defined]
+
+        def _capture_send(to_event: Dict[str, Any], event_info: Dict[str, Any]) -> None:
+            agent._send_calls.append({"event": to_event, "info": event_info})
+
+        agent._send_to_crm_agent = _capture_send  # type: ignore[assignment]
+
+        agent.process_all_events()
+
+        entries = agent.audit_log.load_entries()
+        assert len(entries) == 2
+        assert {entry["request_type"] for entry in entries} == {"missing_info"}
+        response_entry = next(entry for entry in entries if entry["stage"] == "response")
+        assert response_entry["outcome"] == "completed"
+        assert response_entry["responder"] == "simulation"
+    finally:
+        if agent is not None:
+            agent.finalize_run_logs()
+        settings.run_log_dir = original_run_dir

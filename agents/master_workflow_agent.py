@@ -19,6 +19,7 @@ from config.config import settings
 from utils.trigger_loader import load_trigger_words
 
 from pathlib import Path
+import datetime
 
 logger = logging.getLogger("MasterWorkflowAgent")
 
@@ -62,7 +63,17 @@ class MasterWorkflowAgent:
                 bucket_name=settings.s3_bucket,
                 logger=logger,
             )
-        self.log_filename = "polling_trigger.log"
+        # Use a unique log filename per run using current UTC timestamp
+        timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%SZ")
+        self.log_filename = f"polling_trigger_{timestamp}.log"
+
+        # ADD THIS: configure logger to write to the unique per-run file
+        file_handler = logging.FileHandler(
+            self.log_filename, mode="w", encoding="utf-8"
+        )
+        formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
 
     def process_all_events(self) -> None:
         """

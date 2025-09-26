@@ -2,8 +2,7 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
 
-# Notes: Agent responsible for handling uploads
-# (and optionally downloads) to AWS S3.
+# Notes: Agent responsible for handling uploads (and optionally downloads) to AWS S3.
 class S3StorageAgent:
     def __init__(
         self,
@@ -33,8 +32,7 @@ class S3StorageAgent:
     def upload_file(self, local_path, s3_key):
         """
         Notes:
-        - Uploads a local file to the configured S3 bucket under
-        the given key (path in the bucket).
+        - Uploads a local file to the configured S3 bucket under the given key (path in the bucket).
         - Logs success or error if a logger is provided.
         - Returns True on success, False on failure.
         """

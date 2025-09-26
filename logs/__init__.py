@@ -1,4 +1,4 @@
-"""Utility helpers for initializing log managers."""
+"""Utility helpers for initializing log managers backed by PostgreSQL."""
 
 from typing import Optional
 
@@ -16,27 +16,35 @@ if load_dotenv is not None:
     load_dotenv()
 
 
-def get_event_log_manager(bucket_name: Optional[str] = None) -> EventLogManager:
-    """Return an :class:`EventLogManager` configured for the S3 bucket.
+def get_event_log_manager(
+    dsn: Optional[str] = None,
+    *,
+    table_name: Optional[str] = None,
+) -> EventLogManager:
+    """Return an :class:`EventLogManager` configured for PostgreSQL storage.
 
     Parameters
     ----------
-    bucket_name:
-        Optional explicit bucket name. When omitted, the value is read from the
-        ``S3_BUCKET_NAME`` environment variable. The repository uses
-        ``python-dotenv`` to allow configuring this variable via a ``.env`` file.
+    dsn:
+        Optional explicit PostgreSQL DSN. When omitted, the value is read from
+        the ``POSTGRES_DSN`` (or ``DATABASE_URL``) environment variable.
+    table_name:
+        Optional table override. Defaults to the value configured via the
+        ``POSTGRES_EVENT_LOG_TABLE`` environment variable or ``event_logs``.
 
     Raises
     ------
     EnvironmentError
-        If no bucket name can be determined.
+        If no DSN can be determined.
     """
 
-    target_bucket = bucket_name or settings.s3_bucket
-    if not target_bucket:
+    target_dsn = dsn or settings.postgres_dsn
+    if not target_dsn:
         raise EnvironmentError(
-            "S3 bucket name missing. Provide 'bucket_name' or set the "
-            "S3_BUCKET_NAME (or legacy S3_BUCKET) environment variable."
+            "PostgreSQL DSN missing. Provide 'dsn' or set the POSTGRES_DSN "
+            "(or DATABASE_URL) environment variable."
         )
 
-    return EventLogManager(target_bucket)
+    target_table = table_name or settings.postgres_event_log_table
+    return EventLogManager(target_dsn, table_name=target_table)
+

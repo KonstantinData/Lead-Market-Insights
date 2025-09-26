@@ -6,10 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 REQUIRED_SECRETS = [
-    "AWS_ACCESS_KEY_ID",
-    "AWS_SECRET_ACCESS_KEY",
-    "AWS_DEFAULT_REGION",
-    "S3_BUCKET_NAME",
+    "POSTGRES_DSN",
     "GOOGLE_CLIENT_ID",
     "GOOGLE_CLIENT_SECRET",
     "GOOGLE_PROJECT_ID",
@@ -40,8 +37,17 @@ REQUIRED_VARIABLES = [
 ]
 
 # Optional, falls du Hubspot und weitere Dienste nutzt:
-OPTIONAL_SECRETS = ["HUBSPOT_ACCESS_TOKEN", "HUBSPOT_CLIENT_SECRET"]
-OPTIONAL_VARIABLES = ["HUBSPOT_SCOPES"]
+OPTIONAL_SECRETS = [
+    "HUBSPOT_ACCESS_TOKEN",
+    "HUBSPOT_CLIENT_SECRET",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+]
+OPTIONAL_VARIABLES = [
+    "HUBSPOT_SCOPES",
+    "AWS_DEFAULT_REGION",
+    "S3_BUCKET_NAME",
+]
 
 
 def check_env_vars(var_names, section="ENV"):
@@ -75,3 +81,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

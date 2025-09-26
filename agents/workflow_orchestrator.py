@@ -1,7 +1,7 @@
 """
 WorkflowOrchestrator: Central orchestrator for the Agentic Intelligence Research workflow.
 
-- Controls the full workflow (polling, trigger detection, extraction, HITL, CRM, S3 upload).
+- Controls the full workflow (polling, trigger detection, extraction, HITL, CRM, persistence).
 - Handles logging, error handling, status, and retries.
 - Calls the MasterWorkflowAgent and sub-agents as pure logic modules.
 """
@@ -49,13 +49,14 @@ class WorkflowOrchestrator:
             self._finalize()
 
     def _finalize(self):
-        # Optional: Upload log file to S3, etc.
+        # Optional: persist log artefacts to PostgreSQL.
         if not self.master_agent:
             return
 
         try:
-            self.master_agent.upload_log_to_s3()
+            self.master_agent.persist_log_to_database()
         except Exception:
-            logger.error("Failed to upload log file to S3", exc_info=True)
+            logger.error("Failed to persist log file to PostgreSQL", exc_info=True)
 
         logger.info("Orchestration finalized.")
+

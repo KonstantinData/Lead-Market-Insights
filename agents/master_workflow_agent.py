@@ -8,18 +8,17 @@ MasterWorkflowAgent: Pure logic agent for polling and event-processing.
 """
 
 import logging
-from typing import Dict, Any, Optional
+from pathlib import Path
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
 
 from agents.event_polling_agent import EventPollingAgent
 from agents.trigger_detection_agent import TriggerDetectionAgent
 from agents.extraction_agent import ExtractionAgent
 from agents.human_in_loop_agent import HumanInLoopAgent
-from agents.s3_storage_agent import S3StorageAgent
+from agents.postgres_storage_agent import PostgresStorageAgent
 from config.config import settings
 from utils.trigger_loader import load_trigger_words
-
-from pathlib import Path
-from datetime import datetime, timezone
 
 logger = logging.getLogger("MasterWorkflowAgent")
 
@@ -46,28 +45,24 @@ class MasterWorkflowAgent:
         self.extraction_agent = extraction_agent or ExtractionAgent()
         self.human_agent = HumanInLoopAgent(communication_backend=communication_backend)
 
-        # S3 agent setup (optional)
-        self.s3_agent = None
-        if all(
-            [
-                settings.aws_access_key_id,
-                settings.aws_secret_access_key,
-                settings.aws_default_region,
-                settings.s3_bucket,
-            ]
-        ):
-            self.s3_agent = S3StorageAgent(
-                aws_access_key_id=settings.aws_access_key_id,
-                aws_secret_access_key=settings.aws_secret_access_key,
-                region_name=settings.aws_default_region,
-                bucket_name=settings.s3_bucket,
-                logger=logger,
-            )
+        # Optional PostgreSQL-backed storage for log artefacts
+        self.storage_agent: Optional[PostgresStorageAgent] = None
+        if settings.postgres_dsn:
+            try:
+                self.storage_agent = PostgresStorageAgent(
+                    dsn=settings.postgres_dsn,
+                    table_name=settings.postgres_file_log_table,
+                    logger=logger,
+                )
+            except Exception:  # pragma: no cover - depends on DB connectivity
+                logger.exception("Failed to initialise PostgresStorageAgent.")
+                self.storage_agent = None
+
         # Use a unique log filename per run using current UTC timestamp
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
         self.log_filename = f"polling_trigger_{timestamp}.log"
 
-        # ADD THIS: configure logger to write to the unique per-run file
+        # Configure logger to write to the unique per-run file
         file_handler = logging.FileHandler(
             self.log_filename, mode="w", encoding="utf-8"
         )
@@ -161,14 +156,17 @@ class MasterWorkflowAgent:
         # TODO: Replace with real CRM agent logic
         logger.info(f"Sending event {event.get('id')} to CRM with info: {info}")
 
-    def upload_log_to_s3(self) -> None:
-        if self.s3_agent:
-            success = self.s3_agent.upload_file(
-                self.log_filename, f"logs/{self.log_filename}"
-            )
+    def persist_log_to_database(self) -> None:
+        if self.storage_agent:
+            success = self.storage_agent.upload_file(self.log_filename)
             if success:
-                logger.info(f"Log file uploaded to S3: {self.log_filename}")
+                logger.info(
+                    "Log file stored in PostgreSQL: %s",
+                    self.log_filename,
+                )
             else:
-                logger.warning("Log file upload to S3 failed.")
+                logger.warning("Log file storage in PostgreSQL failed.")
         else:
-            logger.warning("S3 agent not configured. Skipping log upload.")
+            logger.warning(
+                "PostgreSQL storage not configured. Skipping log persistence."
+            )

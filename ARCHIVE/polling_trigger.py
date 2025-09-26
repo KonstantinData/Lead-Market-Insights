@@ -13,7 +13,7 @@ from agents.event_polling_agent import EventPollingAgent
 from agents.trigger_detection_agent import TriggerDetectionAgent
 from agents.extraction_agent import ExtractionAgent
 from agents.human_in_loop_agent import HumanInLoopAgent
-from agents.s3_storage_agent import S3StorageAgent
+from agents.postgres_storage_agent import PostgresStorageAgent
 from utils.trigger_loader import load_trigger_words
 
 # Notes: Set up basic logging to both file and stdout
@@ -131,23 +131,17 @@ def main():
     extraction_agent = ExtractionAgent()
     human_agent = HumanInLoopAgent()
 
-    # Notes: S3 agent is optional, only initialized if all config values are present
-    s3_agent = None
-    if all(
-        [
-            settings.aws_access_key_id,
-            settings.aws_secret_access_key,
-            settings.aws_default_region,
-            settings.s3_bucket,
-        ]
-    ):
-        s3_agent = S3StorageAgent(
-            aws_access_key_id=settings.aws_access_key_id,
-            aws_secret_access_key=settings.aws_secret_access_key,
-            region_name=settings.aws_default_region,
-            bucket_name=settings.s3_bucket,
-            logger=logger,
-        )
+    storage_agent = None
+    if settings.postgres_dsn:
+        try:
+            storage_agent = PostgresStorageAgent(
+                dsn=settings.postgres_dsn,
+                table_name=settings.postgres_file_log_table,
+                logger=logger,
+            )
+        except Exception:
+            logger.exception("Failed to initialise PostgresStorageAgent.")
+            storage_agent = None
 
     logger.info("Polling workflow started.")
 
@@ -171,16 +165,15 @@ def main():
 
     logger.info("Polling workflow finished.")
 
-    # Notes: Upload the log file to S3 if agent is available
-    if s3_agent:
-        logger.info("Uploading log file to S3...")
-        success = s3_agent.upload_file(log_filename, f"logs/{log_filename}")
+    if storage_agent:
+        logger.info("Persisting log file to PostgreSQL...")
+        success = storage_agent.upload_file(log_filename)
         if success:
-            logger.info("Log file uploaded successfully.")
+            logger.info("Log file persisted successfully.")
         else:
-            logger.warning("Log file upload failed.")
+            logger.warning("Log file persistence failed.")
     else:
-        logger.warning("S3 agent not configured. Skipping log upload.")
+        logger.warning("PostgreSQL storage not configured. Skipping log persistence.")
 
 
 if __name__ == "__main__":
@@ -188,3 +181,4 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         logger.error(f"Polling workflow failed: {e}", exc_info=True)
+

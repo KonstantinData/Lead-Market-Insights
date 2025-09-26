@@ -1,7 +1,7 @@
 # Agents module
 
 The `agents` package contains the autonomous building blocks that power the event
-processing workflow.  Each agent focuses on a narrow responsibility so they can be reused
+processing workflow. Each agent focuses on a narrow responsibility so they can be reused
 or replaced independently when integrating the automation platform into different
 environments.
 
@@ -14,9 +14,9 @@ environments.
 | [`extraction_agent.py`](extraction_agent.py) | Extracts core metadata (company name, web domain) from events and flags whether the information set is complete, ready for richer parsing extensions. |
 | [`human_in_loop_agent.py`](human_in_loop_agent.py) | Facilitates human-in-the-loop interactions for gathering missing event data and confirming dossier creation via a pluggable communication backend or built-in simulator. |
 | [`master_workflow_agent.py`](master_workflow_agent.py) | Implements the end-to-end business logic: polls events, detects triggers, performs extraction, coordinates with humans, and forwards confirmed events downstream. |
-| [`s3_storage_agent.py`](s3_storage_agent.py) | Uploads generated files to Amazon S3 using the configured credentials. |
+| [`postgres_storage_agent.py`](postgres_storage_agent.py) | Persists generated artefacts such as workflow log files into a local PostgreSQL database for inspection. |
 | [`trigger_detection_agent.py`](trigger_detection_agent.py) | Detects hard and soft trigger phrases in event summaries and descriptions using normalised keyword matching. |
-| [`workflow_orchestrator.py`](workflow_orchestrator.py) | High-level orchestrator that initialises the `MasterWorkflowAgent`, handles error resilience, and finalises runs such as optional S3 log uploads. |
+| [`workflow_orchestrator.py`](workflow_orchestrator.py) | High-level orchestrator that initialises the `MasterWorkflowAgent`, handles error resilience, and finalises runs such as PostgreSQL log persistence. |
 
 ## Extending agents
 
@@ -29,3 +29,4 @@ environments.
 
 Refer to [`tests/test_master_workflow_agent_hitl.py`](../tests/test_master_workflow_agent_hitl.py)
 for examples of orchestrating agents within the broader workflow.
+

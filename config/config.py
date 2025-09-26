@@ -3,23 +3,43 @@ from typing import Optional, Tuple
 
 from dotenv import load_dotenv
 
+_ORIGINAL_ENV = os.environ.copy()
+_SKIP_DOTENV = os.getenv("SETTINGS_SKIP_DOTENV") == "1"
+if not _SKIP_DOTENV:
+    load_dotenv()
+
+
+def _normalise(value: Optional[str]) -> Optional[str]:
+    if value is None or value == "":
+        return None
+    return value
+
 
 def _get_env_var(name: str, *, aliases: Tuple[str, ...] = ()) -> Optional[str]:
     """Return an environment variable using the conventional uppercase name.
 
-    Parameters
-    ----------
-    name:
-        The primary environment variable name to resolve.
-    aliases:
-        Optional alternative variable names evaluated when the primary value is
-        unset. The first defined value is returned.
+    When aliases are provided, values defined in the pre-dotenv environment take
+    precedence. This ensures runtime overrides such as ``DATABASE_URL`` can win
+    even if ``.env`` supplies the primary key.
     """
 
-    for candidate in (name, *aliases):
-        value = os.getenv(candidate)
-        if value is not None:
-            return value
+    if aliases:
+        primary_original = _normalise(_ORIGINAL_ENV.get(name))
+        for alias in aliases:
+            alias_original = _normalise(_ORIGINAL_ENV.get(alias))
+            if alias_original is not None and primary_original is None:
+                alias_value = _normalise(os.getenv(alias))
+                if alias_value is not None:
+                    return alias_value
+
+    value = _normalise(os.getenv(name))
+    if value is not None:
+        return value
+
+    for alias in aliases:
+        alias_value = _normalise(os.getenv(alias))
+        if alias_value is not None:
+            return alias_value
 
     return None
 
@@ -28,7 +48,7 @@ def _get_int_env(name: str, default: int) -> int:
     """Fetch an integer environment variable with fallback to a default value."""
 
     raw_value = _get_env_var(name)
-    if raw_value is None or raw_value == "":
+    if raw_value is None:
         return default
 
     try:
@@ -41,8 +61,6 @@ class Settings:
     """Application configuration loaded from environment variables or defaults."""
 
     def __init__(self) -> None:
-        load_dotenv()
-
         self.cal_lookahead_days: int = _get_int_env("CAL_LOOKAHEAD_DAYS", 14)
         self.cal_lookback_days: int = _get_int_env("CAL_LOOKBACK_DAYS", 1)
 
@@ -53,8 +71,22 @@ class Settings:
             "S3_BUCKET_NAME", aliases=("S3_BUCKET",)
         )
 
+        self.postgres_dsn: Optional[str] = _get_env_var(
+            "POSTGRES_DSN", aliases=("DATABASE_URL",)
+        )
+        self.postgres_event_log_table: str = _get_env_var(
+            "POSTGRES_EVENT_LOG_TABLE"
+        ) or "event_logs"
+        self.postgres_workflow_log_table: str = _get_env_var(
+            "POSTGRES_WORKFLOW_LOG_TABLE"
+        ) or "workflow_logs"
+        self.postgres_file_log_table: str = _get_env_var(
+            "POSTGRES_FILE_LOG_TABLE"
+        ) or "workflow_log_files"
+
         self.trigger_words: Optional[str] = _get_env_var("TRIGGER_WORDS")
 
 
 # Notes: Singleton instance for importing settings in other modules
 settings = Settings()
+

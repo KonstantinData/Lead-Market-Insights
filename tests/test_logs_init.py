@@ -16,24 +16,30 @@ def reload_modules():
 
 
 def test_get_event_log_manager_uses_env(monkeypatch):
-    monkeypatch.setenv("S3_BUCKET_NAME", "agentic-intelligence-research-logs")
+    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
+    monkeypatch.setenv("POSTGRES_DSN", "postgresql://user:pass@localhost/db")
+    monkeypatch.setenv("POSTGRES_EVENT_LOG_TABLE", "custom_events")
 
     logs = reload_modules()
 
     class DummyManager:
-        def __init__(self, bucket):
-            self.bucket = bucket
+        def __init__(self, dsn, *, table_name="event_logs"):
+            self.dsn = dsn
+            self.table_name = table_name
 
     monkeypatch.setattr(logs, "EventLogManager", DummyManager)
 
     manager = logs.get_event_log_manager()
 
     assert isinstance(manager, DummyManager)
-    assert manager.bucket == "agentic-intelligence-research-logs"
+    assert manager.dsn == "postgresql://user:pass@localhost/db"
+    assert manager.table_name == "custom_events"
 
 
-def test_get_event_log_manager_missing_bucket(monkeypatch):
-    monkeypatch.delenv("S3_BUCKET_NAME", raising=False)
+def test_get_event_log_manager_missing_dsn(monkeypatch):
+    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
+    monkeypatch.delenv("POSTGRES_DSN", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
 
     logs = reload_modules()
 
@@ -42,16 +48,22 @@ def test_get_event_log_manager_missing_bucket(monkeypatch):
 
 
 def test_get_event_log_manager_prefers_argument(monkeypatch):
-    monkeypatch.setenv("S3_BUCKET_NAME", "from-env")
+    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
+    monkeypatch.setenv("POSTGRES_DSN", "postgresql://env/db")
 
     logs = reload_modules()
 
     class DummyManager:
-        def __init__(self, bucket):
-            self.bucket = bucket
+        def __init__(self, dsn, *, table_name="event_logs"):
+            self.dsn = dsn
+            self.table_name = table_name
 
     monkeypatch.setattr(logs, "EventLogManager", DummyManager)
 
-    manager = logs.get_event_log_manager("explicit-bucket")
+    manager = logs.get_event_log_manager(
+        "postgresql://explicit/db", table_name="explicit_table"
+    )
 
-    assert manager.bucket == "explicit-bucket"
+    assert manager.dsn == "postgresql://explicit/db"
+    assert manager.table_name == "explicit_table"
+

@@ -3,7 +3,8 @@
 The `agents` package contains the autonomous building blocks that power the event
 processing workflow. Each agent focuses on a narrow responsibility so they can be reused
 or replaced independently when integrating the automation platform into different
-environments.
+environments. For a visual overview of how these agents collaborate, refer to
+[`docs/architecture.md`](../docs/architecture.md).
 
 ## Available agents
 

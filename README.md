@@ -7,14 +7,16 @@ The repository is organised as a set of focused agents, supporting utilities, an
 ## Table of contents
 
 1. [Quick start](#quick-start)
-2. [Configuration](#configuration)
-3. [Running the orchestrator](#running-the-orchestrator)
-4. [Repository structure](#repository-structure)
-5. [Development workflow](#development-workflow)
-6. [Logging and observability](#logging-and-observability)
-7. [Data handling and compliance](#data-handling-and-compliance)
-8. [Human-in-the-loop interactions](#human-in-the-loop-interactions)
-9. [Further reading](#further-reading)
+2. [System architecture](#system-architecture)
+3. [Agent responsibilities](#agent-responsibilities)
+4. [Configuration](#configuration)
+5. [Running the orchestrator](#running-the-orchestrator)
+6. [Repository structure](#repository-structure)
+7. [Development workflow](#development-workflow)
+8. [Logging and observability](#logging-and-observability)
+9. [Data handling and compliance](#data-handling-and-compliance)
+10. [Human-in-the-loop interactions](#human-in-the-loop-interactions)
+11. [Further reading](#further-reading)
 
 ## Quick start
 
@@ -29,9 +31,58 @@ The repository is organised as a set of focused agents, supporting utilities, an
    pip install -r requirements.txt
    ```
 
+## System architecture
+
+The automation stack is composed of loosely coupled agents orchestrated by `MasterWorkflowAgent`. A high-level flowchart illustrates the journey from calendar events to CRM updates:
+
+```mermaid
+flowchart LR
+    Calendar[Google Calendar] --> Polling[Polling Agent]
+    Contacts[Google Contacts] --> Polling
+    Polling --> Trigger[Trigger Detection]
+    Trigger --> Extraction[Extraction Agent]
+    Extraction --> Research[Research Agent]
+    Extraction --> Human[Human-in-the-loop]
+    Human --> CRM[CRM Agent]
+    Extraction --> CRM
+    CRM --> Downstream[(CRM / Knowledge Base)]
+    Trigger --> LLM[LLM Strategy]
+    Extraction --> LLM
+    Human --> Alerting[Alerting Agent]
+    Alerting --> IncidentTools[(PagerDuty / Slack)]
+```
+
+See [`docs/architecture.md`](docs/architecture.md) for deeper component diagrams, deployment guidance, and extension patterns.
+
+## Agent responsibilities
+
+| Agent | Role | Notes |
+|-------|------|-------|
+| Polling | Collects candidate events and enriches them with organiser contact data. | Uses Google Workspace integrations with configurable lookback windows. |
+| Trigger detection | Scores events against hard/soft triggers and LLM heuristics. | Combines deterministic keyword matching with LLM confidence thresholds. |
+| Extraction | Builds structured dossiers from event metadata. | Outputs completeness signals used by downstream agents. |
+| LLM strategy | Provides reusable prompts, retry budgets, and guardrails for trigger/extraction agents. | Configured via environment variables and prompt templates. |
+| Research | Augments dossiers with external context (company intel, notes). | Optional enrichment step feeding back into human review. |
+| Human-in-the-loop | Coordinates manual review when information is missing or approvals are required. | Supports strict masking policies for compliance-sensitive deployments. |
+| CRM dispatch | Sends curated dossiers to CRM or ticketing systems. | Default implementation logs payloads; replace with production connector. |
+| Alerting | Escalates workflow anomalies and compliance breaches. | Integrates with Slack, PagerDuty, or email via pluggable dispatchers. |
+
+Review [`agents/README.md`](agents/README.md) for factory usage and implementation tips on creating new agent variants.
+
 ## Configuration
 
 All configuration is driven through environment variables or a `.env` file. The [`config/README.md`](config/README.md) file describes every supported setting, including Google OAuth credentials, local log storage paths, and optional trigger word overrides.
+
+| Category | Key variables | Purpose |
+|----------|---------------|---------|
+| Google Workspace | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `GOOGLE_CALENDAR_ID` | Authenticate and scope polling access. |
+| Polling windows | `CAL_LOOKAHEAD_DAYS`, `CAL_LOOKBACK_DAYS` | Control how far ahead/behind to query events. |
+| LLM guardrails | `LLM_CONFIDENCE_THRESHOLD_*`, `LLM_COST_CAP_*`, `LLM_RETRY_BUDGET_*` | Tune prompt behaviour and spending limits. |
+| Compliance | `COMPLIANCE_MODE`, `MASK_PII_IN_LOGS`, `MASK_PII_IN_MESSAGES`, `PII_FIELD_WHITELIST` | Define masking policies and audit posture. |
+| Storage | `LOG_STORAGE_DIR`, `EVENT_LOG_DIR`, `WORKFLOW_LOG_DIR`, `RUN_LOG_DIR` | Choose where structured artefacts are written. |
+| Agent overrides | `POLLING_AGENT`, `TRIGGER_AGENT`, `EXTRACTION_AGENT`, `HUMAN_AGENT`, `CRM_AGENT` | Swap default implementations via the agent factory. |
+
+The configuration reference includes additional options for rate limits, cost caps, and structured YAML overrides when using `AGENT_CONFIG_FILE`.
 
 ## Running the orchestrator
 
@@ -46,6 +97,7 @@ Individual agents can also be instantiated and exercised directly for targeted t
 ## Repository structure
 
 - **[`agents/`](agents/README.md):** Core workflow agents for polling, trigger detection, extraction, human-in-the-loop coordination, local persistence, and orchestration.
+- **[`docs/`](docs/architecture.md):** Living architecture, compliance, and CI documentation.
 - **[`integration/`](integration/README.md):** Google Calendar and Google Contacts API integrations, including OAuth token handling.
 - **[`config/`](config/README.md):** Centralised configuration loader and trigger word resources.
 - **[`logs/`](logs/README.md):** Structured event/workflow logging backed by the local filesystem.
@@ -57,7 +109,7 @@ Individual agents can also be instantiated and exercised directly for targeted t
 - **[`polling/`](polling/README.md):** Scheduling and trigger polling concepts that feed the automation workflows.
 - **[`reminders/`](reminders/README.md):** Reminder and escalation helpers built on top of the email agent.
 - **[`tests/`](tests/README.md):** Automated test suite covering core agents, integrations, and utilities.
-- **[`ARCHIVE/`](ARCHIVE/Readme.md):** Legacy experiments retained for reference.
+- **[`ARCHIVE/`](ARCHIVE/Readme.md):** Legacy experiments and retired setup scripts retained for reference.
 
 ## Development workflow
 
@@ -112,7 +164,7 @@ Key guidelines:
   - `MASK_PII_IN_LOGS` and `MASK_PII_IN_MESSAGES` provide explicit toggles when a deployment needs to override the mode defaults.
   - `PII_FIELD_WHITELIST` lets you append additional business-safe fields (comma-separated) that should never be redacted.
 
-Automated tests under [`tests/test_pii_masking.py`](tests/test_pii_masking.py) assert that masked logs never leak organiser emails and that human-facing messages honour the compliance toggles. Any new features that surface event data should include equivalent safeguards.
+Automated tests under [`tests/test_pii_masking.py`](tests/test_pii_masking.py) assert that masked logs never leak organiser emails and that human-facing messages honour the compliance toggles. Any new features that surface event data should include equivalent safeguards. For a comprehensive control checklist, consult [`docs/compliance.md`](docs/compliance.md).
 
 ## Human-in-the-loop interactions
 
@@ -120,8 +172,10 @@ Human feedback is requested through the `HumanInLoopAgent`, which can work with 
 
 ## Further reading
 
-- Detailed agent responsibilities: [`agents/README.md`](agents/README.md)
+- Detailed agent responsibilities and extension guidance: [`agents/README.md`](agents/README.md)
 - Google integrations and credential requirements: [`integration/README.md`](integration/README.md)
+- Architecture, deployment, and CI notes: [`docs/architecture.md`](docs/architecture.md)
+- Compliance guardrails and audit expectations: [`docs/compliance.md`](docs/compliance.md)
 - Testing guidance: [`tests/README.md`](tests/README.md)
 
 Contributions are welcome—please open issues or pull requests with proposed improvements or bug fixes.

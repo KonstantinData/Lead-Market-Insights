@@ -4,7 +4,7 @@ This folder contains legacy, deprecated, or superseded scripts and files that ar
 
 ## Purpose
 
-- **Preservation:** Important code and logic that may be useful for reference, audits, or future inspiration are kept here rather than being deleted.
+- **Preservation:** Important code and logic that may be useful for reference, audits, or future inspiration are kept here rather than being deleted. Recent additions include the retired bootstrap scripts moved from the repository root (`init_repo_structure.py`, `startup_check.py`) into [`scripts/`](scripts/).
 - **Clarity:** Keeps the main project directory clean, focused only on actively maintained and relevant code.
 - **Transparency:** New contributors can understand the evolution of the codebase and see which approaches or structures have been replaced.
 

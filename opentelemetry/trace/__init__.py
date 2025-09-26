@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from .._internal.context import get_current_span as _get_current_span_impl
 from .._internal.context import set_current_span as _set_current_span_impl
@@ -20,6 +20,8 @@ __all__ = [
 ]
 
 _TRACER_PROVIDER: Optional[Any] = None
+
+
 class StatusCode(Enum):
     UNSET = 0
     OK = 1

@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, List, Optional
-
-from ...resources import Resource
+from typing import List
 
 __all__ = [
     "MetricReader",

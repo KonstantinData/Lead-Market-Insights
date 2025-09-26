@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Optional
 
 from ..sdk.metrics import MeterProvider as _MeterProvider
 

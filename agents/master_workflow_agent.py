@@ -100,11 +100,21 @@ class MasterWorkflowAgent:
             self.human_agent.set_audit_log(self.audit_log)
 
         # Configure logger to write to the unique per-run file
+        for existing_handler in list(logger.handlers):
+            if isinstance(existing_handler, logging.FileHandler) and getattr(
+                existing_handler, "_master_agent_handler", False
+            ):
+                logger.removeHandler(existing_handler)
+                existing_handler.close()
+
         file_handler = logging.FileHandler(
             self.log_file_path, mode="w", encoding="utf-8"
         )
         formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
         file_handler.setFormatter(formatter)
+        file_handler.setLevel(logging.INFO)
+        setattr(file_handler, "_master_agent_handler", True)
+        logger.setLevel(logging.INFO)
         logger.addHandler(file_handler)
 
         self.llm_confidence_thresholds: Dict[str, float] = {}

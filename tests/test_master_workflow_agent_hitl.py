@@ -138,6 +138,10 @@ def test_audit_log_records_dossier_acceptance(tmp_path) -> None:
         assert response_entry["outcome"] == "approved"
         assert response_entry["request_type"] == "dossier_confirmation"
         assert response_entry["responder"] == "DummyBackend"
+
+        log_contents = agent.log_file_path.read_text(encoding="utf-8")
+        assert response_entry["audit_id"] in log_contents
+        assert "[audit_id=n/a]" not in log_contents
     finally:
         if agent is not None:
             agent.finalize_run_logs()
@@ -163,6 +167,10 @@ def test_audit_log_records_dossier_decline(tmp_path) -> None:
         assert {entry["stage"] for entry in entries} == {"request", "response"}
         response_entry = next(entry for entry in entries if entry["stage"] == "response")
         assert response_entry["outcome"] == "declined"
+
+        log_contents = agent.log_file_path.read_text(encoding="utf-8")
+        assert response_entry["audit_id"] in log_contents
+        assert "[audit_id=n/a]" not in log_contents
     finally:
         if agent is not None:
             agent.finalize_run_logs()
@@ -216,6 +224,10 @@ def test_audit_log_records_missing_info_flow(tmp_path) -> None:
         response_entry = next(entry for entry in entries if entry["stage"] == "response")
         assert response_entry["outcome"] == "completed"
         assert response_entry["responder"] == "simulation"
+
+        log_contents = agent.log_file_path.read_text(encoding="utf-8")
+        assert response_entry["audit_id"] in log_contents
+        assert "[audit_id=n/a]" not in log_contents
     finally:
         if agent is not None:
             agent.finalize_run_logs()

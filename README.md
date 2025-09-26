@@ -30,7 +30,7 @@ The repository is organised as a set of focused agents, supporting utilities, an
 
 ## Configuration
 
-All configuration is driven through environment variables or a `.env` file. The [`config/README.md`](config/README.md) file describes every supported setting, including Google OAuth credentials, PostgreSQL connection details, and optional trigger word overrides.
+All configuration is driven through environment variables or a `.env` file. The [`config/README.md`](config/README.md) file describes every supported setting, including Google OAuth credentials, local log storage paths, and optional trigger word overrides.
 
 ## Running the orchestrator
 
@@ -44,10 +44,10 @@ Individual agents can also be instantiated and exercised directly for targeted t
 
 ## Repository structure
 
-- **[`agents/`](agents/README.md):** Core workflow agents for polling, trigger detection, extraction, human-in-the-loop coordination, PostgreSQL persistence, and orchestration.
+- **[`agents/`](agents/README.md):** Core workflow agents for polling, trigger detection, extraction, human-in-the-loop coordination, local persistence, and orchestration.
 - **[`integration/`](integration/README.md):** Google Calendar and Google Contacts API integrations, including OAuth token handling.
 - **[`config/`](config/README.md):** Centralised configuration loader and trigger word resources.
-- **[`logs/`](logs/README.md):** Structured event/workflow logging backed by PostgreSQL tables.
+- **[`logs/`](logs/README.md):** Structured event/workflow logging backed by the local filesystem.
 - **[`utils/`](utils/README.md):** Cross-cutting utilities for text normalisation, trigger loading, and duplicate detection.
 - **[`templates/`](templates/README.md):** Shared communication templates (emails, notifications).
 - **[`extraction/`](extraction/README.md):** Extension point for advanced data extraction pipelines.
@@ -67,7 +67,7 @@ Individual agents can also be instantiated and exercised directly for targeted t
 
 ## Logging and observability
 
-Dedicated log managers in [`logs/`](logs/README.md) persist event and workflow logs to PostgreSQL. The `MasterWorkflowAgent` exposes a `persist_log_to_database` helper that the orchestrator calls after each run.
+Dedicated log managers in [`logs/`](logs/README.md) persist event and workflow logs on the local filesystem. The `MasterWorkflowAgent` exposes a `finalize_run_logs` helper that the orchestrator calls after each run to record log metadata.
 
 ## Human-in-the-loop interactions
 

@@ -8,5 +8,5 @@ __all__ = [
     "workflow_orchestrator",
     "email_agent",
     "extraction_agent",
-    "postgres_storage_agent",
+    "local_storage_agent",
 ]

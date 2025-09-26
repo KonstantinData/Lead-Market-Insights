@@ -1,6 +1,7 @@
 """Tests for configuration settings loading."""
 
 import importlib
+from pathlib import Path
 
 
 def reload_settings():
@@ -9,34 +10,32 @@ def reload_settings():
     return config_module.settings
 
 
-def test_postgres_dsn_prefers_primary_env(monkeypatch):
+def test_log_storage_dir_defaults(monkeypatch):
     monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
-    monkeypatch.setenv("POSTGRES_DSN", "postgresql://primary/db")
-    monkeypatch.setenv("DATABASE_URL", "postgresql://alias/db")
+    for key in [
+        "LOG_STORAGE_DIR",
+        "EVENT_LOG_DIR",
+        "WORKFLOW_LOG_DIR",
+        "RUN_LOG_DIR",
+    ]:
+        monkeypatch.delenv(key, raising=False)
 
     settings = reload_settings()
 
-    assert settings.postgres_dsn == "postgresql://primary/db"
+    expected = Path(__file__).resolve().parents[1] / "logs" / "run_history"
+    assert settings.log_storage_dir == expected
+    assert settings.event_log_dir == expected / "events"
+    assert settings.workflow_log_dir == expected / "workflows"
+    assert settings.run_log_dir == expected / "runs"
 
 
-def test_postgres_dsn_supports_alias(monkeypatch):
+def test_log_storage_dir_respects_env(monkeypatch, tmp_path):
     monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
-    monkeypatch.delenv("POSTGRES_DSN", raising=False)
-    monkeypatch.setenv("DATABASE_URL", "postgresql://alias/db")
+    target = tmp_path / "custom-root"
+    monkeypatch.setenv("LOG_STORAGE_DIR", str(target))
+    monkeypatch.setenv("EVENT_LOG_DIR", str(target / "events"))
 
     settings = reload_settings()
 
-    assert settings.postgres_dsn == "postgresql://alias/db"
-
-
-def test_postgres_table_defaults(monkeypatch):
-    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
-    monkeypatch.delenv("POSTGRES_EVENT_LOG_TABLE", raising=False)
-    monkeypatch.delenv("POSTGRES_WORKFLOW_LOG_TABLE", raising=False)
-    monkeypatch.delenv("POSTGRES_FILE_LOG_TABLE", raising=False)
-
-    settings = reload_settings()
-
-    assert settings.postgres_event_log_table == "event_logs"
-    assert settings.postgres_workflow_log_table == "workflow_logs"
-    assert settings.postgres_file_log_table == "workflow_log_files"
+    assert settings.log_storage_dir == target.resolve()
+    assert settings.event_log_dir == (target / "events").resolve()

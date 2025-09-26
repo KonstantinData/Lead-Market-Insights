@@ -14,9 +14,9 @@ environments.
 | [`extraction_agent.py`](extraction_agent.py) | Extracts core metadata (company name, web domain) from events and flags whether the information set is complete, ready for richer parsing extensions. |
 | [`human_in_loop_agent.py`](human_in_loop_agent.py) | Facilitates human-in-the-loop interactions for gathering missing event data and confirming dossier creation via a pluggable communication backend or built-in simulator. |
 | [`master_workflow_agent.py`](master_workflow_agent.py) | Implements the end-to-end business logic: polls events, detects triggers, performs extraction, coordinates with humans, and forwards confirmed events downstream. |
-| [`postgres_storage_agent.py`](postgres_storage_agent.py) | Persists generated artefacts such as workflow log files into a local PostgreSQL database for inspection. |
+| [`local_storage_agent.py`](local_storage_agent.py) | Persists generated artefacts such as workflow log files into a structured local directory tree for inspection. |
 | [`trigger_detection_agent.py`](trigger_detection_agent.py) | Detects hard and soft trigger phrases in event summaries and descriptions using normalised keyword matching. |
-| [`workflow_orchestrator.py`](workflow_orchestrator.py) | High-level orchestrator that initialises the `MasterWorkflowAgent`, handles error resilience, and finalises runs such as PostgreSQL log persistence. |
+| [`workflow_orchestrator.py`](workflow_orchestrator.py) | High-level orchestrator that initialises the `MasterWorkflowAgent`, handles error resilience, and finalises runs by recording local log metadata. |
 
 ## Extending agents
 

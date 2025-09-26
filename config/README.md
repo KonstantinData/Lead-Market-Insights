@@ -2,7 +2,7 @@
 
 The configuration package exposes a single `Settings` object that loads environment
 variables (optionally from a `.env` file via `python-dotenv`). The settings inform how the
-workflow connects to Google services, local PostgreSQL storage, and how far ahead/behind
+workflow connects to Google services, where local log artefacts are stored, and how far ahead/behind
 to poll events.
 
 ## Environment variables
@@ -17,12 +17,10 @@ to poll events.
 | `GOOGLE_TOKEN_URI` | Token endpoint URL; defaults to Google's standard OAuth token URI when not provided. | _optional_ |
 | `GOOGLE_CALENDAR_ID` | Calendar identifier to poll (e.g., `primary` or an email address). | `info@condata.io` |
 | `TRIGGER_WORDS` | Comma-separated list of trigger words that override the default list and the contents of `trigger_words.txt`. | _optional_ |
-| `POSTGRES_DSN` | Connection string for the local PostgreSQL instance (alias `DATABASE_URL`). | _optional_ |
-| `POSTGRES_EVENT_LOG_TABLE` | Table for event log entries. | `event_logs` |
-| `POSTGRES_WORKFLOW_LOG_TABLE` | Table for workflow-level log entries. | `workflow_logs` |
-| `POSTGRES_FILE_LOG_TABLE` | Table for persisted workflow artefacts such as log files. | `workflow_log_files` |
-
-Legacy AWS variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION`, `S3_BUCKET_NAME`) are still parsed for backwards compatibility but no longer used by the runtime now that log persistence is handled by PostgreSQL.
+| `LOG_STORAGE_DIR` | Root directory for storing workflow run artefacts. | `<repo>/logs/run_history` |
+| `EVENT_LOG_DIR` | Override for event log storage (defaults to a subdirectory of `LOG_STORAGE_DIR`). | `<LOG_STORAGE_DIR>/events` |
+| `WORKFLOW_LOG_DIR` | Override for workflow log storage. | `<LOG_STORAGE_DIR>/workflows` |
+| `RUN_LOG_DIR` | Override for per-run log files. | `<LOG_STORAGE_DIR>/runs` |
 
 Set `SETTINGS_SKIP_DOTENV=1` to bypass `.env` loading (useful for automated tests that inject configuration via environment variables).
 
@@ -36,9 +34,8 @@ inside the file are ignored.
 from config.config import settings
 
 lookahead = settings.cal_lookahead_days
-dsn = settings.postgres_dsn
+log_dir = settings.log_storage_dir
 ```
 
 The `settings` object is instantiated once and reused across the codebase for consistent
 configuration access.
-

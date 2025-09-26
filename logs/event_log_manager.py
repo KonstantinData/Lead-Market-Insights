@@ -1,117 +1,75 @@
+import json
 import logging
-from datetime import datetime
+import re
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, Optional
 
-import psycopg
-from psycopg import sql
-from psycopg.types.json import Json
+
+_SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
+def _sanitise(identifier: str) -> str:
+    cleaned = _SAFE_NAME.sub("_", identifier)
+    cleaned = cleaned.strip("._")
+    return cleaned or "event"
 
 
 class EventLogManager:
-    """
-    Manages event logs stored in PostgreSQL: event_logs(event_id, payload, last_updated).
-    """
+    """Manages event logs stored as JSON files on the local filesystem."""
 
     def __init__(
         self,
-        dsn: str,
+        base_path: Path,
         *,
-        table_name: str = "event_logs",
         logger: Optional[logging.Logger] = None,
     ) -> None:
-        if not dsn:
-            raise ValueError("PostgreSQL DSN is required for EventLogManager.")
-
-        self.dsn = dsn
-        self.table_name = table_name
+        self.base_path = Path(base_path)
+        self.base_path.mkdir(parents=True, exist_ok=True)
         self.logger = logger or logging.getLogger(self.__class__.__name__)
-        self._ensure_table()
 
-    def _ensure_table(self) -> None:
-        create_statement = sql.SQL(
-            """
-            CREATE TABLE IF NOT EXISTS {table} (
-                event_id TEXT PRIMARY KEY,
-                payload JSONB NOT NULL,
-                last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            """
-        ).format(table=sql.Identifier(self.table_name))
-
-        with psycopg.connect(self.dsn) as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(create_statement)
-            connection.commit()
-
-    def _log_success(self, action: str, event_id: str) -> None:
-        if self.logger:
-            self.logger.info("Event log %s: %s", action, event_id)
+    def _event_file(self, event_id: str) -> Path:
+        return self.base_path / f"{_sanitise(event_id)}.json"
 
     def write_event_log(self, event_id: str, data: Dict[str, Any]) -> None:
-        """Insert or update the event log in PostgreSQL."""
+        """Persist the event payload to disk."""
 
-        data = dict(data)  # Avoid mutating caller state
-        data["last_updated"] = datetime.utcnow().isoformat()
+        payload = dict(data)
+        payload["last_updated"] = datetime.now(timezone.utc).isoformat()
 
-        statement = sql.SQL(
-            """
-            INSERT INTO {table} (event_id, payload, last_updated)
-            VALUES (%s, %s, NOW())
-            ON CONFLICT (event_id) DO UPDATE SET
-                payload = EXCLUDED.payload,
-                last_updated = EXCLUDED.last_updated
-            """
-        ).format(table=sql.Identifier(self.table_name))
+        event_file = self._event_file(event_id)
+        with event_file.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
 
-        try:
-            with psycopg.connect(self.dsn) as connection:
-                with connection.cursor() as cursor:
-                    cursor.execute(statement, (event_id, Json(data)))
-                connection.commit()
-            self._log_success("written", event_id)
-        except psycopg.Error as error:
-            if self.logger:
-                self.logger.error("Error writing event log %s: %s", event_id, error)
-            raise
+        if self.logger:
+            self.logger.info("Event log written: %s", event_file)
 
     def read_event_log(self, event_id: str) -> Optional[Dict[str, Any]]:
-        """Read the event log from PostgreSQL. Returns None if not found."""
+        """Load an event log from disk."""
 
-        query = sql.SQL(
-            "SELECT payload FROM {table} WHERE event_id = %s"
-        ).format(table=sql.Identifier(self.table_name))
-
-        with psycopg.connect(self.dsn) as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(query, (event_id,))
-                row = cursor.fetchone()
-
-        if row is None:
+        event_file = self._event_file(event_id)
+        if not event_file.exists():
             if self.logger:
                 self.logger.warning("No event log found for %s", event_id)
             return None
 
-        return row[0]
+        with event_file.open("r", encoding="utf-8") as handle:
+            return json.load(handle)
 
     def delete_event_log(self, event_id: str) -> None:
-        """Delete the event log from PostgreSQL."""
+        """Remove the stored event log."""
 
-        statement = sql.SQL(
-            "DELETE FROM {table} WHERE event_id = %s"
-        ).format(table=sql.Identifier(self.table_name))
-
+        event_file = self._event_file(event_id)
         try:
-            with psycopg.connect(self.dsn) as connection:
-                with connection.cursor() as cursor:
-                    cursor.execute(statement, (event_id,))
-                connection.commit()
-            self._log_success("deleted", event_id)
-        except psycopg.Error as error:
+            event_file.unlink(missing_ok=True)
             if self.logger:
-                self.logger.error("Error deleting event log %s: %s", event_id, error)
+                self.logger.info("Deleted event log for %s", event_id)
+        except OSError as error:
+            if self.logger:
+                self.logger.error("Failed to delete event log %s: %s", event_id, error)
             raise
 
 
 # Example:
-# manager = EventLogManager("postgresql://user:pass@localhost/db")
+# manager = EventLogManager(Path("logs/run_history/events"))
 # manager.write_event_log("123", {"status": "done"})

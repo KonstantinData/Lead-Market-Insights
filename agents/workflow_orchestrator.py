@@ -49,13 +49,15 @@ class WorkflowOrchestrator:
             self._finalize()
 
     def _finalize(self):
-        # Optional: persist log artefacts to PostgreSQL.
         if not self.master_agent:
             return
 
         try:
-            self.master_agent.persist_log_to_database()
+            self.master_agent.finalize_run_logs()
+            logger.info(
+                "Run log stored locally at %s", self.master_agent.log_file_path
+            )
         except Exception:
-            logger.error("Failed to persist log file to PostgreSQL", exc_info=True)
+            logger.error("Failed to finalise local log storage", exc_info=True)
 
         logger.info("Orchestration finalized.")

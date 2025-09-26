@@ -1,3 +1,10 @@
+"""Archived bootstrap script kept for historical reference.
+
+This helper previously created placeholder folders during early repository
+prototyping. The automation platform now checks in real modules, so the
+script is no longer required during setup.
+"""
+
 import os
 
 folders = [

@@ -1,3 +1,9 @@
+"""Archived environment validation script retained for reference.
+
+Modern deployments rely on standard dependency management and CI checks, so
+this standalone bootstrap verification is no longer invoked by the runtime.
+"""
+
 import os
 import sys
 from dotenv import load_dotenv

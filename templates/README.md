@@ -2,7 +2,8 @@
 
 Communication templates centralise the wording used by agents when contacting organisers,
 stakeholders, or administrators.  Keeping templates in a dedicated package makes it easy to
-update messaging without touching the automation logic.
+update messaging without touching the automation logic. When adjusting messaging, review the
+masking and approval requirements documented in [`docs/compliance.md`](../docs/compliance.md).
 
 ## Contents
 

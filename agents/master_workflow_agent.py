@@ -154,14 +154,14 @@ class MasterWorkflowAgent:
                 logger.info(f"No trigger detected for event {event_id}")
                 continue
 
-                masked_trigger = self._mask_for_logging(trigger_result)
-                logger.info(
-                    "%s trigger detected in event %s (matched: %s in %s)",
-                    masked_trigger.get("type", "" ).capitalize(),
-                    event_id,
-                    masked_trigger.get("matched_word"),
-                    masked_trigger.get("matched_field"),
-                )
+            masked_trigger = self._mask_for_logging(trigger_result)
+            logger.info(
+                "%s trigger detected in event %s (matched: %s in %s)",
+                masked_trigger.get("type", "").capitalize(),
+                event_id,
+                masked_trigger.get("matched_word"),
+                masked_trigger.get("matched_field"),
+            )
 
             # Step 2: Extraction of required info (company_name, web_domain)
             extracted = self.extraction_agent.extract(event)

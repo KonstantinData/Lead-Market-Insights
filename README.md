@@ -48,6 +48,7 @@ Individual agents can also be instantiated and exercised directly for targeted t
 - **[`integration/`](integration/README.md):** Google Calendar and Google Contacts API integrations, including OAuth token handling.
 - **[`config/`](config/README.md):** Centralised configuration loader and trigger word resources.
 - **[`logs/`](logs/README.md):** Structured event/workflow logging backed by the local filesystem.
+- **[`log_storage/`](log_storage/README.md):** Default on-disk location for generated event and workflow logs.
 - **[`utils/`](utils/README.md):** Cross-cutting utilities for text normalisation, trigger loading, and duplicate detection.
 - **[`templates/`](templates/README.md):** Shared communication templates (emails, notifications).
 - **[`extraction/`](extraction/README.md):** Extension point for advanced data extraction pipelines.
@@ -67,7 +68,7 @@ Individual agents can also be instantiated and exercised directly for targeted t
 
 ## Logging and observability
 
-Dedicated log managers in [`logs/`](logs/README.md) persist event and workflow logs on the local filesystem. The `MasterWorkflowAgent` exposes a `finalize_run_logs` helper that the orchestrator calls after each run to record log metadata.
+Dedicated log managers in [`logs/`](logs/README.md) persist event and workflow logs on the local filesystem. Generated log artefacts default to [`log_storage/run_history`](log_storage/README.md), keeping them out of the repository root. The `MasterWorkflowAgent` exposes a `finalize_run_logs` helper that the orchestrator calls after each run to record log metadata.
 
 ## Human-in-the-loop interactions
 

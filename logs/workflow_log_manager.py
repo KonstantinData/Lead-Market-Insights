@@ -60,5 +60,5 @@ class WorkflowLogManager:
 
 
 # Example:
-# wlm = WorkflowLogManager(Path("logs/run_history/workflows"))
+# wlm = WorkflowLogManager(Path("log_storage/run_history/workflows"))
 # wlm.append_log("run42", "start", "Workflow started", event_id="evt123")

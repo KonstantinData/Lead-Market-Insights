@@ -21,5 +21,5 @@ log_manager = get_event_log_manager()
 log_manager.write_event_log("event-123", {"status": "started"})
 ```
 
-By default logs are stored under ``logs/run_history`` within the repository. Override the location with the ``LOG_STORAGE_DIR`` or ``EVENT_LOG_DIR`` environment variables when running the workflow.
+By default logs are stored under ``log_storage/run_history`` within the repository. Override the location with the ``LOG_STORAGE_DIR`` or ``EVENT_LOG_DIR`` environment variables when running the workflow.
 

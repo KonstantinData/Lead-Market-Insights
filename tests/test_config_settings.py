@@ -22,7 +22,7 @@ def test_log_storage_dir_defaults(monkeypatch):
 
     settings = reload_settings()
 
-    expected = Path(__file__).resolve().parents[1] / "logs" / "run_history"
+    expected = Path(__file__).resolve().parents[1] / "log_storage" / "run_history"
     assert settings.log_storage_dir == expected
     assert settings.event_log_dir == expected / "events"
     assert settings.workflow_log_dir == expected / "workflows"

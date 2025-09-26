@@ -71,5 +71,5 @@ class EventLogManager:
 
 
 # Example:
-# manager = EventLogManager(Path("logs/run_history/events"))
+# manager = EventLogManager(Path("log_storage/run_history/events"))
 # manager.write_event_log("123", {"status": "done"})

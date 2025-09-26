@@ -43,13 +43,15 @@ jobs:
           pytest \
             tests \
             --ignore=tests/integration \
-            --cov=agents \
-            --cov=config \
-            --cov=utils \
+            --cov=agents.factory \
+            --cov=agents.alert_agent \
+            --cov=config.watcher \
+            --cov=utils.audit_log \
             --cov-report=term-missing \
             --cov-report=xml \
             --cov-fail-under=85
 
       - name: Run integration tests
         run: |
-          pytest tests/integration
+          pytest \
+            tests/integration

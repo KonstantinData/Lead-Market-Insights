@@ -127,4 +127,3 @@ class LlmConfigurationWatcher:
             logger.info("Reloaded LLM configuration from %s", path)
             if self._on_update:
                 self._on_update(self._settings)
-

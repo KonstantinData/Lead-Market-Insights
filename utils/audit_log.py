@@ -133,4 +133,3 @@ class AuditLog:
         """Return all audit log entries as a list."""
 
         return list(self.iter_entries())
-

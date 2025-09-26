@@ -249,10 +249,24 @@ class MasterWorkflowAgent:
         if self.log_file_path.exists():
             log_size = self.log_file_path.stat().st_size
 
+        audit_path = self.storage_agent.get_audit_log_path(self.run_id)
+        audit_entries = []
+        if audit_path.exists():
+            try:
+                audit_entries = self.audit_log.load_entries()
+            except Exception:  # pragma: no cover - defensive guard for corrupted log
+                logger.warning("Unable to read audit log at %s during finalization", audit_path)
+
+        metadata = {
+            "log_size_bytes": log_size,
+            "audit_log_path": audit_path.as_posix(),
+            "audit_entry_count": len(audit_entries),
+        }
+
         self.storage_agent.record_run(
             self.run_id,
             self.log_file_path,
-            metadata={"log_size_bytes": log_size},
+            metadata=metadata,
         )
 
         if hasattr(self, "_config_watcher"):

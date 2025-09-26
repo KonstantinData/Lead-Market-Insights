@@ -1,10 +1,13 @@
 import re
-from typing import List, Optional, Dict, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
+from agents.factory import register_agent
+from agents.interfaces import BaseTriggerAgent
 from utils.text_normalization import normalize_text
 
 
-class TriggerDetectionAgent:
+@register_agent(BaseTriggerAgent, "trigger_detection", "default", is_default=True)
+class TriggerDetectionAgent(BaseTriggerAgent):
     def __init__(self, trigger_words: Optional[List[str]] = None):
         if trigger_words:
             normalised = [normalize_text(word) for word in trigger_words]

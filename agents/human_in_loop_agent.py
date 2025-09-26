@@ -2,6 +2,9 @@ import inspect
 import logging
 from typing import Any, Dict, Optional
 
+from agents.factory import register_agent
+from agents.interfaces import BaseHumanAgent
+
 logger = logging.getLogger(__name__)
 
 # Notes:
@@ -10,7 +13,8 @@ logger = logging.getLogger(__name__)
 # the agent falls back to a deterministic simulation for demo/testing.
 
 
-class HumanInLoopAgent:
+@register_agent(BaseHumanAgent, "human_in_loop", "default", is_default=True)
+class HumanInLoopAgent(BaseHumanAgent):
     def __init__(self, communication_backend: Optional[Any] = None) -> None:
         """
         Create the HITL agent.

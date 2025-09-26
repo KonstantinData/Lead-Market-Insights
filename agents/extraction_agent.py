@@ -3,11 +3,16 @@
 # (such as company name and web domain) from event dictionaries.
 # This version implements basic logic and can be extended to use NLP or regex.
 
-import re
 import logging
+import re
+from typing import Any, Dict
+
+from agents.factory import register_agent
+from agents.interfaces import BaseExtractionAgent
 
 
-class ExtractionAgent:
+@register_agent(BaseExtractionAgent, "extraction", "default", is_default=True)
+class ExtractionAgent(BaseExtractionAgent):
     """
     Agent for extracting required information (e.g., company name, web domain)
     from an event dictionary.
@@ -16,7 +21,7 @@ class ExtractionAgent:
     def __init__(self):
         pass
 
-    def extract(self, event):
+    def extract(self, event: Dict[str, Any]) -> Dict[str, Any]:
         """
         Extracts the company name and web domain from the event data.
         Returns a dictionary with the extracted info and a completeness flag.

@@ -12,8 +12,9 @@ The repository is organised as a set of focused agents, supporting utilities, an
 4. [Repository structure](#repository-structure)
 5. [Development workflow](#development-workflow)
 6. [Logging and observability](#logging-and-observability)
-7. [Human-in-the-loop interactions](#human-in-the-loop-interactions)
-8. [Further reading](#further-reading)
+7. [Data handling and compliance](#data-handling-and-compliance)
+8. [Human-in-the-loop interactions](#human-in-the-loop-interactions)
+9. [Further reading](#further-reading)
 
 ## Quick start
 
@@ -69,6 +70,21 @@ Individual agents can also be instantiated and exercised directly for targeted t
 ## Logging and observability
 
 Dedicated log managers in [`logs/`](logs/README.md) persist event and workflow logs on the local filesystem. Generated log artefacts default to [`log_storage/run_history`](log_storage/README.md), keeping them out of the repository root. The `MasterWorkflowAgent` exposes a `finalize_run_logs` helper that the orchestrator calls after each run to record log metadata.
+
+## Data handling and compliance
+
+The platform masks sensitive organiser or attendee information before it is logged or shared with human reviewers. The [`utils/pii.py`](utils/pii.py) module provides the `mask_pii` helper used across agents to redact emails, phone numbers, personal names, and similar identifiers while preserving whitelisted business context such as `company_name` or `web_domain`.
+
+Key guidelines:
+
+- **Never log raw PII.** Agents call `mask_pii` before logging events, trigger results, or human-response details. When adding new logging statements that include user-provided payloads, wrap them with the helper (e.g., `logger.info("Payload: %s", mask_pii(payload))`).
+- **Sanitise human-facing messages when compliance mode requires it.** The `HumanInLoopAgent` automatically redacts personal fields before composing confirmation requests when `settings.mask_pii_in_messages` is enabled.
+- **Tune compliance by configuration.** Environment variables control how aggressive the masking is:
+  - `COMPLIANCE_MODE` accepts `standard` (default) or `strict`. Strict mode enables message masking and expands numeric redaction.
+  - `MASK_PII_IN_LOGS` and `MASK_PII_IN_MESSAGES` provide explicit toggles when a deployment needs to override the mode defaults.
+  - `PII_FIELD_WHITELIST` lets you append additional business-safe fields (comma-separated) that should never be redacted.
+
+Automated tests under [`tests/test_pii_masking.py`](tests/test_pii_masking.py) assert that masked logs never leak organiser emails and that human-facing messages honour the compliance toggles. Any new features that surface event data should include equivalent safeguards.
 
 ## Human-in-the-loop interactions
 

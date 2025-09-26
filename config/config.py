@@ -80,6 +80,23 @@ def _get_float_env(name: str, default: float) -> float:
         raise ValueError(f"Environment variable {name} must be a float.") from exc
 
 
+def _get_bool_env(name: str, default: bool) -> bool:
+    """Return a boolean value derived from an environment variable."""
+
+    raw_value = _get_env_var(name)
+    if raw_value is None:
+        return default
+
+    normalised = raw_value.strip().lower()
+    if normalised in {"1", "true", "yes", "on"}:
+        return True
+    if normalised in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(
+        f"Environment variable {name} must be a boolean (accepted values: 1/0, true/false)."
+    )
+
+
 def _get_path_env(name: str, default: Path) -> Path:
     """Return the path from an environment variable or a default."""
 
@@ -194,6 +211,48 @@ class Settings:
         )
 
         self.trigger_words: Optional[str] = _get_env_var("TRIGGER_WORDS")
+
+        self.compliance_mode: str = (
+            _get_env_var("COMPLIANCE_MODE") or "standard"
+        ).strip().lower()
+        if self.compliance_mode not in {"standard", "strict"}:
+            self.compliance_mode = "standard"
+
+        default_mask_logs = True
+        default_mask_messages = self.compliance_mode == "strict"
+        self.mask_pii_in_logs: bool = _get_bool_env(
+            "MASK_PII_IN_LOGS", default_mask_logs
+        )
+        self.mask_pii_in_messages: bool = _get_bool_env(
+            "MASK_PII_IN_MESSAGES", default_mask_messages
+        )
+
+        whitelist_env = _get_env_var("PII_FIELD_WHITELIST")
+        whitelist = {
+            "company_name",
+            "company",
+            "business",
+            "business_name",
+            "organisation",
+            "organization",
+            "org_name",
+            "web_domain",
+            "domain",
+            "website",
+            "summary",
+            "description",
+            "id",
+            "event_id",
+        }
+        if whitelist_env:
+            whitelist.update(
+                {
+                    item.strip().lower()
+                    for item in whitelist_env.split(",")
+                    if item and item.strip()
+                }
+            )
+        self.pii_field_whitelist = whitelist
 
         self.agent_config_file: Optional[Path] = None
         self.agent_overrides: Dict[str, str] = {}

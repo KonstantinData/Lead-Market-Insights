@@ -39,3 +39,50 @@ def test_log_storage_dir_respects_env(monkeypatch, tmp_path):
 
     assert settings.log_storage_dir == target.resolve()
     assert settings.event_log_dir == (target / "events").resolve()
+
+
+def test_compliance_defaults(monkeypatch):
+    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
+    monkeypatch.delenv("COMPLIANCE_MODE", raising=False)
+    monkeypatch.delenv("MASK_PII_IN_LOGS", raising=False)
+    monkeypatch.delenv("MASK_PII_IN_MESSAGES", raising=False)
+
+    settings = reload_settings()
+
+    assert settings.compliance_mode == "standard"
+    assert settings.mask_pii_in_logs is True
+    assert settings.mask_pii_in_messages is False
+
+
+def test_strict_compliance_overrides(monkeypatch):
+    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
+    monkeypatch.setenv("COMPLIANCE_MODE", "strict")
+    monkeypatch.delenv("MASK_PII_IN_LOGS", raising=False)
+    monkeypatch.delenv("MASK_PII_IN_MESSAGES", raising=False)
+
+    settings = reload_settings()
+
+    assert settings.compliance_mode == "strict"
+    assert settings.mask_pii_in_logs is True
+    assert settings.mask_pii_in_messages is True
+
+
+def test_explicit_mask_overrides(monkeypatch):
+    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
+    monkeypatch.setenv("MASK_PII_IN_LOGS", "0")
+    monkeypatch.setenv("MASK_PII_IN_MESSAGES", "1")
+
+    settings = reload_settings()
+
+    assert settings.mask_pii_in_logs is False
+    assert settings.mask_pii_in_messages is True
+
+
+def test_custom_whitelist(monkeypatch):
+    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
+    monkeypatch.setenv("PII_FIELD_WHITELIST", "custom_field,AnotherField")
+
+    settings = reload_settings()
+
+    assert "custom_field" in settings.pii_field_whitelist
+    assert "anotherfield" in settings.pii_field_whitelist

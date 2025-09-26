@@ -1,6 +1,8 @@
+import importlib.util
+import json
 import os
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 from dotenv import load_dotenv
 
@@ -8,6 +10,13 @@ _ORIGINAL_ENV = os.environ.copy()
 _SKIP_DOTENV = os.getenv("SETTINGS_SKIP_DOTENV") == "1"
 if not _SKIP_DOTENV:
     load_dotenv()
+
+
+_YAML_MODULE = None
+_yaml_spec = importlib.util.find_spec("yaml")
+if _yaml_spec and _yaml_spec.loader:
+    _YAML_MODULE = importlib.util.module_from_spec(_yaml_spec)
+    _yaml_spec.loader.exec_module(_YAML_MODULE)
 
 
 def _normalise(value: Optional[str]) -> Optional[str]:
@@ -67,6 +76,48 @@ def _get_path_env(name: str, default: Path) -> Path:
     return default
 
 
+def _read_agent_config_file(path: Path) -> Mapping[str, Any]:
+    """Load agent configuration overrides from a JSON or YAML file."""
+
+    suffix = path.suffix.lower()
+    text = path.read_text(encoding="utf-8")
+
+    if suffix in {".yaml", ".yml"}:
+        if _YAML_MODULE is None:
+            raise RuntimeError("PyYAML is required to load YAML agent configuration files.")
+        data = _YAML_MODULE.safe_load(text) or {}
+    elif suffix == ".json":
+        data = json.loads(text)
+    else:
+        raise ValueError(
+            f"Unsupported agent configuration format '{suffix}'. Use JSON or YAML."
+        )
+
+    if not isinstance(data, Mapping):
+        raise ValueError("Agent configuration file must contain a mapping at the top level.")
+
+    return data
+
+
+def _extract_agent_overrides(config_data: Mapping[str, Any]) -> Dict[str, str]:
+    """Normalise agent override names from structured configuration data."""
+
+    candidates = config_data
+    agents_section = config_data.get("agents") if isinstance(config_data, Mapping) else None
+    if isinstance(agents_section, Mapping):
+        candidates = agents_section
+
+    overrides: Dict[str, str] = {}
+    for key in ("polling", "trigger", "extraction", "human", "crm"):
+        direct_value = candidates.get(key)
+        alt_value = candidates.get(f"{key}_agent")
+        chosen = direct_value or alt_value
+        if isinstance(chosen, str) and chosen.strip():
+            overrides[key] = chosen.strip()
+
+    return overrides
+
+
 class Settings:
     """Application configuration loaded from environment variables or defaults."""
 
@@ -89,6 +140,33 @@ class Settings:
         )
 
         self.trigger_words: Optional[str] = _get_env_var("TRIGGER_WORDS")
+
+        self.agent_config_file: Optional[Path] = None
+        self.agent_overrides: Dict[str, str] = {}
+
+        agent_config_path = _get_env_var("AGENT_CONFIG_FILE")
+        if agent_config_path:
+            candidate = Path(agent_config_path).expanduser().resolve()
+            if candidate.exists():
+                try:
+                    data = _read_agent_config_file(candidate)
+                    self.agent_overrides.update(_extract_agent_overrides(data))
+                    self.agent_config_file = candidate
+                except Exception as exc:  # pragma: no cover - configuration error surface
+                    raise EnvironmentError(
+                        f"Failed to read agent configuration from {candidate}: {exc}"
+                    ) from exc
+
+        env_overrides = {
+            "polling": _get_env_var("POLLING_AGENT"),
+            "trigger": _get_env_var("TRIGGER_AGENT"),
+            "extraction": _get_env_var("EXTRACTION_AGENT"),
+            "human": _get_env_var("HUMAN_AGENT"),
+            "crm": _get_env_var("CRM_AGENT"),
+        }
+        self.agent_overrides.update(
+            {key: value for key, value in env_overrides.items() if value}
+        )
 
 
 # Notes: Singleton instance for importing settings in other modules

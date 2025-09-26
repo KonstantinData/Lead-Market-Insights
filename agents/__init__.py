@@ -9,4 +9,7 @@ __all__ = [
     "email_agent",
     "extraction_agent",
     "local_storage_agent",
+    "crm_agent",
+    "factory",
+    "interfaces",
 ]

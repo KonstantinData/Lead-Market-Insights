@@ -1,19 +1,24 @@
 import logging
+from typing import Any, Dict, Iterable
+
+from agents.factory import register_agent
+from agents.interfaces import BasePollingAgent
 from integration.google_calendar_integration import GoogleCalendarIntegration
 from integration.google_contacts_integration import GoogleContactsIntegration
 
 logger = logging.getLogger(__name__)
 
 
-class EventPollingAgent:
-    def __init__(self, config=None):
+@register_agent(BasePollingAgent, "event_polling", "default", is_default=True)
+class EventPollingAgent(BasePollingAgent):
+    def __init__(self, config: Any = None):
         self.config = config
         self.calendar = GoogleCalendarIntegration()
         # Access token wird per Calendar-Integration gemanaged
         self.contacts = None
 
     @staticmethod
-    def _is_birthday_event(event: dict) -> bool:
+    def _is_birthday_event(event: Dict[str, Any]) -> bool:
         """Return ``True`` if the given event represents a birthday entry."""
 
         if not isinstance(event, dict):
@@ -45,7 +50,7 @@ class EventPollingAgent:
 
         return False
 
-    def poll(self):
+    def poll(self) -> Iterable[Dict[str, Any]]:
         """Polls calendar events (read-only) and logs them, skipping birthday entries."""
         try:
             events = self.calendar.list_events(max_results=100)
@@ -63,7 +68,7 @@ class EventPollingAgent:
             logger.error(f"Google Calendar polling failed: {e}")
             raise
 
-    def poll_contacts(self):
+    def poll_contacts(self) -> Iterable[Dict[str, Any]]:
         """
         Polls contacts (read-only) and logs them.
         """

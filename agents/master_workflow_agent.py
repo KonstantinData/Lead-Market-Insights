@@ -8,14 +8,27 @@ MasterWorkflowAgent: Pure logic agent for polling and event-processing.
 """
 
 import logging
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, Optional
 
-from agents.event_polling_agent import EventPollingAgent
-from agents.trigger_detection_agent import TriggerDetectionAgent
-from agents.extraction_agent import ExtractionAgent
-from agents.human_in_loop_agent import HumanInLoopAgent
+from agents.factory import create_agent
+
+# Ensure default agent implementations register themselves with the factory.
+from agents import (  # noqa: F401  # pylint: disable=unused-import
+    crm_agent as _crm_module,
+    event_polling_agent as _polling_module,
+    extraction_agent as _extraction_module,
+    human_in_loop_agent as _human_module,
+    trigger_detection_agent as _trigger_module,
+)
+from agents.interfaces import (
+    BaseCrmAgent,
+    BaseExtractionAgent,
+    BaseHumanAgent,
+    BasePollingAgent,
+    BaseTriggerAgent,
+)
 from agents.local_storage_agent import LocalStorageAgent
 from config.config import settings
 from utils.trigger_loader import load_trigger_words
@@ -27,23 +40,47 @@ class MasterWorkflowAgent:
     def __init__(
         self,
         communication_backend: Optional[Any] = None,
-        event_agent: Optional[EventPollingAgent] = None,
-        trigger_agent: Optional[TriggerDetectionAgent] = None,
-        extraction_agent: Optional[ExtractionAgent] = None,
+        event_agent: Optional[BasePollingAgent] = None,
+        trigger_agent: Optional[BaseTriggerAgent] = None,
+        extraction_agent: Optional[BaseExtractionAgent] = None,
+        human_agent: Optional[BaseHumanAgent] = None,
+        crm_agent: Optional[BaseCrmAgent] = None,
+        agent_overrides: Optional[Dict[str, str]] = None,
     ) -> None:
         # Initialize configuration and all agents.
-        self.event_agent = event_agent or EventPollingAgent(config=settings)
+        resolved_overrides: Dict[str, str] = dict(settings.agent_overrides)
+        if agent_overrides:
+            resolved_overrides.update({k: v for k, v in agent_overrides.items() if v})
+
+        self.event_agent = event_agent or create_agent(
+            BasePollingAgent,
+            resolved_overrides.get("polling"),
+            config=settings,
+        )
         trigger_words_file = (
             Path(__file__).resolve().parents[1] / "config" / "trigger_words.txt"
         )
         self.trigger_words = load_trigger_words(
             settings.trigger_words, triggers_file=trigger_words_file, logger=logger
         )
-        self.trigger_agent = trigger_agent or TriggerDetectionAgent(
-            trigger_words=self.trigger_words
+        self.trigger_agent = trigger_agent or create_agent(
+            BaseTriggerAgent,
+            resolved_overrides.get("trigger"),
+            trigger_words=self.trigger_words,
         )
-        self.extraction_agent = extraction_agent or ExtractionAgent()
-        self.human_agent = HumanInLoopAgent(communication_backend=communication_backend)
+        self.extraction_agent = extraction_agent or create_agent(
+            BaseExtractionAgent,
+            resolved_overrides.get("extraction"),
+        )
+        self.human_agent = human_agent or create_agent(
+            BaseHumanAgent,
+            resolved_overrides.get("human"),
+            communication_backend=communication_backend,
+        )
+        self.crm_agent = crm_agent or create_agent(
+            BaseCrmAgent,
+            resolved_overrides.get("crm"),
+        )
 
         # Local storage for log artefacts
         self.storage_agent = LocalStorageAgent(settings.run_log_dir, logger=logger)
@@ -145,8 +182,7 @@ class MasterWorkflowAgent:
         return self.trigger_agent.check(event)
 
     def _send_to_crm_agent(self, event: Dict[str, Any], info: Dict[str, Any]) -> None:
-        # TODO: Replace with real CRM agent logic
-        logger.info(f"Sending event {event.get('id')} to CRM with info: {info}")
+        self.crm_agent.send(event, info)
 
     def finalize_run_logs(self) -> None:
         """Persist metadata about the generated log file to local storage."""

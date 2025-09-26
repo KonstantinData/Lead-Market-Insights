@@ -127,10 +127,12 @@ class AlertAgent:
         body_template = channel.get(
             "body_template", "Severity: {severity}\nMessage: {message}\n"
         )
-        subject = subject_template.format(severity=severity.name, message=message, **context)
-        body = body_template.format(
-            severity=severity.name, message=message, **context
-        )
+        format_kwargs = dict(context)
+        format_kwargs["severity"] = severity.name
+        format_kwargs.setdefault("severity_value", severity.value)
+        format_kwargs["message"] = message
+        subject = subject_template.format(**format_kwargs)
+        body = body_template.format(**format_kwargs)
 
         for recipient in recipients:
             client.send_email(recipient, subject, body)
@@ -151,7 +153,14 @@ class AlertAgent:
             "text": channel.get(
                 "message_template",
                 "[{severity}] {message}",
-            ).format(severity=severity.name, message=message, **context),
+            ).format(
+                **{
+                    **dict(context),
+                    "severity": severity.name,
+                    "severity_value": severity.value,
+                    "message": message,
+                }
+            ),
         }
         requests.post(webhook_url, json=payload, timeout=5)
 

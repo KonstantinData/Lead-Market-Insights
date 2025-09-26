@@ -38,20 +38,18 @@ jobs:
           pip install flake8
           flake8 .
 
-      # Optional: Run tests
-      - name: Run tests
+      - name: Run unit tests with coverage
         run: |
-          pytest
+          pytest \
+            tests \
+            --ignore=tests/integration \
+            --cov=agents \
+            --cov=config \
+            --cov=utils \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-fail-under=85
 
-      # Debug-Schritt: Überprüfe, ob die Google-Credentials gesetzt sind (optional, für Fehleranalyse)
-      - name: Debug Google Credentials
+      - name: Run integration tests
         run: |
-          echo "GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID"
-          echo "GOOGLE_CLIENT_SECRET length: ${#GOOGLE_CLIENT_SECRET}"
-          echo "GOOGLE_REFRESH_TOKEN length: ${#GOOGLE_REFRESH_TOKEN}"
-          echo "GOOGLE_TOKEN_URI=$GOOGLE_TOKEN_URI"
-        shell: bash
-
-      # Der neue Einstiegspunkt – nur falls gewünscht als Teil der CI:
-      - name: Run main.py entrypoint
-        run: python main.py
+          pytest tests/integration

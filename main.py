@@ -16,7 +16,8 @@ from agents.workflow_orchestrator import WorkflowOrchestrator
 if __name__ == "__main__":
     # Set up logging (optional: customize as needed)
     logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s [run_id=%(run_id)s] %(message)s",
     )
 
     orchestrator = WorkflowOrchestrator()

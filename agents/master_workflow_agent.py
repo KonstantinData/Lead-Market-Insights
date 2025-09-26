@@ -35,6 +35,11 @@ from config.watcher import LlmConfigurationWatcher
 from utils.trigger_loader import load_trigger_words
 from utils.pii import mask_pii
 from utils.audit_log import AuditLog
+from utils.observability import (
+    observe_operation,
+    record_hitl_outcome,
+    record_trigger_match,
+)
 
 logger = logging.getLogger("MasterWorkflowAgent")
 
@@ -88,35 +93,12 @@ class MasterWorkflowAgent:
         # Local storage for log artefacts
         self.storage_agent = LocalStorageAgent(settings.run_log_dir, logger=logger)
 
-        # Use a unique log directory per run using current UTC timestamp
-        self.run_id = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
-        self.run_directory = self.storage_agent.create_run_directory(self.run_id)
-        self.log_file_path = self.run_directory / "polling_trigger.log"
-        self.log_filename = str(self.log_file_path)
-
-        # Structured audit trail for HITL interactions
-        audit_log_path = self.storage_agent.get_audit_log_path(self.run_id)
-        self.audit_log = AuditLog(audit_log_path, logger=logger)
-        if hasattr(self.human_agent, "set_audit_log"):
-            self.human_agent.set_audit_log(self.audit_log)
-
-        # Configure logger to write to the unique per-run file
-        for existing_handler in list(logger.handlers):
-            if isinstance(existing_handler, logging.FileHandler) and getattr(
-                existing_handler, "_master_agent_handler", False
-            ):
-                logger.removeHandler(existing_handler)
-                existing_handler.close()
-
-        file_handler = logging.FileHandler(
-            self.log_file_path, mode="w", encoding="utf-8"
-        )
-        formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
-        file_handler.setFormatter(formatter)
-        file_handler.setLevel(logging.INFO)
-        setattr(file_handler, "_master_agent_handler", True)
-        logger.setLevel(logging.INFO)
-        logger.addHandler(file_handler)
+        self.run_id: str = ""
+        self.run_directory: Path = self.storage_agent.base_dir
+        self.log_file_path: Path = self.run_directory / "polling_trigger.log"
+        self.log_filename: str = str(self.log_file_path)
+        self.audit_log: AuditLog
+        self.initialize_run()
 
         self.llm_confidence_thresholds: Dict[str, float] = {}
         self.llm_cost_caps: Dict[str, float] = {}
@@ -127,6 +109,38 @@ class MasterWorkflowAgent:
             settings, on_update=self._apply_llm_settings
         )
         self._config_watcher.start()
+
+    def initialize_run(self, run_id: Optional[str] = None) -> None:
+        """Set up run-specific artefacts such as log files and audit logs."""
+
+        self.run_id = run_id or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+        self.run_directory = self.storage_agent.create_run_directory(self.run_id)
+        self.log_file_path = self.run_directory / "polling_trigger.log"
+        self.log_filename = str(self.log_file_path)
+
+        audit_log_path = self.storage_agent.get_audit_log_path(self.run_id)
+        self.audit_log = AuditLog(audit_log_path, logger=logger)
+        if hasattr(self.human_agent, "set_audit_log"):
+            self.human_agent.set_audit_log(self.audit_log)
+
+        for existing_handler in list(logger.handlers):
+            if isinstance(existing_handler, logging.FileHandler) and getattr(
+                existing_handler, "_master_agent_handler", False
+            ):
+                logger.removeHandler(existing_handler)
+                existing_handler.close()
+
+        file_handler = logging.FileHandler(
+            self.log_file_path, mode="w", encoding="utf-8"
+        )
+        formatter = logging.Formatter(
+            "%(asctime)s %(levelname)s [run_id=%(run_id)s] %(message)s"
+        )
+        file_handler.setFormatter(formatter)
+        file_handler.setLevel(logging.INFO)
+        setattr(file_handler, "_master_agent_handler", True)
+        logger.setLevel(logging.INFO)
+        logger.addHandler(file_handler)
 
     def process_all_events(self) -> None:
         """
@@ -141,7 +155,10 @@ class MasterWorkflowAgent:
             event_id = event.get("id")
 
             # Step 1: Trigger detection (check both summary and description, hard/soft)
-            trigger_result = self._detect_trigger(event)
+            with observe_operation(
+                "trigger_detection", {"event.id": str(event_id)} if event_id else None
+            ):
+                trigger_result = self._detect_trigger(event)
             if not self._meets_confidence_threshold("trigger", trigger_result):
                 logger.info(
                     "Skipping event %s due to trigger confidence %.3f below threshold %.3f",
@@ -154,6 +171,8 @@ class MasterWorkflowAgent:
                 logger.info(f"No trigger detected for event {event_id}")
                 continue
 
+            record_trigger_match(trigger_result.get("type", "unknown"))
+
             masked_trigger = self._mask_for_logging(trigger_result)
             logger.info(
                 "%s trigger detected in event %s (matched: %s in %s)",
@@ -164,7 +183,10 @@ class MasterWorkflowAgent:
             )
 
             # Step 2: Extraction of required info (company_name, web_domain)
-            extracted = self.extraction_agent.extract(event)
+            with observe_operation(
+                "extraction", {"event.id": str(event_id)} if event_id else None
+            ):
+                extracted = self.extraction_agent.extract(event)
             info = extracted.get("info", {})
             is_complete = extracted.get("is_complete", False)
             if not self._meets_confidence_threshold("extraction", extracted):
@@ -178,10 +200,16 @@ class MasterWorkflowAgent:
 
             # Step 3: Decide actions based on trigger type and info completeness
             if trigger_result["type"] == "hard" and is_complete:
-                self._send_to_crm_agent(event, info)
+                with observe_operation(
+                    "crm_dispatch", {"event.id": str(event_id)} if event_id else None
+                ):
+                    self._send_to_crm_agent(event, info)
             elif trigger_result["type"] == "soft" and is_complete:
                 # Human-in-the-loop: Ask organizer if dossier is needed
-                response = self.human_agent.request_dossier_confirmation(event, info)
+                with observe_operation(
+                    "hitl_dossier", {"event.id": str(event_id)} if event_id else None
+                ):
+                    response = self.human_agent.request_dossier_confirmation(event, info)
                 audit_id = response.get("audit_id")
                 if response.get("dossier_required"):
                     logger.info(
@@ -190,7 +218,12 @@ class MasterWorkflowAgent:
                         audit_id or "n/a",
                         self._mask_for_logging(response.get("details")),
                     )
-                    self._send_to_crm_agent(event, info)
+                    record_hitl_outcome("dossier", "approved")
+                    with observe_operation(
+                        "crm_dispatch",
+                        {"event.id": str(event_id)} if event_id else None,
+                    ):
+                        self._send_to_crm_agent(event, info)
                 else:
                     logger.info(
                         "Organizer declined dossier for event %s [audit_id=%s]: %s",
@@ -198,9 +231,14 @@ class MasterWorkflowAgent:
                         audit_id or "n/a",
                         self._mask_for_logging(response.get("details")),
                     )
+                    record_hitl_outcome("dossier", "declined")
             elif trigger_result["type"] == "hard" and not is_complete:
                 # Human-in-the-loop: Ask for missing company_name/web_domain
-                filled = self.human_agent.request_info(event, extracted)
+                with observe_operation(
+                    "hitl_missing_info",
+                    {"event.id": str(event_id)} if event_id else None,
+                ):
+                    filled = self.human_agent.request_info(event, extracted)
                 audit_id = filled.get("audit_id")
                 if filled.get("is_complete"):
                     logger.info(
@@ -208,16 +246,25 @@ class MasterWorkflowAgent:
                         event_id,
                         audit_id or "n/a",
                     )
-                    self._send_to_crm_agent(event, filled.get("info", {}))
+                    record_hitl_outcome("missing_info", "completed")
+                    with observe_operation(
+                        "crm_dispatch",
+                        {"event.id": str(event_id)} if event_id else None,
+                    ):
+                        self._send_to_crm_agent(event, filled.get("info", {}))
                 else:
                     logger.warning(
                         "Required info still missing for event %s [audit_id=%s]",
                         event_id,
                         audit_id or "n/a",
                     )
+                    record_hitl_outcome("missing_info", "incomplete")
             elif trigger_result["type"] == "soft" and not is_complete:
                 # Human-in-the-loop: First ask organizer, then ask for missing info if needed
-                response = self.human_agent.request_dossier_confirmation(event, info)
+                with observe_operation(
+                    "hitl_dossier", {"event.id": str(event_id)} if event_id else None
+                ):
+                    response = self.human_agent.request_dossier_confirmation(event, info)
                 audit_id = response.get("audit_id")
                 if response.get("dossier_required"):
                     logger.info(
@@ -226,7 +273,12 @@ class MasterWorkflowAgent:
                         audit_id or "n/a",
                         self._mask_for_logging(response.get("details")),
                     )
-                    filled = self.human_agent.request_info(event, extracted)
+                    record_hitl_outcome("dossier", "approved")
+                    with observe_operation(
+                        "hitl_missing_info",
+                        {"event.id": str(event_id)} if event_id else None,
+                    ):
+                        filled = self.human_agent.request_info(event, extracted)
                     fill_audit_id = filled.get("audit_id")
                     if filled.get("is_complete"):
                         logger.info(
@@ -234,13 +286,19 @@ class MasterWorkflowAgent:
                             event_id,
                             fill_audit_id or "n/a",
                         )
-                        self._send_to_crm_agent(event, filled.get("info", {}))
+                        record_hitl_outcome("missing_info", "completed")
+                        with observe_operation(
+                            "crm_dispatch",
+                            {"event.id": str(event_id)} if event_id else None,
+                        ):
+                            self._send_to_crm_agent(event, filled.get("info", {}))
                     else:
                         logger.warning(
                             "Required info still missing after HITL for event %s [audit_id=%s]",
                             event_id,
                             fill_audit_id or "n/a",
                         )
+                        record_hitl_outcome("missing_info", "incomplete")
                 else:
                     logger.info(
                         "Organizer declined dossier for event %s [audit_id=%s]: %s",
@@ -248,6 +306,7 @@ class MasterWorkflowAgent:
                         audit_id or "n/a",
                         self._mask_for_logging(response.get("details")),
                     )
+                    record_hitl_outcome("dossier", "declined")
             else:
                 logger.warning(f"Unhandled trigger/info state for event {event_id}")
 

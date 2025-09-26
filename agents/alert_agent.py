@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from enum import Enum
-from typing import Any, Callable, Dict, Iterable, List, MutableMapping, Optional
+from typing import Any, Callable, Iterable, List, MutableMapping, Optional
 
 import requests
 
@@ -174,4 +174,3 @@ class AlertAgent:
         }
         headers = channel.get("headers") or {"Content-Type": "application/json"}
         requests.post(url, json=payload, headers=headers, timeout=5)
-

@@ -1,5 +1,6 @@
 # Core dependencies
 python-dotenv>=1.0,<2.0       # Load environment variables from .env file
+watchdog>=3.0,<4.0           # Monitor configuration changes at runtime
 
 # Google API support
 google-api-python-client>=2.0,<3.0

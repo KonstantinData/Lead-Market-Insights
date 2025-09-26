@@ -2,7 +2,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 from dotenv import load_dotenv
 
@@ -67,6 +67,19 @@ def _get_int_env(name: str, default: int) -> int:
         raise ValueError(f"Environment variable {name} must be an integer.") from exc
 
 
+def _get_float_env(name: str, default: float) -> float:
+    """Fetch a floating point environment variable with fallback."""
+
+    raw_value = _get_env_var(name)
+    if raw_value is None:
+        return default
+
+    try:
+        return float(raw_value)
+    except ValueError as exc:  # pragma: no cover - defensive programming branch
+        raise ValueError(f"Environment variable {name} must be a float.") from exc
+
+
 def _get_path_env(name: str, default: Path) -> Path:
     """Return the path from an environment variable or a default."""
 
@@ -118,6 +131,47 @@ def _extract_agent_overrides(config_data: Mapping[str, Any]) -> Dict[str, str]:
     return overrides
 
 
+def _prefixed_env_mapping(prefix: str, cast: Callable[[str], Any]) -> Dict[str, Any]:
+    """Extract a mapping of values from environment variables using a prefix."""
+
+    result: Dict[str, Any] = {}
+    for key, value in os.environ.items():
+        if not key.startswith(prefix):
+            continue
+        suffix = key[len(prefix) :].strip()
+        if not suffix:
+            continue
+        normalised_key = suffix.lower()
+        try:
+            result[normalised_key] = cast(value)
+        except (TypeError, ValueError):  # pragma: no cover - defensive branch
+            raise ValueError(
+                f"Environment variable {key} must be coercible to {cast.__name__}."
+            )
+    return result
+
+
+def _coerce_mapping(
+    mapping: Optional[Mapping[str, Any]], cast: Callable[[Any], Any]
+) -> Dict[str, Any]:
+    """Coerce keys to lowercase strings and values using ``cast``."""
+
+    if not mapping:
+        return {}
+
+    result: Dict[str, Any] = {}
+    for key, value in mapping.items():
+        if value is None:
+            continue
+        try:
+            result[str(key).lower()] = cast(value)
+        except (TypeError, ValueError):  # pragma: no cover - configuration error surface
+            raise ValueError(
+                f"Invalid value for '{key}' in LLM configuration; expected {cast.__name__}."
+            ) from None
+    return result
+
+
 class Settings:
     """Application configuration loaded from environment variables or defaults."""
 
@@ -143,6 +197,11 @@ class Settings:
 
         self.agent_config_file: Optional[Path] = None
         self.agent_overrides: Dict[str, str] = {}
+        self._raw_agent_config: Mapping[str, Any] = {}
+
+        self.llm_confidence_thresholds: Dict[str, float] = {}
+        self.llm_cost_caps: Dict[str, float] = {}
+        self.llm_retry_budgets: Dict[str, int] = {}
 
         agent_config_path = _get_env_var("AGENT_CONFIG_FILE")
         if agent_config_path:
@@ -150,6 +209,7 @@ class Settings:
             if candidate.exists():
                 try:
                     data = _read_agent_config_file(candidate)
+                    self._raw_agent_config = data
                     self.agent_overrides.update(_extract_agent_overrides(data))
                     self.agent_config_file = candidate
                 except Exception as exc:  # pragma: no cover - configuration error surface
@@ -167,6 +227,70 @@ class Settings:
         self.agent_overrides.update(
             {key: value for key, value in env_overrides.items() if value}
         )
+
+        self._load_llm_configuration(self._raw_agent_config)
+
+    def _load_llm_configuration(self, config_data: Mapping[str, Any]) -> None:
+        """Populate LLM configuration dictionaries from env defaults and YAML overrides."""
+
+        default_confidence = {
+            "trigger": _get_float_env("LLM_CONFIDENCE_THRESHOLD_TRIGGER", 0.6),
+            "extraction": _get_float_env("LLM_CONFIDENCE_THRESHOLD_EXTRACTION", 0.55),
+        }
+        default_cost_caps = {
+            "daily": _get_float_env("LLM_COST_CAP_DAILY", 25.0),
+            "monthly": _get_float_env("LLM_COST_CAP_MONTHLY", 500.0),
+        }
+        default_retry_budgets = {
+            "trigger": _get_int_env("LLM_RETRY_BUDGET_TRIGGER", 2),
+            "extraction": _get_int_env("LLM_RETRY_BUDGET_EXTRACTION", 2),
+        }
+
+        confidence_thresholds = dict(default_confidence)
+        confidence_thresholds.update(
+            _prefixed_env_mapping("LLM_CONFIDENCE_THRESHOLD_", float)
+        )
+
+        cost_caps = dict(default_cost_caps)
+        cost_caps.update(_prefixed_env_mapping("LLM_COST_CAP_", float))
+
+        retry_budgets = dict(default_retry_budgets)
+        retry_budgets.update(_prefixed_env_mapping("LLM_RETRY_BUDGET_", int))
+
+        llm_section = (
+            config_data.get("llm")
+            if isinstance(config_data, Mapping)
+            else None
+        )
+        if isinstance(llm_section, Mapping):
+            confidence_thresholds.update(
+                _coerce_mapping(llm_section.get("confidence_thresholds"), float)
+            )
+            cost_caps.update(_coerce_mapping(llm_section.get("cost_caps"), float))
+            retry_budgets.update(
+                _coerce_mapping(llm_section.get("retry_budgets"), int)
+            )
+
+        self.llm_confidence_thresholds = confidence_thresholds
+        self.llm_cost_caps = cost_caps
+        self.llm_retry_budgets = retry_budgets
+
+    def refresh_llm_configuration(self) -> None:
+        """Reload LLM configuration from the configured sources."""
+
+        config_data: Mapping[str, Any] = {}
+        if self.agent_config_file and self.agent_config_file.exists():
+            try:
+                config_data = _read_agent_config_file(self.agent_config_file)
+                self._raw_agent_config = config_data
+            except Exception as exc:  # pragma: no cover - configuration error surface
+                raise EnvironmentError(
+                    f"Failed to refresh agent configuration from {self.agent_config_file}: {exc}"
+                ) from exc
+        else:
+            self._raw_agent_config = {}
+
+        self._load_llm_configuration(self._raw_agent_config)
 
 
 # Notes: Singleton instance for importing settings in other modules

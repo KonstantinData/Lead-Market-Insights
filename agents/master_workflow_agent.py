@@ -31,6 +31,7 @@ from agents.interfaces import (
 )
 from agents.local_storage_agent import LocalStorageAgent
 from config.config import settings
+from config.watcher import LlmConfigurationWatcher
 from utils.trigger_loader import load_trigger_words
 
 logger = logging.getLogger("MasterWorkflowAgent")
@@ -99,6 +100,16 @@ class MasterWorkflowAgent:
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 
+        self.llm_confidence_thresholds: Dict[str, float] = {}
+        self.llm_cost_caps: Dict[str, float] = {}
+        self.llm_retry_budgets: Dict[str, int] = {}
+        self._apply_llm_settings(settings)
+
+        self._config_watcher = LlmConfigurationWatcher(
+            settings, on_update=self._apply_llm_settings
+        )
+        self._config_watcher.start()
+
     def process_all_events(self) -> None:
         """
         Loops through all events, applies trigger detection, extraction, HITL, and CRM logic.
@@ -112,6 +123,14 @@ class MasterWorkflowAgent:
 
             # Step 1: Trigger detection (check both summary and description, hard/soft)
             trigger_result = self._detect_trigger(event)
+            if not self._meets_confidence_threshold("trigger", trigger_result):
+                logger.info(
+                    "Skipping event %s due to trigger confidence %.3f below threshold %.3f",
+                    event_id,
+                    trigger_result.get("confidence", 0.0),
+                    self.llm_confidence_thresholds.get("trigger", 0.0),
+                )
+                continue
             if not trigger_result["trigger"]:
                 logger.info(f"No trigger detected for event {event_id}")
                 continue
@@ -125,6 +144,14 @@ class MasterWorkflowAgent:
             extracted = self.extraction_agent.extract(event)
             info = extracted.get("info", {})
             is_complete = extracted.get("is_complete", False)
+            if not self._meets_confidence_threshold("extraction", extracted):
+                logger.info(
+                    "Extraction confidence %.3f below threshold %.3f for event %s",
+                    extracted.get("confidence", 0.0),
+                    self.llm_confidence_thresholds.get("extraction", 0.0),
+                    event_id,
+                )
+                continue
 
             # Step 3: Decide actions based on trigger type and info completeness
             if trigger_result["type"] == "hard" and is_complete:
@@ -196,3 +223,40 @@ class MasterWorkflowAgent:
             self.log_file_path,
             metadata={"log_size_bytes": log_size},
         )
+
+        if hasattr(self, "_config_watcher"):
+            self._config_watcher.stop()
+
+    def _apply_llm_settings(self, current_settings) -> None:
+        """Copy the latest LLM settings from the shared settings object."""
+
+        self.llm_confidence_thresholds = dict(current_settings.llm_confidence_thresholds)
+        self.llm_cost_caps = dict(current_settings.llm_cost_caps)
+        self.llm_retry_budgets = dict(current_settings.llm_retry_budgets)
+        logger.debug(
+            "Updated LLM thresholds: confidence=%s cost_caps=%s retry_budgets=%s",
+            self.llm_confidence_thresholds,
+            self.llm_cost_caps,
+            self.llm_retry_budgets,
+        )
+
+    def _meets_confidence_threshold(self, key: str, payload: Dict[str, Any]) -> bool:
+        """Check whether the payload satisfies the configured confidence threshold."""
+
+        threshold = self.llm_confidence_thresholds.get(key)
+        if threshold is None:
+            return True
+
+        confidence = payload.get("confidence")
+        if confidence is None:
+            return True
+
+        try:
+            return float(confidence) >= float(threshold)
+        except (TypeError, ValueError):  # pragma: no cover - defensive branch
+            logger.warning(
+                "Invalid confidence value '%s' for key '%s'; allowing by default.",
+                confidence,
+                key,
+            )
+            return True

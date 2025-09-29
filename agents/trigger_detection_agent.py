@@ -83,7 +83,10 @@ class TriggerDetectionAgent(BaseTriggerAgent):
 
     SOFT_TRIGGER_PROMPT = """
 Du bist ein Trigger-Erkennungs-Agent, der Kalendereinträge analysiert.
-Deine Aufgabe ist es, zwei spezifische Textfelder aus Google Calendar-Einträgen auf sogenannte weiche Trigger (Soft-Trigger) zu untersuchen, die sinngemäß dieselbe Bedeutung haben wie sogenannte harte Trigger (Hard-Trigger).
+Deine Aufgabe ist es, zwei spezifische Textfelder aus Google Calendar-Einträgen
+auf sogenannte weiche Trigger (Soft-Trigger) zu untersuchen,
+die sinngemäß dieselbe Bedeutung haben wie sogenannte harte Trigger
+(Hard-Trigger).
 Die Hard-Trigger sind eine Liste fester Schlüsselwörter oder -phrasen, die in der Datei `config/trigger_words.txt` definiert sind.
 
 ### Eingabedaten:
@@ -92,7 +95,8 @@ Die Hard-Trigger sind eine Liste fester Schlüsselwörter oder -phrasen, die in 
 - `hard_triggers`: Liste von Hard-Triggern aus der Datei `config/trigger_words.txt`
 
 ### Anforderungen:
-1. Untersuche die Felder `summary` und `description` auf Begriffe oder Phrasen (Soft-Trigger), die semantisch einem Eintrag aus `hard_triggers` entsprechen.
+1. Untersuche die Felder `summary` und `description` auf Begriffe oder Phrasen
+   (Soft-Trigger), die semantisch einem Eintrag aus `hard_triggers` entsprechen.
 2. Gib für jeden gefundenen Soft-Trigger folgendes zurück:
     - `soft_trigger`: Das gefundene Wort bzw. die Phrase
     - `matched_hard_trigger`: Der zugehörige Hard-Trigger

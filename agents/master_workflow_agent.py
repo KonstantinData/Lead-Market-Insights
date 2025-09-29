@@ -218,7 +218,19 @@ class MasterWorkflowAgent:
             with observe_operation(
                 "extraction", {"event.id": str(event_id)} if event_id else None
             ):
-                extracted = self.extraction_agent.extract(event)
+                extraction_input = dict(event)
+                context = trigger_result.get("extraction_context")
+                if isinstance(context, dict):
+                    soft_matches = context.get("soft_trigger_matches")
+                    if soft_matches:
+                        extraction_input["soft_trigger_matches"] = soft_matches
+                    hard_triggers = context.get("hard_triggers")
+                    if hard_triggers:
+                        extraction_input["hard_triggers"] = hard_triggers
+                    for field in ("summary", "description"):
+                        if field not in extraction_input and context.get(field) is not None:
+                            extraction_input[field] = context.get(field)
+                extracted = self.extraction_agent.extract(extraction_input)
             event_result["extraction"] = extracted
 
             info = extracted.get("info", {}) or {}

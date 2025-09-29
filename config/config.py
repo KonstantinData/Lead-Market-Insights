@@ -219,6 +219,17 @@ class Settings:
             "RUN_LOG_DIR", self.log_storage_dir / "runs"
         )
 
+        self.hubspot_access_token: Optional[str] = _get_env_var("HUBSPOT_ACCESS_TOKEN")
+        self.hubspot_client_secret: Optional[str] = _get_env_var("HUBSPOT_CLIENT_SECRET")
+        self.hubspot_api_base_url: str = _get_env_var("HUBSPOT_API_BASE_URL") or (
+            "https://api.hubapi.com"
+        )
+        self.hubspot_request_timeout: int = _get_int_env("HUBSPOT_REQUEST_TIMEOUT", 10)
+        self.hubspot_max_retries: int = _get_int_env("HUBSPOT_MAX_RETRIES", 3)
+        self.hubspot_retry_backoff_seconds: float = _get_float_env(
+            "HUBSPOT_RETRY_BACKOFF_SECONDS", 1.0
+        )
+
         self.agent_log_dir: Path
         self.research_artifact_dir: Path
         self.research_pdf_dir: Path

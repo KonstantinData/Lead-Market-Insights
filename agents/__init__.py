@@ -11,6 +11,7 @@ __all__ = [
     "extraction_agent",
     "local_storage_agent",
     "crm_agent",
+    "internal_research_agent",
     "factory",
     "interfaces",
 ]

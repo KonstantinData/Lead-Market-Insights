@@ -5,6 +5,7 @@ from .base import (
     BaseExtractionAgent,
     BaseHumanAgent,
     BasePollingAgent,
+    BaseResearchAgent,
     BaseTriggerAgent,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
     "BaseExtractionAgent",
     "BaseHumanAgent",
     "BasePollingAgent",
+    "BaseResearchAgent",
     "BaseTriggerAgent",
 ]

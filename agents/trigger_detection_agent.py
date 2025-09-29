@@ -18,7 +18,7 @@ class TriggerDetectionAgent(BaseTriggerAgent):
             self.trigger_words = (normalize_text("trigger word"),)
 
         self._patterns: Tuple[re.Pattern[str], ...] = tuple(
-            re.compile(rf"\b{re.escape(word)}\b") for word in self.trigger_words
+            re.compile{re.escape(word)} for word in self.trigger_words
         )
 
     def check(self, event: Dict[str, Any]) -> Dict[str, Any]:

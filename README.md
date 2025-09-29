@@ -79,10 +79,11 @@ All configuration is driven through environment variables or a `.env` file. The 
 | Polling windows | `CAL_LOOKAHEAD_DAYS`, `CAL_LOOKBACK_DAYS` | Control how far ahead/behind to query events. |
 | LLM guardrails | `LLM_CONFIDENCE_THRESHOLD_*`, `LLM_COST_CAP_*`, `LLM_RETRY_BUDGET_*` | Tune prompt behaviour and spending limits. |
 | Compliance | `COMPLIANCE_MODE`, `MASK_PII_IN_LOGS`, `MASK_PII_IN_MESSAGES`, `PII_FIELD_WHITELIST` | Define masking policies and audit posture. |
-| Storage | `LOG_STORAGE_DIR`, `EVENT_LOG_DIR`, `WORKFLOW_LOG_DIR`, `RUN_LOG_DIR` | Choose where structured artefacts are written. |
+| Storage | `LOG_STORAGE_DIR`, `EVENT_LOG_DIR`, `WORKFLOW_LOG_DIR`, `RUN_LOG_DIR`, `AGENT_LOG_DIR`, `RESEARCH_ARTIFACT_DIR`, `RESEARCH_PDF_DIR` | Choose where structured artefacts, research notes, and supporting files are written. |
+| CRM attachments | `CRM_ATTACHMENT_BASE_URL` | Prefix CRM-friendly links to stored dossiers and artefacts. |
 | Agent overrides | `POLLING_AGENT`, `TRIGGER_AGENT`, `EXTRACTION_AGENT`, `HUMAN_AGENT`, `CRM_AGENT` | Swap default implementations via the agent factory. |
 
-The configuration reference includes additional options for rate limits, cost caps, and structured YAML overrides when using `AGENT_CONFIG_FILE`.
+The configuration reference includes additional options for rate limits, cost caps, structured YAML overrides when using `AGENT_CONFIG_FILE`, plus controls for research artefact storage and CRM attachment link construction.
 
 ## Running the orchestrator
 

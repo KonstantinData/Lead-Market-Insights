@@ -21,6 +21,10 @@ to poll events.
 | `EVENT_LOG_DIR` | Override for event log storage (defaults to a subdirectory of `LOG_STORAGE_DIR`). | `<LOG_STORAGE_DIR>/events` |
 | `WORKFLOW_LOG_DIR` | Override for workflow log storage. | `<LOG_STORAGE_DIR>/workflows` |
 | `RUN_LOG_DIR` | Override for per-run log files. | `<LOG_STORAGE_DIR>/runs` |
+| `AGENT_LOG_DIR` | Directory where per-agent operational logs are written. | `<LOG_STORAGE_DIR>/agents` |
+| `RESEARCH_ARTIFACT_DIR` | Folder for storing structured research outputs and notes. | `<LOG_STORAGE_DIR>/research/artifacts` |
+| `RESEARCH_PDF_DIR` | Folder for saving downloaded research PDFs. | `<LOG_STORAGE_DIR>/research/pdfs` |
+| `CRM_ATTACHMENT_BASE_URL` | Base URL used when constructing CRM attachment links. | empty |
 | `COMPLIANCE_MODE` | Controls default masking rules; accepts `standard` or `strict`. | `standard` |
 | `MASK_PII_IN_LOGS` | Explicit toggle to mask personal data in logs regardless of compliance mode. | `true` |
 | `MASK_PII_IN_MESSAGES` | Explicit toggle to mask personal data in HITL messages. | `false` (`true` when `COMPLIANCE_MODE=strict`) |
@@ -74,6 +78,18 @@ llm:
 When watchdog is available, the application monitors the `.env` file and the optional YAML/JSON
 configuration for changes. Updates are applied live to the running `MasterWorkflowAgent` and any
 other consumer of `settings`, avoiding the need to restart long-lived processes.
+
+### Research artefacts and CRM attachments
+
+Research agents persist their intermediate outputs alongside workflow logs to aid audits and
+follow-up work. By default, structured artefacts and downloaded PDFs live within the
+`log_storage/run_history/research` tree, mirroring the existing log directory layout. Override the
+`RESEARCH_ARTIFACT_DIR` and `RESEARCH_PDF_DIR` variables to relocate these stores when mounting
+network volumes or long-term archives.
+
+The CRM dispatcher can expose hosted artefacts through stable links. Set
+`CRM_ATTACHMENT_BASE_URL` to the prefix your CRM expects (for example, an S3 bucket URL) so
+generated messages reference the correct attachment location.
 
 ### Compliance modes and masking
 

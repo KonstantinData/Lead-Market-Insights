@@ -27,6 +27,18 @@ def test_agent_detects_description_soft_trigger() -> None:
     }
 
 
+def test_agent_detects_trigger_within_longer_text() -> None:
+    agent = TriggerDetectionAgent(trigger_words=["business client"])
+
+    result = agent.check({"summary": "business client condata - v2"})
+    assert result == {
+        "trigger": True,
+        "type": "hard",
+        "matched_word": normalize_text("business client"),
+        "matched_field": "summary",
+    }
+
+
 def test_agent_falls_back_to_defaults_when_no_triggers() -> None:
     agent = TriggerDetectionAgent(trigger_words=[])
     assert agent.trigger_words

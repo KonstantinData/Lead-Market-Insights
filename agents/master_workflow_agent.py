@@ -262,6 +262,7 @@ class MasterWorkflowAgent:
                         event_id,
                         force_internal=False,
                     )
+                    continue
                 else:
                     with observe_operation(
                         "hitl_missing_info",

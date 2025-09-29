@@ -58,5 +58,5 @@ class BaseResearchAgent(ABC):
     """Contract for agents that perform internal research workflows."""
 
     @abstractmethod
-    def run(self, trigger: Mapping[str, Any]) -> Dict[str, Any]:
-        """Execute research workflow for a trigger and return normalized output."""
+    def run(self, trigger: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Execute a research workflow and return a normalized payload."""

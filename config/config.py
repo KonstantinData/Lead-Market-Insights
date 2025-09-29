@@ -138,12 +138,34 @@ def _extract_agent_overrides(config_data: Mapping[str, Any]) -> Dict[str, str]:
         candidates = agents_section
 
     overrides: Dict[str, str] = {}
-    for key in ("polling", "trigger", "extraction", "human", "crm"):
-        direct_value = candidates.get(key)
-        alt_value = candidates.get(f"{key}_agent")
-        chosen = direct_value or alt_value
-        if isinstance(chosen, str) and chosen.strip():
-            overrides[key] = chosen.strip()
+    key_aliases = {
+        "polling": ("polling", "polling_agent"),
+        "trigger": ("trigger", "trigger_agent"),
+        "extraction": ("extraction", "extraction_agent"),
+        "human": ("human", "human_agent"),
+        "crm": ("crm", "crm_agent"),
+        "internal_research": (
+            "internal_research",
+            "internal_research_agent",
+        ),
+        "dossier_research": (
+            "dossier_research",
+            "dossier_agent",
+            "dossier_research_agent",
+        ),
+        "similar_companies": (
+            "similar_companies",
+            "similar_companies_agent",
+            "similar_company_agent",
+        ),
+    }
+
+    for key, aliases in key_aliases.items():
+        for alias in aliases:
+            value = candidates.get(alias)
+            if isinstance(value, str) and value.strip():
+                overrides[key] = value.strip()
+                break
 
     return overrides
 

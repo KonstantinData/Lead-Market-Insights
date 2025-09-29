@@ -220,4 +220,3 @@ class HubSpotIntegration:
                 if value:
                     return normalize_text(value)
         return ""
-

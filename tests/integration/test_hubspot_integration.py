@@ -132,4 +132,3 @@ def test_missing_access_token_raises_error(monkeypatch):
 
     with pytest.raises(EnvironmentError):
         HubSpotIntegration(settings=Settings())
-

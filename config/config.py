@@ -219,6 +219,12 @@ class Settings:
             "RUN_LOG_DIR", self.log_storage_dir / "runs"
         )
 
+        self.agent_log_dir: Path
+        self.research_artifact_dir: Path
+        self.research_pdf_dir: Path
+        self.crm_attachment_base_url: str
+        self._load_storage_extensions()
+
         self.prompt_directory: Path = _get_path_env(
             "PROMPT_DIRECTORY", project_root / "templates" / "prompts"
         )
@@ -372,6 +378,21 @@ class Settings:
 
         self.prompt_versions = prompt_versions
 
+    def _load_storage_extensions(self) -> None:
+        """Load optional storage-related settings from environment variables."""
+
+        self.agent_log_dir = _get_path_env("AGENT_LOG_DIR", self.log_storage_dir / "agents")
+
+        research_root = self.log_storage_dir / "research"
+        self.research_artifact_dir = _get_path_env(
+            "RESEARCH_ARTIFACT_DIR", research_root / "artifacts"
+        )
+        self.research_pdf_dir = _get_path_env(
+            "RESEARCH_PDF_DIR", research_root / "pdfs"
+        )
+
+        self.crm_attachment_base_url = _get_env_var("CRM_ATTACHMENT_BASE_URL") or ""
+
     def refresh_llm_configuration(self) -> None:
         """Reload LLM configuration from the configured sources."""
 
@@ -387,6 +408,7 @@ class Settings:
         else:
             self._raw_agent_config = {}
 
+        self._load_storage_extensions()
         self._load_llm_configuration(self._raw_agent_config)
         self._load_prompt_configuration(self._raw_agent_config)
 

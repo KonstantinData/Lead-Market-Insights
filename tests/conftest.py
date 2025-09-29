@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, Iterable
+from typing import Any, Dict, Iterable
 
 import pytest
 
@@ -42,6 +42,7 @@ def stub_agent_registry(isolated_agent_registry):
         BaseExtractionAgent,
         BaseHumanAgent,
         BasePollingAgent,
+        BaseResearchAgent,
         BaseTriggerAgent,
     )
 
@@ -111,6 +112,43 @@ def stub_agent_registry(isolated_agent_registry):
         def send(self, event: Dict[str, object], info: Dict[str, object]) -> None:
             self.sent.append({"event": event, "info": info})
 
+    class StubInternalResearchAgent(BaseResearchAgent):
+        def __init__(self, *, config: Any = None):
+            self.config = config
+
+        def run(self, trigger: Dict[str, Any]) -> Dict[str, Any]:
+            return {
+                "agent": "internal_research",
+                "status": "REPORT_REQUIRED",
+                "payload": {
+                    "action": "REPORT_REQUIRED",
+                    "existing_report": False,
+                },
+            }
+
+    class StubDossierResearchAgent(BaseResearchAgent):
+        def __init__(self, *, config: Any = None):
+            self.config = config
+
+        def run(self, trigger: Dict[str, Any]) -> Dict[str, Any]:
+            return {
+                "agent": "dossier_research",
+                "status": "completed",
+                "artifact_path": "stub/dossier.json",
+                "payload": {},
+            }
+
+    class StubSimilarCompaniesAgent(BaseResearchAgent):
+        def __init__(self, *, config: Any = None):
+            self.config = config
+
+        def run(self, trigger: Dict[str, Any]) -> Dict[str, Any]:
+            return {
+                "agent": "similar_companies_level1",
+                "status": "completed",
+                "payload": {"results": []},
+            }
+
     register_agent(BasePollingAgent, "stub-polling", is_default=True)(StubPollingAgent)
     register_agent(BaseTriggerAgent, "stub-trigger", is_default=True)(StubTriggerAgent)
     register_agent(
@@ -118,6 +156,13 @@ def stub_agent_registry(isolated_agent_registry):
     )(StubExtractionAgent)
     register_agent(BaseHumanAgent, "stub-human", is_default=True)(StubHumanAgent)
     register_agent(BaseCrmAgent, "stub-crm", is_default=True)(StubCrmAgent)
+    register_agent(
+        BaseResearchAgent, "internal_research", is_default=True
+    )(StubInternalResearchAgent)
+    register_agent(BaseResearchAgent, "dossier_research")(StubDossierResearchAgent)
+    register_agent(
+        BaseResearchAgent, "similar_companies_level1"
+    )(StubSimilarCompaniesAgent)
 
     return {
         "polling": StubPollingAgent,
@@ -125,4 +170,7 @@ def stub_agent_registry(isolated_agent_registry):
         "extraction": StubExtractionAgent,
         "human": StubHumanAgent,
         "crm": StubCrmAgent,
+        "internal_research": StubInternalResearchAgent,
+        "dossier_research": StubDossierResearchAgent,
+        "similar_companies": StubSimilarCompaniesAgent,
     }

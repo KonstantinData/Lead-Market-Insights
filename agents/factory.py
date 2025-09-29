@@ -10,6 +10,7 @@ from agents.interfaces import (
     BaseExtractionAgent,
     BaseHumanAgent,
     BasePollingAgent,
+    BaseResearchAgent,
     BaseTriggerAgent,
 )
 
@@ -91,6 +92,7 @@ __all__ = [
     "BaseExtractionAgent",
     "BaseHumanAgent",
     "BasePollingAgent",
+    "BaseResearchAgent",
     "BaseTriggerAgent",
     "available_agents",
     "create_agent",

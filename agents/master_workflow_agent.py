@@ -10,16 +10,19 @@ MasterWorkflowAgent: Pure logic agent for polling and event-processing.
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from agents.factory import create_agent
 
 # Ensure default agent implementations register themselves with the factory.
 from agents import (  # noqa: F401  # pylint: disable=unused-import
     crm_agent as _crm_module,
+    dossier_research_agent as _dossier_research_module,
     event_polling_agent as _polling_module,
     extraction_agent as _extraction_module,
     human_in_loop_agent as _human_module,
+    int_lvl_1_agent as _similar_company_module,
+    internal_research_agent as _internal_research_module,
     trigger_detection_agent as _trigger_module,
 )
 from agents.interfaces import (
@@ -27,6 +30,7 @@ from agents.interfaces import (
     BaseExtractionAgent,
     BaseHumanAgent,
     BasePollingAgent,
+    BaseResearchAgent,
     BaseTriggerAgent,
 )
 from agents.local_storage_agent import LocalStorageAgent
@@ -91,6 +95,25 @@ class MasterWorkflowAgent:
             resolved_overrides.get("crm"),
         )
 
+        self.internal_research_agent = self._create_research_agent(
+            resolved_overrides.get("internal_research"),
+            default_name=None,
+            required=False,
+            description="internal research",
+        )
+        self.dossier_research_agent = self._create_research_agent(
+            resolved_overrides.get("dossier_research"),
+            default_name="dossier_research",
+            required=False,
+            description="dossier research",
+        )
+        self.similar_companies_agent = self._create_research_agent(
+            resolved_overrides.get("similar_companies"),
+            default_name="similar_companies_level1",
+            required=False,
+            description="similar company",
+        )
+
         # Local storage for log artefacts
         self.storage_agent = LocalStorageAgent(settings.run_log_dir, logger=logger)
         self.workflow_log_manager = WorkflowLogManager(settings.workflow_log_dir)
@@ -151,23 +174,32 @@ class MasterWorkflowAgent:
         logger.setLevel(logging.INFO)
         logger.addHandler(file_handler)
 
-    def process_all_events(self) -> None:
-        """
-        Loops through all events, applies trigger detection, extraction, HITL, and CRM logic.
-        Decision tree follows the requirements (hard/soft trigger, info completeness, etc).
-        """
+    def process_all_events(self) -> List[Dict[str, Any]]:
+        """Process all available events and return structured run results."""
+
         logger.info("MasterWorkflowAgent: Processing events...")
+
+        processed_results: List[Dict[str, Any]] = []
 
         for event in self.event_agent.poll():
             masked_event = self._mask_for_logging(event)
             logger.info("Polled event: %s", masked_event)
             event_id = event.get("id")
 
-            # Step 1: Trigger detection (check both summary and description, hard/soft)
+            event_result: Dict[str, Any] = {
+                "event_id": event_id,
+                "research": {},
+                "research_errors": [],
+                "status": "received",
+            }
+            processed_results.append(event_result)
+
             with observe_operation(
                 "trigger_detection", {"event.id": str(event_id)} if event_id else None
             ):
                 trigger_result = self._detect_trigger(event)
+            event_result["trigger"] = trigger_result
+
             if not self._meets_confidence_threshold("trigger", trigger_result):
                 logger.info(
                     "Skipping event %s due to trigger confidence %.3f below threshold %.3f",
@@ -175,9 +207,11 @@ class MasterWorkflowAgent:
                     trigger_result.get("confidence", 0.0),
                     self.llm_confidence_thresholds.get("trigger", 0.0),
                 )
+                event_result["status"] = "skipped_trigger_threshold"
                 continue
-            if not trigger_result["trigger"]:
+            if not trigger_result.get("trigger"):
                 logger.info(f"No trigger detected for event {event_id}")
+                event_result["status"] = "no_trigger"
                 continue
 
             record_trigger_match(trigger_result.get("type", "unknown"))
@@ -191,13 +225,14 @@ class MasterWorkflowAgent:
                 masked_trigger.get("matched_field"),
             )
 
-            # Step 2: Extraction of required info (company_name, web_domain)
             with observe_operation(
                 "extraction", {"event.id": str(event_id)} if event_id else None
             ):
                 extracted = self.extraction_agent.extract(event)
-            info = extracted.get("info", {})
-            is_complete = extracted.get("is_complete", False)
+            event_result["extraction"] = extracted
+
+            info = extracted.get("info", {}) or {}
+            is_complete = bool(extracted.get("is_complete"))
             if not self._meets_confidence_threshold("extraction", extracted):
                 logger.info(
                     "Extraction confidence %.3f below threshold %.3f for event %s",
@@ -205,26 +240,87 @@ class MasterWorkflowAgent:
                     self.llm_confidence_thresholds.get("extraction", 0.0),
                     event_id,
                 )
+                event_result["status"] = "skipped_extraction_threshold"
                 continue
 
-            # Step 3: Decide actions based on trigger type and info completeness
-            if trigger_result["type"] == "hard" and is_complete:
-                with observe_operation(
-                    "crm_dispatch", {"event.id": str(event_id)} if event_id else None
-                ):
-                    self._send_to_crm_agent(event, info)
-            elif trigger_result["type"] == "soft" and is_complete:
-                # Human-in-the-loop: Ask organizer if dossier is needed
+            normalised_info = self._normalise_info_for_research(info)
+            internal_status = None
+            internal_result = None
+            if self._has_research_inputs(normalised_info):
+                internal_result = self._run_internal_research(
+                    event_result,
+                    event,
+                    normalised_info,
+                    event_id,
+                    force=False,
+                )
+                internal_status = self._extract_internal_status(internal_result)
+
+            if is_complete and internal_status == "AWAIT_REQUESTOR_DETAILS":
+                event_result["status"] = "awaiting_requestor_details"
+                continue
+            if is_complete and internal_status == "AWAIT_REQUESTOR_DECISION":
+                event_result["status"] = "awaiting_requestor_decision"
+                continue
+
+            if trigger_result.get("type") == "hard":
+                if is_complete:
+                    self._process_crm_dispatch(
+                        event,
+                        normalised_info,
+                        event_result,
+                        event_id,
+                        force_internal=False,
+                    )
+                else:
+                    with observe_operation(
+                        "hitl_missing_info",
+                        {"event.id": str(event_id)} if event_id else None,
+                    ):
+                        filled = self.human_agent.request_info(event, extracted)
+                    audit_id = filled.get("audit_id")
+                    if filled.get("is_complete"):
+                        logger.info(
+                            "Missing info provided for event %s [audit_id=%s]",
+                            event_id,
+                            audit_id or "n/a",
+                        )
+                        record_hitl_outcome("missing_info", "completed")
+                        filled_info = self._normalise_info_for_research(
+                            filled.get("info", {}) or {}
+                        )
+                        self._process_crm_dispatch(
+                            event,
+                            filled_info,
+                            event_result,
+                            event_id,
+                            force_internal=True,
+                        )
+                    else:
+                        logger.warning(
+                            "Required info still missing for event %s [audit_id=%s]",
+                            event_id,
+                            audit_id or "n/a",
+                        )
+                        record_hitl_outcome("missing_info", "incomplete")
+                        event_result["status"] = "missing_info_incomplete"
+                continue
+
+            if trigger_result.get("type") == "soft" and is_complete:
                 with observe_operation(
                     "hitl_dossier", {"event.id": str(event_id)} if event_id else None
                 ):
-                    response = self.human_agent.request_dossier_confirmation(event, info)
+                    response = self.human_agent.request_dossier_confirmation(
+                        event, info
+                    )
+                event_result["hitl_dossier"] = response
                 audit_id = response.get("audit_id")
                 status = self._resolve_dossier_status(response)
                 if status == "pending":
                     self._log_dossier_pending(event_id, audit_id, response)
                     record_hitl_outcome("dossier", "pending")
-                elif response.get("dossier_required"):
+                    event_result["status"] = "dossier_pending"
+                elif response.get("dossier_required") or status == "approved":
                     logger.info(
                         "Organizer approved dossier for event %s [audit_id=%s]: %s",
                         event_id,
@@ -232,11 +328,13 @@ class MasterWorkflowAgent:
                         self._mask_for_logging(response.get("details")),
                     )
                     record_hitl_outcome("dossier", "approved")
-                    with observe_operation(
-                        "crm_dispatch",
-                        {"event.id": str(event_id)} if event_id else None,
-                    ):
-                        self._send_to_crm_agent(event, info)
+                    self._process_crm_dispatch(
+                        event,
+                        normalised_info,
+                        event_result,
+                        event_id,
+                        force_internal=False,
+                    )
                 else:
                     logger.info(
                         "Organizer declined dossier for event %s [audit_id=%s]: %s",
@@ -245,45 +343,24 @@ class MasterWorkflowAgent:
                         self._mask_for_logging(response.get("details")),
                     )
                     record_hitl_outcome("dossier", "declined")
-            elif trigger_result["type"] == "hard" and not is_complete:
-                # Human-in-the-loop: Ask for missing company_name/web_domain
-                with observe_operation(
-                    "hitl_missing_info",
-                    {"event.id": str(event_id)} if event_id else None,
-                ):
-                    filled = self.human_agent.request_info(event, extracted)
-                audit_id = filled.get("audit_id")
-                if filled.get("is_complete"):
-                    logger.info(
-                        "Missing info provided for event %s [audit_id=%s]",
-                        event_id,
-                        audit_id or "n/a",
-                    )
-                    record_hitl_outcome("missing_info", "completed")
-                    with observe_operation(
-                        "crm_dispatch",
-                        {"event.id": str(event_id)} if event_id else None,
-                    ):
-                        self._send_to_crm_agent(event, filled.get("info", {}))
-                else:
-                    logger.warning(
-                        "Required info still missing for event %s [audit_id=%s]",
-                        event_id,
-                        audit_id or "n/a",
-                    )
-                    record_hitl_outcome("missing_info", "incomplete")
-            elif trigger_result["type"] == "soft" and not is_complete:
-                # Human-in-the-loop: First ask organizer, then ask for missing info if needed
+                    event_result["status"] = "dossier_declined"
+                continue
+
+            if trigger_result.get("type") == "soft" and not is_complete:
                 with observe_operation(
                     "hitl_dossier", {"event.id": str(event_id)} if event_id else None
                 ):
-                    response = self.human_agent.request_dossier_confirmation(event, info)
+                    response = self.human_agent.request_dossier_confirmation(
+                        event, info
+                    )
+                event_result["hitl_dossier"] = response
                 audit_id = response.get("audit_id")
                 status = self._resolve_dossier_status(response)
                 if status == "pending":
                     self._log_dossier_pending(event_id, audit_id, response)
                     record_hitl_outcome("dossier", "pending")
-                elif response.get("dossier_required"):
+                    event_result["status"] = "dossier_pending"
+                elif response.get("dossier_required") or status == "approved":
                     logger.info(
                         "Organizer approved dossier for event %s [audit_id=%s]: %s",
                         event_id,
@@ -304,11 +381,16 @@ class MasterWorkflowAgent:
                             fill_audit_id or "n/a",
                         )
                         record_hitl_outcome("missing_info", "completed")
-                        with observe_operation(
-                            "crm_dispatch",
-                            {"event.id": str(event_id)} if event_id else None,
-                        ):
-                            self._send_to_crm_agent(event, filled.get("info", {}))
+                        filled_info = self._normalise_info_for_research(
+                            filled.get("info", {}) or {}
+                        )
+                        self._process_crm_dispatch(
+                            event,
+                            filled_info,
+                            event_result,
+                            event_id,
+                            force_internal=True,
+                        )
                     else:
                         logger.warning(
                             "Required info still missing after HITL for event %s [audit_id=%s]",
@@ -316,6 +398,7 @@ class MasterWorkflowAgent:
                             fill_audit_id or "n/a",
                         )
                         record_hitl_outcome("missing_info", "incomplete")
+                        event_result["status"] = "missing_info_incomplete"
                 else:
                     logger.info(
                         "Organizer declined dossier for event %s [audit_id=%s]: %s",
@@ -324,8 +407,13 @@ class MasterWorkflowAgent:
                         self._mask_for_logging(response.get("details")),
                     )
                     record_hitl_outcome("dossier", "declined")
-            else:
-                logger.warning(f"Unhandled trigger/info state for event {event_id}")
+                    event_result["status"] = "dossier_declined"
+                continue
+
+            logger.warning(f"Unhandled trigger/info state for event {event_id}")
+            event_result["status"] = "unhandled_state"
+
+        return processed_results
 
     def _detect_trigger(self, event: Dict[str, Any]) -> Dict[str, Any]:
         # Delegates to trigger agent, checks both summary and description
@@ -333,6 +421,238 @@ class MasterWorkflowAgent:
 
     def _send_to_crm_agent(self, event: Dict[str, Any], info: Dict[str, Any]) -> None:
         self.crm_agent.send(event, info)
+
+    def _create_research_agent(
+        self,
+        override_name: Optional[str],
+        *,
+        default_name: Optional[str],
+        required: bool,
+        description: str,
+    ) -> Optional[BaseResearchAgent]:
+        name = override_name or default_name
+        label = name or "<default>"
+        try:
+            return create_agent(BaseResearchAgent, name)  # type: ignore[arg-type]
+        except KeyError:
+            if required:
+                logger.error(
+                    "Required %s agent '%s' is not registered.", description, label
+                )
+                raise
+            logger.warning(
+                "%s agent '%s' is not registered; continuing without it.",
+                description.capitalize(),
+                label,
+            )
+            return None
+        except OSError as exc:
+            logger.warning(
+                "Unable to initialise %s agent '%s': %s",
+                description,
+                label,
+                exc,
+            )
+            return None
+
+    def _normalise_info_for_research(self, info: Dict[str, Any]) -> Dict[str, Any]:
+        payload = dict(info or {})
+        if "company_name" not in payload and payload.get("name"):
+            payload["company_name"] = payload.get("name")
+        domain = (
+            payload.get("company_domain")
+            or payload.get("web_domain")
+            or payload.get("domain")
+        )
+        if domain:
+            payload["company_domain"] = domain
+        return payload
+
+    def _has_research_inputs(self, info: Dict[str, Any]) -> bool:
+        return bool(info.get("company_name")) and bool(info.get("company_domain"))
+
+    def _build_research_trigger(
+        self,
+        event: Dict[str, Any],
+        info: Dict[str, Any],
+        event_id: Optional[Any],
+    ) -> Dict[str, Any]:
+        payload = dict(info)
+        payload.setdefault("run_id", self.run_id)
+        if event_id is not None:
+            payload.setdefault("event_id", event_id)
+        trigger: Dict[str, Any] = {
+            "id": event_id,
+            "event_id": event_id,
+            "run_id": self.run_id,
+            "source": "workflow_orchestrator",
+            "payload": payload,
+        }
+        creator = event.get("creator") if isinstance(event, dict) else None
+        recipient = event.get("recipient") if isinstance(event, dict) else None
+        if creator:
+            trigger["creator"] = creator
+        if recipient:
+            trigger["recipient"] = recipient
+        return trigger
+
+    def _run_research_agent(
+        self,
+        agent: Optional[BaseResearchAgent],
+        agent_name: str,
+        event_result: Dict[str, Any],
+        event: Dict[str, Any],
+        info: Dict[str, Any],
+        event_id: Optional[Any],
+        *,
+        force: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        if agent is None:
+            return None
+
+        research_store = event_result.setdefault("research", {})
+        if agent_name in research_store and not force:
+            return research_store[agent_name]
+
+        trigger = self._build_research_trigger(event, info, event_id)
+        try:
+            result = agent.run(trigger)
+        except Exception as exc:  # pragma: no cover - defensive guard
+            logger.exception(
+                "%s research agent failed for event %s", agent_name, event_id
+            )
+            event_result.setdefault("research_errors", []).append(
+                {"agent": agent_name, "error": str(exc)}
+            )
+            return research_store.get(agent_name)
+
+        research_store[agent_name] = result
+        return result
+
+    def _run_internal_research(
+        self,
+        event_result: Dict[str, Any],
+        event: Dict[str, Any],
+        info: Dict[str, Any],
+        event_id: Optional[Any],
+        *,
+        force: bool,
+    ) -> Optional[Dict[str, Any]]:
+        if not self.internal_research_agent or not self._has_research_inputs(info):
+            return event_result.get("research", {}).get("internal_research")
+
+        return self._run_research_agent(
+            self.internal_research_agent,
+            "internal_research",
+            event_result,
+            event,
+            info,
+            event_id,
+            force=force,
+        )
+
+    def _extract_internal_status(
+        self, result: Optional[Dict[str, Any]]
+    ) -> Optional[str]:
+        if not isinstance(result, dict):
+            return None
+        status = result.get("status")
+        if isinstance(status, str) and status:
+            return status
+        payload = result.get("payload")
+        if isinstance(payload, dict):
+            action = payload.get("action")
+            if isinstance(action, str) and action:
+                return action
+        return None
+
+    def _execute_precrm_research(
+        self,
+        event_result: Dict[str, Any],
+        event: Dict[str, Any],
+        info: Dict[str, Any],
+        event_id: Optional[Any],
+        *,
+        requires_dossier: bool,
+    ) -> None:
+        if requires_dossier and self._can_run_dossier(info):
+            self._run_research_agent(
+                self.dossier_research_agent,
+                "dossier_research",
+                event_result,
+                event,
+                info,
+                event_id,
+                force=True,
+            )
+
+        if self._can_run_similar(info):
+            self._run_research_agent(
+                self.similar_companies_agent,
+                "similar_companies",
+                event_result,
+                event,
+                info,
+                event_id,
+                force=True,
+            )
+
+    def _can_run_dossier(self, info: Dict[str, Any]) -> bool:
+        return bool(info.get("company_name")) and bool(info.get("company_domain"))
+
+    def _can_run_similar(self, info: Dict[str, Any]) -> bool:
+        return bool(info.get("company_name"))
+
+    def _process_crm_dispatch(
+        self,
+        event: Dict[str, Any],
+        info: Dict[str, Any],
+        event_result: Dict[str, Any],
+        event_id: Optional[Any],
+        *,
+        force_internal: bool,
+    ) -> None:
+        prepared_info = self._normalise_info_for_research(info)
+        if not self._has_research_inputs(prepared_info):
+            event_result["status"] = "missing_research_inputs"
+            return
+
+        internal_result = self._run_internal_research(
+            event_result,
+            event,
+            prepared_info,
+            event_id,
+            force=force_internal,
+        )
+        internal_status = self._extract_internal_status(internal_result)
+        if internal_status == "AWAIT_REQUESTOR_DETAILS":
+            event_result["status"] = "awaiting_requestor_details"
+            return
+        if internal_status == "AWAIT_REQUESTOR_DECISION":
+            event_result["status"] = "awaiting_requestor_decision"
+            return
+
+        requires_dossier = internal_status in (None, "REPORT_REQUIRED")
+        self._execute_precrm_research(
+            event_result,
+            event,
+            prepared_info,
+            event_id,
+            requires_dossier=requires_dossier,
+        )
+
+        crm_payload = dict(prepared_info)
+        if event_result.get("research"):
+            crm_payload["research"] = event_result["research"]
+
+        with observe_operation(
+            "crm_dispatch", {"event.id": str(event_id)} if event_id else None
+        ):
+            self._send_to_crm_agent(event, crm_payload)
+
+        event_result["status"] = "dispatched_to_crm"
+        event_result["crm_dispatched"] = True
+        event_result["crm_payload"] = crm_payload
 
     def finalize_run_logs(self) -> None:
         """Persist metadata about the generated log file to local storage."""

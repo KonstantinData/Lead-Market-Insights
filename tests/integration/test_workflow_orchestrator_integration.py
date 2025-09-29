@@ -50,6 +50,7 @@ def test_backend_failure_triggers_alert(
     monkeypatch, tmp_path: Path, stub_agent_registry
 ) -> None:
     monkeypatch.setenv("RUN_LOG_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("RESEARCH_ARTIFACT_DIR", str(tmp_path / "research" / "artifacts"))
     monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
     reloaded_config = importlib.reload(config_module)
     monkeypatch.setattr(master_module, "settings", reloaded_config.settings)
@@ -82,6 +83,7 @@ def test_repeated_failures_escalate_to_critical(
     monkeypatch, tmp_path: Path, stub_agent_registry
 ):
     monkeypatch.setenv("RUN_LOG_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("RESEARCH_ARTIFACT_DIR", str(tmp_path / "research" / "artifacts"))
     monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
     reloaded_config = importlib.reload(config_module)
     monkeypatch.setattr(master_module, "settings", reloaded_config.settings)
@@ -124,6 +126,9 @@ def test_agent_swaps_can_be_driven_by_configuration(
                     "extraction": "stub-extraction",
                     "human": "stub-human",
                     "crm": "stub-crm",
+                    "internal_research": "internal_research",
+                    "dossier_research": "dossier_research",
+                    "similar_companies": "similar_companies_level1",
                 }
             }
         ),
@@ -132,6 +137,7 @@ def test_agent_swaps_can_be_driven_by_configuration(
 
     monkeypatch.setenv("AGENT_CONFIG_FILE", str(config_file))
     monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
+    monkeypatch.setenv("RESEARCH_ARTIFACT_DIR", str(tmp_path / "research" / "artifacts"))
     reloaded_config = importlib.reload(config_module)
     monkeypatch.setattr(master_module, "settings", reloaded_config.settings)
 
@@ -142,3 +148,15 @@ def test_agent_swaps_can_be_driven_by_configuration(
     assert isinstance(master_agent.extraction_agent, stub_agent_registry["extraction"])
     assert isinstance(master_agent.human_agent, stub_agent_registry["human"])
     assert isinstance(master_agent.crm_agent, stub_agent_registry["crm"])
+    assert isinstance(
+        master_agent.internal_research_agent,
+        stub_agent_registry["internal_research"],
+    )
+    assert isinstance(
+        master_agent.dossier_research_agent,
+        stub_agent_registry["dossier_research"],
+    )
+    assert isinstance(
+        master_agent.similar_companies_agent,
+        stub_agent_registry["similar_companies"],
+    )

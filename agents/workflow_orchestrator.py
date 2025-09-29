@@ -6,11 +6,14 @@ WorkflowOrchestrator: Central orchestrator for the Agentic Intelligence Research
 - Calls the MasterWorkflowAgent and sub-agents as pure logic modules.
 """
 
+import json
 import logging
-from typing import Dict, Optional
+from pathlib import Path
+from typing import Dict, Optional, Sequence
 
 from agents.alert_agent import AlertAgent, AlertSeverity
 from agents.master_workflow_agent import MasterWorkflowAgent
+from config.config import settings
 from utils.observability import configure_observability, generate_run_id, workflow_run
 
 logger = logging.getLogger("WorkflowOrchestrator")
@@ -32,6 +35,7 @@ class WorkflowOrchestrator:
         self._failure_key = "workflow_run"
         self._failure_counts: Dict[str, int] = {}
         self._last_run_id: Optional[str] = None
+        self._research_summary_root = Path(settings.research_artifact_dir) / "workflow_runs"
 
         configure_observability()
 
@@ -68,7 +72,22 @@ class WorkflowOrchestrator:
                 if self.master_agent:
                     if hasattr(self.master_agent, "initialize_run"):
                         self.master_agent.initialize_run(run_context.run_id)
-                    self.master_agent.process_all_events()
+                    results = self.master_agent.process_all_events() or []
+                    self._report_research_errors(run_context.run_id, results)
+                    try:
+                        self._store_research_outputs(run_context.run_id, results)
+                    except Exception as exc:  # pragma: no cover - defensive guard
+                        logger.error(
+                            "Failed to persist research outputs", exc_info=True
+                        )
+                        self._handle_exception(
+                            exc,
+                            handled=True,
+                            context={
+                                "phase": "store_research",
+                                "run_id": run_context.run_id,
+                            },
+                        )
             except Exception as exc:
                 run_context.mark_failure(exc)
                 logger.exception("Workflow failed with exception:")
@@ -84,6 +103,59 @@ class WorkflowOrchestrator:
                 self._reset_failure_count(self._failure_key)
             finally:
                 self._finalize()
+
+    def _store_research_outputs(
+        self, run_id: str, results: Sequence[Dict[str, object]]
+    ) -> None:
+        if not results:
+            return
+
+        summary_dir = self._research_summary_root / run_id
+        summary_dir.mkdir(parents=True, exist_ok=True)
+        summary_path = summary_dir / "summary.json"
+
+        sanitized: list[Dict[str, object]] = []
+        for entry in results:
+            sanitized.append(
+                {
+                    "event_id": entry.get("event_id"),
+                    "status": entry.get("status"),
+                    "crm_dispatched": entry.get("crm_dispatched", False),
+                    "trigger": entry.get("trigger"),
+                    "extraction": entry.get("extraction"),
+                    "research": entry.get("research"),
+                    "research_errors": entry.get("research_errors", []),
+                }
+            )
+
+        summary_path.write_text(
+            json.dumps(sanitized, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        logger.info(
+            "Stored research summary for run %s at %s",
+            run_id,
+            summary_path.as_posix(),
+        )
+
+    def _report_research_errors(
+        self, run_id: str, results: Sequence[Dict[str, object]]
+    ) -> None:
+        if not results:
+            return
+
+        for entry in results:
+            for error in entry.get("research_errors", []) or []:
+                message = (
+                    f"Research agent '{error.get('agent')}' failed during run {run_id}."
+                )
+                context = {
+                    "run_id": run_id,
+                    "event_id": entry.get("event_id"),
+                    "agent": error.get("agent"),
+                    "error": error.get("error"),
+                }
+                self._emit_alert(message, AlertSeverity.ERROR, context)
 
     def _finalize(self):
         if not self.master_agent:

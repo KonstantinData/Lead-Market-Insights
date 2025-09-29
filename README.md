@@ -9,14 +9,15 @@ The repository is organised as a set of focused agents, supporting utilities, an
 1. [Quick start](#quick-start)
 2. [System architecture](#system-architecture)
 3. [Agent responsibilities](#agent-responsibilities)
-4. [Configuration](#configuration)
-5. [Running the orchestrator](#running-the-orchestrator)
-6. [Repository structure](#repository-structure)
-7. [Development workflow](#development-workflow)
-8. [Logging and observability](#logging-and-observability)
-9. [Data handling and compliance](#data-handling-and-compliance)
-10. [Human-in-the-loop interactions](#human-in-the-loop-interactions)
-11. [Further reading](#further-reading)
+4. [Research workflow reference](#research-workflow-reference)
+5. [Configuration](#configuration)
+6. [Running the orchestrator](#running-the-orchestrator)
+7. [Repository structure](#repository-structure)
+8. [Development workflow](#development-workflow)
+9. [Logging and observability](#logging-and-observability)
+10. [Data handling and compliance](#data-handling-and-compliance)
+11. [Human-in-the-loop interactions](#human-in-the-loop-interactions)
+12. [Further reading](#further-reading)
 
 ## Quick start
 
@@ -52,7 +53,7 @@ flowchart LR
     Alerting --> IncidentTools[(PagerDuty / Slack)]
 ```
 
-See [`docs/architecture.md`](docs/architecture.md) for deeper component diagrams, deployment guidance, and extension patterns.
+See [`docs/architecture.md`](docs/architecture.md) for deeper component diagrams, deployment guidance, and extension patterns, including a sequence view of how the research agents collaborate with polling, extraction, and human decision points.
 
 ## Agent responsibilities
 
@@ -62,12 +63,64 @@ See [`docs/architecture.md`](docs/architecture.md) for deeper component diagrams
 | Trigger detection | Scores events against hard/soft triggers and LLM heuristics. | Combines deterministic keyword matching with LLM confidence thresholds. |
 | Extraction | Builds structured dossiers from event metadata. | Outputs completeness signals used by downstream agents. |
 | LLM strategy | Provides reusable prompts, retry budgets, and guardrails for trigger/extraction agents. | Configured via environment variables and prompt templates. |
-| Research | Augments dossiers with external context (company intel, notes). | Optional enrichment step feeding back into human review. |
+| Research | Augments dossiers with external context (company intel, notes). | Composed of dedicated internal, dossier, and similar-company agents that coordinate storage, reminders, and downstream delivery. |
 | Human-in-the-loop | Coordinates manual review when information is missing or approvals are required. | Supports strict masking policies for compliance-sensitive deployments. |
 | CRM dispatch | Sends curated dossiers to CRM or ticketing systems. | Default implementation logs payloads; replace with production connector. |
 | Alerting | Escalates workflow anomalies and compliance breaches. | Integrates with Slack, PagerDuty, or email via pluggable dispatchers. |
 
-Review [`agents/README.md`](agents/README.md) for factory usage and implementation tips on creating new agent variants.
+Review [`agents/README.md`](agents/README.md) for factory usage and implementation tips on creating new agent variants, including the specialised research agents.
+
+## Research workflow reference
+
+### End-to-end research pipeline
+
+The research pipeline activates after extraction has produced a minimally viable dossier. The orchestrator performs the following stages:
+
+1. **Normalisation** – `MasterWorkflowAgent` harmonises extracted event data into the canonical research input schema (company name, website, organiser emails, trigger metadata).
+2. **Internal dossier lookup** – `InternalResearchAgent` checks local artefact storage for an existing dossier, correlates the request with CRM records, and records whether reminders or escalations are needed. When an up-to-date dossier is found the run short-circuits to delivery.
+3. **Dossier research generation** – `DossierResearchAgent` queries public sources to create a `company_detail_research.json` artefact that captures background, funding, product signals, and CRM-ready notes. It writes the JSON under `<RESEARCH_ARTIFACT_DIR>/dossier_research/<run_id>/` and emits structured telemetry.
+4. **Similar companies analysis** – The `similar_companies_level1` research agent expands on the dossier by identifying comparable organisations and records its findings in `similar_companies_level1.json`.
+5. **PDF compilation** – When all required JSON artefacts exist, `utils.reporting.convert_research_artifacts_to_pdfs` packages them into run-scoped PDFs stored beneath `<RESEARCH_PDF_DIR>/<run_id>/`. These PDFs are later attached to CRM records or emailed directly.
+6. **Delivery orchestration** – The orchestrator shares the assembled artefacts with the CRM agent and human operator notifications so everyone has a consistent view of the research bundle.
+
+Each stage logs its own progress with the workflow `run_id`, allowing teams to audit the full pipeline across logs, artefacts, and OpenTelemetry traces.
+
+### Existing dossier branch logic
+
+When an organiser or company already has a vetted dossier, the internal research agent reuses the latest artefacts instead of performing a fresh crawl. The decision tree is:
+
+1. Check `<RESEARCH_ARTIFACT_DIR>/internal_research/<company_slug>/latest.json` (or CRM records) for a dossier created within the freshness window.
+2. If present, copy the artefact metadata into the current run folder, record a "reuse" decision, and trigger the **existing dossier** email template so operators know why no new research was generated.
+3. If the dossier is stale, queue a refresh task by notifying the human-in-the-loop agent. The reminder schedule is derived from the `reminders/` configuration so escalations are automatic when operators do not acknowledge the refresh.
+4. Only if no dossier exists (or a refresh is approved) do the dossier and similar-company agents proceed with new research runs.
+
+This logic prevents duplicate research while ensuring operators receive a clear audit trail about what happened in each run.
+
+### Human-in-the-loop decision cycle
+
+The human agent receives structured payloads that include:
+
+- Extracted company facts and detected research gaps.
+- Any prior dossier metadata (timestamps, owning researcher, status).
+- Suggested follow-up actions from the internal research agent (e.g. "confirm organiser website" or "approve refresh").
+
+The cycle progresses through the following checkpoints:
+
+1. **Assignment** – The orchestrator records an audit log entry (`research.internal_research`) and assigns the task. Reminder timers start immediately.
+2. **Reminder and escalation** – If the task remains incomplete, reminders are sent using `reminders/` cadences (for example, 2-hour and 6-hour follow-ups) until the SLA is met. Escalations are logged with the same `run_id` for traceability.
+3. **Decision capture** – Operators respond via the configured human backend (email, ticketing, or chat). Their choices (approve, request changes, decline) are persisted to the audit trail under `log_storage/run_history/workflows/<run_id>/hitl.json`.
+4. **Audit stitching** – Once the human decision is applied, the orchestrator updates the run record with timestamps, the acting operator, and a summary of the action so downstream audits can replay the decision path.
+
+### Final research delivery workflow
+
+Every run ends by compiling the artefacts required for organisers and CRM stakeholders:
+
+1. **PDF attachments** – The reporting utility generates a concise PDF summary for each JSON artefact and stores it at `<RESEARCH_PDF_DIR>/<run_id>/<artifact_name>.pdf`. The CRM agent attaches these files when sending the final research dossier.
+2. **CRM portal links** – When `CRM_ATTACHMENT_BASE_URL` is configured, each artefact path is converted into a stable link (for example, `https://crm.example.com/attachments/<run_id>/<file>`). Operators will see these links referenced in CRM notes and the final delivery email.
+3. **Email delivery** – The `final_research_delivery` templates include both PDF attachments and portal links so organisers have immediate access regardless of channel restrictions.
+4. **Run closure** – `MasterWorkflowAgent.finalize_run_logs` records the artefact manifest, HITL outcomes, and delivery status. Operators can cross-check the manifest in `log_storage/run_history/research/workflow_runs/<run_id>/summary.json`.
+
+See [`docs/research_artifacts.md`](docs/research_artifacts.md) for detailed artefact schemas, sample JSON files, and PDF layout guidance that operators can use when validating deliveries.
 
 ## Configuration
 
@@ -79,11 +132,13 @@ All configuration is driven through environment variables or a `.env` file. The 
 | Polling windows | `CAL_LOOKAHEAD_DAYS`, `CAL_LOOKBACK_DAYS` | Control how far ahead/behind to query events. |
 | LLM guardrails | `LLM_CONFIDENCE_THRESHOLD_*`, `LLM_COST_CAP_*`, `LLM_RETRY_BUDGET_*` | Tune prompt behaviour and spending limits. |
 | Compliance | `COMPLIANCE_MODE`, `MASK_PII_IN_LOGS`, `MASK_PII_IN_MESSAGES`, `PII_FIELD_WHITELIST` | Define masking policies and audit posture. |
-| Storage | `LOG_STORAGE_DIR`, `EVENT_LOG_DIR`, `WORKFLOW_LOG_DIR`, `RUN_LOG_DIR`, `AGENT_LOG_DIR`, `RESEARCH_ARTIFACT_DIR`, `RESEARCH_PDF_DIR` | Choose where structured artefacts, research notes, and supporting files are written. |
-| CRM attachments | `CRM_ATTACHMENT_BASE_URL` | Prefix CRM-friendly links to stored dossiers and artefacts. |
+| Storage | `LOG_STORAGE_DIR`, `EVENT_LOG_DIR`, `WORKFLOW_LOG_DIR`, `RUN_LOG_DIR`, `AGENT_LOG_DIR`, `RESEARCH_ARTIFACT_DIR`, `RESEARCH_PDF_DIR` | Choose where structured artefacts, research notes, PDFs, and supporting files are written. |
+| Research agents | `AGENT_CONFIG_FILE` overrides for `internal_research`, `dossier_research`, and `similar_companies` | Select alternative research implementations, including sandbox/test doubles. |
+| CRM attachments | `CRM_ATTACHMENT_BASE_URL`, `HUBSPOT_API_BASE_URL` | Prefix CRM-friendly links to stored dossiers and configure the base URL for HubSpot API calls. |
+| PDF generation | `RESEARCH_PDF_DIR`, `REPORTLAB` dependency | Control where research PDFs are stored and ensure ReportLab is installed for PDF generation. |
 | Agent overrides | `POLLING_AGENT`, `TRIGGER_AGENT`, `EXTRACTION_AGENT`, `HUMAN_AGENT`, `CRM_AGENT` | Swap default implementations via the agent factory. |
 
-The configuration reference includes additional options for rate limits, cost caps, structured YAML overrides when using `AGENT_CONFIG_FILE`, plus controls for research artefact storage and CRM attachment link construction.
+The configuration reference includes additional options for rate limits, cost caps, structured YAML overrides when using `AGENT_CONFIG_FILE`, plus controls for research artefact storage, CRM attachment link construction, and custom research agent selection.
 
 ## Running the orchestrator
 

@@ -1,0 +1,13 @@
+Hi {recipient_name},
+
+Thank you for your patience. We've completed the research for {company_name}.
+Attached you'll find the final dossier along with any supporting materials requested.
+
+Key highlights:
+{highlights}
+
+If you prefer to review the dossier in the CRM portal, use the link below.
+
+Please let us know if you have any follow-up questions or additional requests.
+
+{signature}

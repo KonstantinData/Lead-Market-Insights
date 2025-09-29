@@ -24,6 +24,7 @@ orjson>=3.9,<4.0              # Fast JSON (optional, for performance)
 
 # Data manipulation
 pandas>=2.2,<3.0              # For any advanced data processing, reporting, or enrichment
+reportlab>=3.6,<4.0           # Generate PDF summaries for research outputs
 
 # Logging and monitoring
 loguru>=0.7,<1.0              # Modern, flexible logging (optional, enhances standard logging)

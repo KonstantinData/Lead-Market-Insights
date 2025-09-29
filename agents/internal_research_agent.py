@@ -6,8 +6,9 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence
 
 from agents.factory import register_agent
 from agents.interfaces import BaseResearchAgent
@@ -18,6 +19,25 @@ from logs.workflow_log_manager import WorkflowLogManager
 from reminders.reminder_escalation import ReminderEscalation
 
 NormalizedPayload = Dict[str, Any]
+
+_TEMPLATE_ROOT = Path(__file__).resolve().parents[1] / "templates" / "email"
+
+
+class _SafeFormatDict(dict):
+    """Dictionary returning an empty string for missing format keys."""
+
+    def __missing__(self, key: str) -> str:  # pragma: no cover - defensive safeguard
+        return ""
+
+
+@lru_cache(maxsize=None)
+def _load_email_template(template_name: str) -> str:
+    template_path = _TEMPLATE_ROOT / template_name
+    if not template_path.exists():
+        raise FileNotFoundError(
+            f"Email template '{template_name}' not found at {template_path}"
+        )
+    return template_path.read_text(encoding="utf-8")
 
 
 @register_agent(BaseResearchAgent, "internal_research", "default", is_default=True)
@@ -57,6 +77,10 @@ class InternalResearchAgent(BaseResearchAgent):
         self._configure_file_logger()
 
         self.email_agent = email_agent or self._build_email_agent_from_env()
+        self._default_signature_text = "Best regards,\nInternal Research Agent"
+        self._default_signature_html = (
+            "<p>Best regards,<br>Internal Research Agent</p>"
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -434,6 +458,7 @@ class InternalResearchAgent(BaseResearchAgent):
         if exists and last_report_date:
             email_status = self._send_existing_report_email(
                 payload,
+                payload_result,
                 run_id,
                 event_id,
                 last_report_date,
@@ -453,6 +478,7 @@ class InternalResearchAgent(BaseResearchAgent):
     def _send_existing_report_email(
         self,
         payload: Mapping[str, Any],
+        payload_result: Mapping[str, Any],
         run_id: str,
         event_id: Optional[str],
         last_report_date: str,
@@ -479,17 +505,37 @@ class InternalResearchAgent(BaseResearchAgent):
 
         subject = f"Existing research available for {company_name}"
         first_name = recipient.split("@", 1)[0]
+        context = {
+            "recipient_name": first_name,
+            "company_name": company_name,
+            "last_report_date": display_date,
+            "signature": self._default_signature_text,
+        }
         body = (
-            f"Hi {first_name},\n\n"
-            f"We already have a report for {company_name}.\n"
-            f"The latest version is from {display_date}.\n\n"
-            "Reply with I USE THE EXISTING to receive the PDF and reference in HubSpot.\n"
-            "Reply with NEW REPORT if you need an updated dossier.\n\n"
-            "Best regards,\nInternal Research Agent"
+            self._render_email_template(
+                "internal_research_existing_dossier.txt", context
+            )
+            or ""
+        )
+        html_body = self._render_email_template(
+            "internal_research_existing_dossier.html",
+            {**context, "signature": self._default_signature_html},
+            optional=True,
         )
 
+        portal_link = self._build_crm_portal_link(payload_result, payload)
+        attachment_links: Optional[Iterable[str]] = None
+        if portal_link:
+            attachment_links = [portal_link]
+
         try:
-            sent = self.email_agent.send_email(recipient, subject, body)
+            sent = self.email_agent.send_email(
+                recipient,
+                subject,
+                body,
+                html_body=html_body,
+                attachment_links=attachment_links,
+            )
         except Exception as exc:  # pragma: no cover - defensive logging
             self._log_workflow(
                 run_id,
@@ -532,6 +578,89 @@ class InternalResearchAgent(BaseResearchAgent):
             event_id=event_id,
             error=error,
         )
+
+    def _render_email_template(
+        self,
+        template_name: str,
+        context: Mapping[str, Any],
+        *,
+        optional: bool = False,
+    ) -> Optional[str]:
+        try:
+            template = _load_email_template(template_name)
+        except FileNotFoundError:
+            if optional:
+                return None
+            raise
+
+        safe_context = _SafeFormatDict(context)
+        rendered = template.format_map(safe_context)
+        return rendered
+
+    def _build_crm_portal_link(
+        self, *sources: Mapping[str, Any]
+    ) -> Optional[str]:
+        for source in sources:
+            if not isinstance(source, Mapping):
+                continue
+            link = self._extract_portal_link_from_mapping(source)
+            if link:
+                return link
+        return None
+
+    def _extract_portal_link_from_mapping(
+        self, mapping: Mapping[str, Any]
+    ) -> Optional[str]:
+        candidate_keys = (
+            "crm_attachment_link",
+            "crm_attachment_url",
+            "crm_attachment_path",
+            "attachment_link",
+            "attachment_url",
+            "portal_link",
+            "portal_url",
+            "portal_path",
+        )
+        for key in candidate_keys:
+            value = mapping.get(key)
+            normalized = self._normalize_portal_value(value)
+            if normalized:
+                return normalized
+
+        nested = mapping.get("payload")
+        if isinstance(nested, Mapping):
+            return self._extract_portal_link_from_mapping(nested)
+        return None
+
+    def _normalize_portal_value(self, value: Any) -> Optional[str]:
+        if isinstance(value, Mapping):
+            for nested_value in value.values():
+                normalized = self._normalize_portal_value(nested_value)
+                if normalized:
+                    return normalized
+            return None
+
+        if isinstance(value, (list, tuple, set)):
+            for item in value:
+                normalized = self._normalize_portal_value(item)
+                if normalized:
+                    return normalized
+            return None
+
+        if not value:
+            return None
+
+        value_str = str(value).strip()
+        if not value_str:
+            return None
+
+        if value_str.startswith("http://") or value_str.startswith("https://"):
+            return value_str
+
+        base = (self.config.crm_attachment_base_url or "").rstrip("/")
+        if not base:
+            return None
+        return f"{base}/{value_str.lstrip('/')}"
 
 
 __all__ = ["InternalResearchAgent"]

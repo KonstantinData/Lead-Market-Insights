@@ -535,4 +535,3 @@ class InternalResearchAgent(BaseResearchAgent):
 
 
 __all__ = ["InternalResearchAgent"]
-

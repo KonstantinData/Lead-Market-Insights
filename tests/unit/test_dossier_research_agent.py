@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,8 @@ def agent(tmp_path: Path) -> DossierResearchAgent:
     return DossierResearchAgent(config=_Config(tmp_path))
 
 
-def _base_trigger() -> dict[str, object]:
+@pytest.fixture()
+def base_trigger() -> dict[str, object]:
     return {
         "run_id": "run-123",
         "event_id": "evt-456",
@@ -43,8 +45,25 @@ def _base_trigger() -> dict[str, object]:
     }
 
 
-def test_run_serializes_output_and_persists_artifact(agent: DossierResearchAgent) -> None:
-    trigger = _base_trigger()
+@pytest.fixture()
+def trigger_factory(base_trigger: dict[str, object]):
+    def _factory(**updates: object) -> dict[str, object]:
+        trigger = json.loads(json.dumps(base_trigger))
+        trigger_payload = trigger["payload"]
+        if isinstance(updates.get("payload"), dict):
+            trigger_payload.update(updates["payload"])  # type: ignore[arg-type]
+        for key, value in updates.items():
+            if key != "payload":
+                trigger[key] = value
+        return trigger
+
+    return _factory
+
+
+def test_run_serializes_output_and_persists_artifact(
+    agent: DossierResearchAgent, trigger_factory
+) -> None:
+    trigger = trigger_factory()
 
     result = agent.run(trigger)
 
@@ -65,21 +84,73 @@ def test_run_serializes_output_and_persists_artifact(agent: DossierResearchAgent
     assert list(saved_payload.keys()) == list(DossierResearchAgent.OUTPUT_FIELD_ORDER)
 
 
-def test_missing_required_fields_raise_value_error(agent: DossierResearchAgent) -> None:
-    trigger = _base_trigger()
+@pytest.mark.parametrize(
+    "insights_input,sources_input,expected_insights,expected_sources",
+    [
+        ("One liner", "https://example.com", ["One liner"], ["https://example.com"]),
+        (
+            ["Primary insight", None, 42],
+            ["https://example.com", None],
+            ["Primary insight", "42"],
+            ["https://example.com"],
+        ),
+        (None, [], [], []),
+    ],
+)
+def test_sequences_are_normalised(
+    agent: DossierResearchAgent,
+    trigger_factory,
+    insights_input,
+    sources_input,
+    expected_insights,
+    expected_sources,
+) -> None:
+    trigger = trigger_factory(payload={"insights": insights_input, "sources": sources_input})
+
+    dossier = agent.run(trigger)["payload"]
+
+    assert dossier["insights"] == expected_insights
+    assert dossier["sources"] == expected_sources
+
+
+def test_summary_falls_back_to_description(
+    agent: DossierResearchAgent, trigger_factory
+) -> None:
+    trigger = trigger_factory(
+        payload={
+            "summary": None,
+            "company_summary": "",
+            "company_description": None,
+            "description": " Provided summary ",
+        }
+    )
+
+    dossier = agent.run(trigger)["payload"]
+
+    assert dossier["summary"] == "Provided summary"
+    assert dossier["company"]["description"] == " Provided summary "
+
+
+def test_missing_required_fields_raise_value_error(
+    agent: DossierResearchAgent, trigger_factory
+) -> None:
+    trigger = trigger_factory()
     trigger["payload"].pop("company_domain")  # type: ignore[index]
 
     with pytest.raises(ValueError):
         agent.run(trigger)
 
 
-def test_artifacts_are_traceable_by_run_and_event(agent: DossierResearchAgent) -> None:
-    trigger = _base_trigger()
+def test_artifacts_are_traceable_by_run_and_event(
+    agent: DossierResearchAgent, trigger_factory
+) -> None:
+    trigger = trigger_factory()
     agent.run(trigger)
 
-    second_trigger = _base_trigger()
-    second_trigger["event_id"] = "evt-789"
-    second_trigger["payload"]["company_name"] = "Example Subsidiary"  # type: ignore[index]
+    second_trigger = trigger_factory(
+        event_id="evt-789",
+        payload={"company_name": "Example Subsidiary"},
+    )
     agent.run(second_trigger)
 
     base_dir = Path(agent.output_dir) / trigger["run_id"]
@@ -89,3 +160,29 @@ def test_artifacts_are_traceable_by_run_and_event(agent: DossierResearchAgent) -
         "evt-456_company_detail_research.json",
         "evt-789_company_detail_research.json",
     ]
+
+
+def test_company_detail_schema_snapshot(
+    agent: DossierResearchAgent, trigger_factory, monkeypatch
+) -> None:
+    class _FixedDatetime:
+        @classmethod
+        def now(cls, tz=None):
+            base = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+            if tz:
+                return base.astimezone(tz)
+            return base
+
+    monkeypatch.setattr("agents.dossier_research_agent.datetime", _FixedDatetime)
+
+    trigger = trigger_factory()
+    result = agent.run(trigger)
+
+    artifact_path = Path(result["artifact_path"])
+    saved_payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+
+    snapshot_path = Path(__file__).resolve().parent / "snapshots" / "company_detail_research.json"
+    expected_payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+
+    assert saved_payload == expected_payload
+    assert result["payload"] == expected_payload

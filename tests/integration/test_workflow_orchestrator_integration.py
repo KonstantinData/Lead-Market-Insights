@@ -5,10 +5,12 @@ from __future__ import annotations
 import importlib
 import json
 from pathlib import Path
+from typing import List
 
 import pytest
 
 import agents.master_workflow_agent as master_module
+import agents.workflow_orchestrator as workflow_orchestrator
 import config.config as config_module
 from agents.alert_agent import AlertSeverity
 from agents.workflow_orchestrator import WorkflowOrchestrator
@@ -38,6 +40,28 @@ class NoOpWatcher:
 
     def stop(self) -> None:  # pragma: no cover - no-op for tests
         self.started = False
+
+
+class RecordingMasterAgent:
+    """Minimal master agent stub that records orchestration lifecycle calls."""
+
+    def __init__(self, *, log_dir: Path, results: List[dict[str, object]]):
+        self.log_filename = "master.log"
+        self.log_file_path = log_dir / self.log_filename
+        self.log_file_path.write_text("", encoding="utf-8")
+        self.results = results
+        self.initialized_runs: list[str] = []
+        self.finalize_called = False
+        self.storage_agent = None
+
+    def initialize_run(self, run_id: str) -> None:
+        self.initialized_runs.append(run_id)
+
+    def process_all_events(self) -> List[dict[str, object]]:
+        return list(self.results)
+
+    def finalize_run_logs(self) -> None:
+        self.finalize_called = True
 
 
 @pytest.fixture(autouse=True)
@@ -160,3 +184,118 @@ def test_agent_swaps_can_be_driven_by_configuration(
         master_agent.similar_companies_agent,
         stub_agent_registry["similar_companies"],
     )
+
+
+def test_orchestrator_records_research_artifacts_and_email_details(
+    monkeypatch, tmp_path: Path
+) -> None:
+    summary_root = tmp_path / "research" / "artifacts"
+    monkeypatch.setattr(
+        workflow_orchestrator.settings,
+        "research_artifact_dir",
+        str(summary_root),
+        raising=False,
+    )
+
+    snapshot_dir = Path(__file__).resolve().parents[1] / "unit" / "snapshots"
+    dossier_snapshot = json.loads(
+        (snapshot_dir / "company_detail_research.json").read_text(encoding="utf-8")
+    )
+    similar_snapshot = json.loads(
+        (snapshot_dir / "similar_companies_level1.json").read_text(encoding="utf-8")
+    )
+
+    research_results = [
+        {
+            "event_id": "evt-456",
+            "status": "dispatched_to_crm",
+            "crm_dispatched": True,
+            "trigger": {"type": "soft", "confidence": 0.96},
+            "extraction": {
+                "info": {
+                    "company_name": "Example Corp",
+                    "web_domain": "example.com",
+                },
+                "is_complete": True,
+            },
+            "research": {
+                "internal_research": {
+                    "agent": "internal_research",
+                    "status": "REPORT_REQUIRED",
+                    "payload": {
+                        "action": "REPORT_REQUIRED",
+                        "existing_report": False,
+                        "artifacts": {
+                            "neighbor_samples": "stub/level1_samples.json",
+                            "crm_match": "stub/crm_matching_company.json",
+                        },
+                    },
+                },
+                "dossier_research": {
+                    "agent": "dossier_research",
+                    "status": "completed",
+                    "artifact_path": "stub/evt-456_company_detail_research.json",
+                    "payload": dossier_snapshot,
+                },
+                "similar_companies_level1": {
+                    "agent": "similar_companies_level1",
+                    "status": "completed",
+                    "payload": {
+                        "company_name": similar_snapshot["company_name"],
+                        "run_id": similar_snapshot["run_id"],
+                        "event_id": similar_snapshot["event_id"],
+                        "results": similar_snapshot["results"],
+                        "artifact_path": "stub/similar_companies_level1.json",
+                    },
+                },
+            },
+            "research_errors": [],
+            "final_email": {
+                "subject": "Research ready",
+                "attachments": ["stub/dossier.pdf"],
+                "links": ["https://crm.example.com/attachments/run-123"],
+            },
+        }
+    ]
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    master_agent = RecordingMasterAgent(log_dir=log_dir, results=research_results)
+
+    orchestrator = WorkflowOrchestrator(master_agent=master_agent)
+    orchestrator.run()
+
+    run_id = orchestrator._last_run_id
+    assert run_id is not None
+    assert master_agent.initialized_runs == [run_id]
+    assert master_agent.finalize_called is True
+
+    summary_path = summary_root / "workflow_runs" / run_id / "summary.json"
+    assert summary_path.exists()
+
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert len(summary) == 1
+    entry = summary[0]
+    assert entry["event_id"] == "evt-456"
+    assert entry["crm_dispatched"] is True
+    assert set(entry["research"].keys()) == {
+        "internal_research",
+        "dossier_research",
+        "similar_companies_level1",
+    }
+
+    internal_payload = entry["research"]["internal_research"]["payload"]
+    assert internal_payload["action"] == "REPORT_REQUIRED"
+    assert internal_payload["artifacts"]["crm_match"] == "stub/crm_matching_company.json"
+
+    dossier_payload = entry["research"]["dossier_research"]["payload"]
+    assert dossier_payload["report_type"] == "Company Detail Research"
+    assert dossier_payload["company"]["name"] == "Example Corp"
+
+    similar_payload = entry["research"]["similar_companies_level1"]["payload"]
+    assert len(similar_payload["results"]) == 2
+    assert similar_payload["results"][0]["id"] == "1"
+
+    final_email = master_agent.results[0]["final_email"]
+    assert final_email["attachments"] == ["stub/dossier.pdf"]
+    assert final_email["links"][0].startswith("https://")

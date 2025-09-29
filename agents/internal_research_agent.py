@@ -1,279 +1,537 @@
-"""
-Internal Research Agent for Agentic-Intelligence-Research
+"""Internal research agent implementation registered with the agent factory."""
 
-This agent checks if a company already exists in HubSpot using the provided credentials.
-It also performs internal similarity search for related companies and handles missing field reminders.
-
-# Notes:
-# - This script must NEVER use fake or placeholder data.
-# - All actions, reminders, and searches are logged for audit and traceability.
-# - The agent is async-ready and can be called in an asynchronous workflow.
-"""
+from __future__ import annotations
 
 import json
+import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Sequence
 
-from agents.internal_company.run import (
-    run as internal_run,
-)  # Internal company search logic
-from integrations import email_sender  # Email sender integration for reminders
-from core.utils import log_step, optional_fields, required_fields
+from agents.factory import register_agent
+from agents.interfaces import BaseResearchAgent
+from agents.internal_company.run import run as internal_company_run
+from agents.email_agent import EmailAgent
+from config.config import settings
+from logs.workflow_log_manager import WorkflowLogManager
+from reminders.reminder_escalation import ReminderEscalation
 
-import importlib.util as _ilu
-
-# Load append_jsonl from the logging sink
-_JSONL_PATH = Path(__file__).resolve().parent.parent / "a2a_logging" / "jsonl_sink.py"
-_spec = _ilu.spec_from_file_location("jsonl_sink", _JSONL_PATH)
-_mod = _ilu.module_from_spec(_spec)
-assert _spec and _spec.loader
-_spec.loader.exec_module(_mod)
-append_jsonl = _mod.append
-
-from config.settings import SETTINGS
-
-Normalized = Dict[str, Any]
+NormalizedPayload = Dict[str, Any]
 
 
-def _log_agent(
-    action: str, domain: str, user_email: str, artifacts: Optional[str] = None
-) -> None:
-    """Write a log line for this agent."""
-    date = datetime.now(timezone.utc)
-    path = (
-        SETTINGS.logs_dir
-        / "agent_internal_research"
-        / f"{date:%Y}"
-        / f"{date:%m}"
-        / f"{date:%d}.jsonl"
+@register_agent(BaseResearchAgent, "internal_research", "default", is_default=True)
+class InternalResearchAgent(BaseResearchAgent):
+    """Internal research agent coordinating CRM lookups and reminders."""
+
+    DEFAULT_REQUIRED_FIELDS: Sequence[str] = ("company_name", "company_domain")
+    DEFAULT_OPTIONAL_FIELDS: Sequence[str] = (
+        "industry_group",
+        "industry",
+        "description",
     )
-    record = {
-        "ts_utc": date.isoformat().replace("+00:00", "Z"),
-        "agent": "agent_internal_research",
-        "action": action,
-        "company_domain": domain,
-        "user_email": user_email,
-    }
-    if artifacts:
-        record["artifacts"] = artifacts
-    path.parent.mkdir(parents=True, exist_ok=True)
-    append_jsonl(path, record)
 
-
-def _log_workflow(record: Dict[str, Any]) -> None:
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
-    path = SETTINGS.workflows_dir / f"{ts}_workflow.jsonl"
-    data = dict(record)
-    data.setdefault(
-        "timestamp",
-        datetime.now(timezone.utc)
-        .replace(microsecond=0)
-        .isoformat()
-        .replace("+00:00", "Z"),
-    )
-    SETTINGS.workflows_dir.mkdir(parents=True, exist_ok=True)
-    append_jsonl(path, data)
-
-
-def validate_required_fields(data: dict, context: str) -> tuple[List[str], List[str]]:
-    req = required_fields(context)
-    opt = optional_fields()
-    missing_req = [f for f in req if not data.get(f)]
-    missing_opt = [f for f in opt if not data.get(f)]
-    return missing_req, missing_opt
-
-
-def run(trigger: Normalized) -> Normalized:
-    """
-    Run internal research workflow with missing-field handling.
-
-    # Notes:
-    # - Checks for required fields (company_name, company_domain).
-    # - If missing, sends reminder to creator via email.
-    # - If present, runs internal similarity search and checks HubSpot.
-    """
-    payload = trigger.get("payload", {})
-    context = trigger.get("source", "")
-
-    # Map expected keys for downstream integrations (preserve existing values)
-    if not payload.get("company_name") and payload.get("company"):
-        payload["company_name"] = payload.get("company")
-    if not payload.get("company_domain") and payload.get("domain"):
-        payload["company_domain"] = payload.get("domain")
-    payload.setdefault("creator_email", payload.get("email") or trigger.get("creator"))
-
-    missing_required, missing_optional = validate_required_fields(payload, context)
-    creator_email = payload.get("creator_email") or ""
-    creator_name = trigger.get("creator_name")
-    company = payload.get("company") or payload.get("company_name") or "Unknown"
-
-    if missing_required:
-        log_step(
-            "agent_internal_research_skipped",
-            "agent_internal_research_skipped",
-            {"reason": "missing_company_or_domain", "event": trigger},
+    def __init__(
+        self,
+        *,
+        config: Any = settings,
+        workflow_log_manager: Optional[WorkflowLogManager] = None,
+        email_agent: Optional[EmailAgent] = None,
+        internal_search_runner=internal_company_run,
+        logger: Optional[logging.Logger] = None,
+    ) -> None:
+        self.config = config
+        self.workflow_log_manager = workflow_log_manager or WorkflowLogManager(
+            config.workflow_log_dir
         )
-        event_title = payload.get("title") or company
-        start_raw = payload.get("start")
-        end_raw = payload.get("end")
-        try:
-            start_dt = datetime.fromisoformat(start_raw) if start_raw else None
-        except Exception:
-            start_dt = None
-        try:
-            end_dt = datetime.fromisoformat(end_raw) if end_raw else None
-        except Exception:
-            end_dt = None
-        missing = missing_required + missing_optional
-        # Create a task in the system for missing fields
-        # (Assumed tasks.create_task is available in core.tasks)
-        from core import tasks
+        self._internal_search_runner = internal_search_runner
+        self.logger = logger or logging.getLogger(
+            f"{__name__}.{self.__class__.__name__}"
+        )
 
-        task = tasks.create_task(
-            trigger=str(payload.get("event_id") or event_title),
-            missing_fields=missing,
-            employee_email=creator_email or "",
+        self.research_artifact_dir = Path(config.research_artifact_dir) / "internal_research"
+        self.research_artifact_dir.mkdir(parents=True, exist_ok=True)
+
+        self.agent_log_dir = Path(config.agent_log_dir) / "internal_research"
+        self.agent_log_dir.mkdir(parents=True, exist_ok=True)
+        self._configure_file_logger()
+
+        self.email_agent = email_agent or self._build_email_agent_from_env()
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+    def run(self, trigger: Mapping[str, Any]) -> NormalizedPayload:  # type: ignore[override]
+        payload = self._clone_payload(trigger.get("payload"))
+        context = str(trigger.get("source") or "")
+        self._normalise_payload(payload)
+
+        run_id = self._resolve_run_id(trigger, payload)
+        event_id = self._extract_event_id(trigger, payload)
+
+        self._log_workflow(
+            run_id,
+            "start",
+            "Internal research workflow received trigger.",
+            event_id,
         )
-        # Send a reminder email to the creator
-        email_sender.send_reminder(
-            to=creator_email,
-            creator_email=creator_email,
-            creator_name=creator_name,
-            event_id=payload.get("event_id"),
-            event_title=event_title,
-            event_start=start_dt,
-            event_end=end_dt,
-            missing_fields=missing,
-            task_id=task.get("id"),
+
+        missing_required, missing_optional = self._validate_required_fields(
+            payload, context
         )
-        _log_workflow(
-            {
-                "status": "missing_fields",
-                "agent": "internal_company_research",
-                "creator": creator_email,
-                "missing": missing_required,
-            }
+
+        if missing_required:
+            return self._handle_missing_fields(
+                trigger, payload, run_id, event_id, missing_required, missing_optional
+            )
+
+        if missing_optional:
+            self._log_workflow(
+                run_id,
+                "missing_optional_fields",
+                f"Optional fields missing: {', '.join(missing_optional)}.",
+                event_id,
+            )
+
+        self._log_workflow(
+            run_id,
+            "fields_validated",
+            "Required company fields present for research run.",
+            event_id,
         )
-        _log_workflow(
-            {
-                "status": "reminder_sent",
-                "agent": "internal_company_research",
-                "to": creator_email,
-                "missing": missing_required,
-            }
+
+        research_result = self._run_internal_lookup(trigger, run_id, event_id)
+        payload_result = research_result.get("payload") or {}
+
+        samples = self._collect_neighbor_samples(payload_result)
+        neighbor_artifact = self._write_artifact(
+            run_id, "level1_samples.json", samples
         )
-        return {
-            "status": "missing_fields",
-            "agent": "internal_company_research",
+        if samples and neighbor_artifact:
+            self._log_workflow(
+                run_id,
+                "neighbor_samples_recorded",
+                f"Captured {len(samples)} neighbor samples at {neighbor_artifact}.",
+                event_id,
+            )
+
+        crm_artifact = self._write_artifact(
+            run_id,
+            "crm_matching_company.json",
+            self._build_crm_matching_payload(payload),
+        )
+        if crm_artifact:
+            self._log_workflow(
+                run_id,
+                "crm_matching_recorded",
+                f"Stored CRM matching details at {crm_artifact}.",
+                event_id,
+            )
+
+        action, email_status = self._determine_next_action(
+            trigger, payload, payload_result, run_id, event_id
+        )
+
+        self._log_workflow(
+            run_id,
+            "completed",
+            f"Internal research completed with status {action}.",
+            event_id,
+            error=None if email_status else "email_delivery_failed"
+            if email_status is False
+            else None,
+        )
+
+        normalized = {
+            "source": "internal_research",
+            "status": action,
+            "agent": "internal_research",
             "creator": trigger.get("creator"),
-            "missing": missing_required,
+            "recipient": trigger.get("recipient"),
+            "payload": {
+                "action": action,
+                "level1_samples": samples,
+                "existing_report": bool(payload_result.get("exists")),
+                "last_report_date": payload_result.get("last_report_date"),
+                "artifacts": {
+                    "neighbor_samples": neighbor_artifact,
+                    "crm_match": crm_artifact,
+                },
+            },
         }
 
-    if missing_optional:
-        _log_workflow(
-            {
-                "status": "missing_optional_fields",
-                "agent": "internal_company_research",
-                "creator": creator_email,
-                "missing": missing_optional,
-            }
+        return normalized
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+    def _configure_file_logger(self) -> None:
+        log_file = self.agent_log_dir / "internal_research.log"
+        handler_exists = any(
+            isinstance(handler, logging.FileHandler)
+            and getattr(handler, "_internal_research_handler", False)
+            for handler in self.logger.handlers
         )
+        if not handler_exists:
+            file_handler = logging.FileHandler(log_file, encoding="utf-8")
+            file_handler.setLevel(logging.INFO)
+            file_handler.setFormatter(
+                logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+            )
+            setattr(file_handler, "_internal_research_handler", True)
+            self.logger.addHandler(file_handler)
 
-    company_name = payload.get("company_name") or ""
-    company_domain = payload.get("company_domain") or ""
+        self.logger.setLevel(logging.INFO)
+        self.logger.propagate = False
 
-    # Run internal search and HubSpot check
-    result = internal_run(trigger)
-    payload_res = result.get("payload", {}) or {}
+    def _build_email_agent_from_env(self) -> Optional[EmailAgent]:
+        host = os.getenv("SMTP_HOST")
+        port = os.getenv("SMTP_PORT")
+        username = os.getenv("SMTP_USER")
+        password = os.getenv("SMTP_PASS")
+        sender = os.getenv("SMTP_SENDER") or os.getenv("SMTP_FROM") or username
 
-    exists = payload_res.get("exists")
-    last_report_date = payload_res.get("last_report_date")
-    last_dt: Optional[datetime] = None
-    if last_report_date:
+        if not (host and port and username and password and sender):
+            self.logger.info(
+                "EmailAgent configuration missing; reminder emails will be skipped."
+            )
+            return None
+
         try:
-            lr = last_report_date.replace("Z", "+00:00")
-            last_dt = datetime.fromisoformat(str(lr))
-        except Exception:
-            last_dt = None
+            port_number = int(port)
+        except ValueError:
+            self.logger.warning("Invalid SMTP_PORT value '%s'; skipping email setup.", port)
+            return None
 
-    samples: List[Dict[str, Any]] = []
-    for n in payload_res.get("neighbors", []) or []:
-        samples.append(
-            {
-                "company_name": n.get("company_name") or n.get("name") or "",
-                "domain": n.get("company_domain") or n.get("domain") or "",
-                "description": n.get("description"),
-                "reason_for_match": "internal industry/description similarity",
-            }
+        return EmailAgent(host, port_number, username, password, sender)
+
+    def _clone_payload(self, payload: Optional[Mapping[str, Any]]) -> MutableMapping[str, Any]:
+        return dict(payload or {})
+
+    def _normalise_payload(self, payload: MutableMapping[str, Any]) -> None:
+        if payload.get("company") and not payload.get("company_name"):
+            payload["company_name"] = payload["company"]
+        if payload.get("domain") and not payload.get("company_domain"):
+            payload["company_domain"] = payload["domain"]
+        if not payload.get("creator_email"):
+            payload["creator_email"] = payload.get("email")
+
+    def _resolve_run_id(
+        self, trigger: Mapping[str, Any], payload: Mapping[str, Any]
+    ) -> str:
+        run_id = (
+            trigger.get("run_id")
+            or payload.get("event_id")
+            or f"internal-research-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
         )
-    if samples:
-        SETTINGS.artifacts_dir.mkdir(parents=True, exist_ok=True)
-        sample_path = SETTINGS.artifacts_dir / "internal_level1_samples.json"
-        with sample_path.open("w", encoding="utf-8") as fh:
-            json.dump(samples, fh)
-        _log_workflow(
-            {
-                "event_id": payload.get("event_id"),
-                "status": "neighbor_level1_found",
-                "details": {"companies": samples},
-            }
+        return str(run_id)
+
+    def _extract_event_id(
+        self, trigger: Mapping[str, Any], payload: Mapping[str, Any]
+    ) -> Optional[str]:
+        return (
+            payload.get("event_id")
+            or trigger.get("event_id")
+            or trigger.get("id")
+            or payload.get("id")
         )
 
-    if exists and last_report_date:
-        action = "AWAIT_REQUESTOR_DECISION"
-        first_name = creator_email.split("@", 1)[0]
-        if last_dt:
-            try:
-                date_display = last_dt.strftime("%Y-%m-%d")
-            except Exception:
-                date_display = last_report_date
+    def _validate_required_fields(
+        self, payload: Mapping[str, Any], context: str
+    ) -> tuple[List[str], List[str]]:
+        missing_required = [
+            field for field in self.DEFAULT_REQUIRED_FIELDS if not payload.get(field)
+        ]
+        missing_optional = [
+            field for field in self.DEFAULT_OPTIONAL_FIELDS if not payload.get(field)
+        ]
+        self.logger.info(
+            "Validated payload context '%s'. Missing required: %s, missing optional: %s",
+            context or "default",
+            missing_required,
+            missing_optional,
+        )
+        return missing_required, missing_optional
+
+    def _handle_missing_fields(
+        self,
+        trigger: Mapping[str, Any],
+        payload: Mapping[str, Any],
+        run_id: str,
+        event_id: Optional[str],
+        missing_required: Sequence[str],
+        missing_optional: Sequence[str],
+    ) -> NormalizedPayload:
+        company = (
+            payload.get("company_name")
+            or payload.get("company")
+            or "Unknown Company"
+        )
+        message = (
+            f"Missing required fields for {company}: {', '.join(missing_required)}."
+        )
+        self._log_workflow(run_id, "missing_required_fields", message, event_id)
+        self.logger.info(message)
+
+        reminder_sent = self._dispatch_missing_field_reminder(
+            payload, run_id, event_id, missing_required, missing_optional
+        )
+
+        if reminder_sent:
+            self._log_workflow(
+                run_id,
+                "reminder_sent",
+                f"Reminder issued to {payload.get('creator_email')} for missing fields.",
+                event_id,
+            )
         else:
-            date_display = last_report_date or "unknown"
-        subject = f"Quick check: report for {company_name}"
+            self._log_workflow(
+                run_id,
+                "reminder_not_sent",
+                "Reminder not sent due to unavailable email configuration.",
+                event_id,
+                error="email_not_configured",
+            )
+
+        return {
+            "source": "internal_research",
+            "status": "AWAIT_REQUESTOR_DETAILS",
+            "agent": "internal_research",
+            "creator": trigger.get("creator"),
+            "recipient": trigger.get("recipient"),
+            "payload": {
+                "missing_required": list(missing_required),
+                "missing_optional": list(missing_optional),
+                "company": company,
+            },
+        }
+
+    def _dispatch_missing_field_reminder(
+        self,
+        payload: Mapping[str, Any],
+        run_id: str,
+        event_id: Optional[str],
+        missing_required: Sequence[str],
+        missing_optional: Sequence[str],
+    ) -> bool:
+        if not self.email_agent:
+            return False
+
+        recipient = payload.get("creator_email")
+        if not recipient:
+            return False
+
+        subject = "Additional details required for research request"
+        company = payload.get("company_name") or payload.get("company") or "your company"
+        missing_all = list(missing_required) + list(missing_optional)
+        formatted_missing = ", ".join(missing_all)
+        body = (
+            f"Hi,\n\nWe need a bit more information to research {company}."
+            f" Please provide the following fields: {formatted_missing}.\n\n"
+            "Thank you!"
+        )
+
+        reminder = ReminderEscalation(
+            self.email_agent,
+            workflow_log_manager=self.workflow_log_manager,
+            run_id=run_id,
+        )
+        try:
+            return bool(reminder.send_reminder(recipient, subject, body))
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self._log_workflow(
+                run_id,
+                "reminder_exception",
+                "Exception occurred while sending reminder.",
+                event_id,
+                error=str(exc),
+            )
+            return False
+
+    def _run_internal_lookup(
+        self, trigger: Mapping[str, Any], run_id: str, event_id: Optional[str]
+    ) -> Mapping[str, Any]:
+        try:
+            result = self._internal_search_runner(trigger)
+            self._log_workflow(
+                run_id,
+                "internal_lookup_completed",
+                "Internal company search completed successfully.",
+                event_id,
+            )
+            return result
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self._log_workflow(
+                run_id,
+                "internal_lookup_failed",
+                "Internal company search failed.",
+                event_id,
+                error=str(exc),
+            )
+            raise
+
+    def _collect_neighbor_samples(
+        self, payload_result: Mapping[str, Any]
+    ) -> List[Dict[str, Any]]:
+        samples: List[Dict[str, Any]] = []
+        for neighbor in payload_result.get("neighbors", []) or []:
+            samples.append(
+                {
+                    "company_name": neighbor.get("company_name")
+                    or neighbor.get("name")
+                    or "",
+                    "domain": neighbor.get("company_domain")
+                    or neighbor.get("domain")
+                    or "",
+                    "description": neighbor.get("description"),
+                    "reason_for_match": "internal industry/description similarity",
+                }
+            )
+        return samples
+
+    def _write_artifact(
+        self, run_id: str, filename: str, data: Any
+    ) -> Optional[str]:
+        if not data:
+            return None
+
+        run_dir = self.research_artifact_dir / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = run_dir / filename
+        with artifact_path.open("w", encoding="utf-8") as handle:
+            json.dump(data, handle, ensure_ascii=False, indent=2)
+        return artifact_path.as_posix()
+
+    def _build_crm_matching_payload(
+        self, payload: Mapping[str, Any]
+    ) -> List[Dict[str, Any]]:
+        company_name = payload.get("company_name") or ""
+        company_domain = payload.get("company_domain") or ""
+        if not company_name and not company_domain:
+            return []
+
+        return [
+            {
+                "company_name": company_name,
+                "company_domain": company_domain,
+                "industry_group": payload.get("industry_group"),
+                "industry": payload.get("industry"),
+                "description": payload.get("description"),
+            }
+        ]
+
+    def _determine_next_action(
+        self,
+        trigger: Mapping[str, Any],
+        payload: Mapping[str, Any],
+        payload_result: Mapping[str, Any],
+        run_id: str,
+        event_id: Optional[str],
+    ) -> tuple[str, Optional[bool]]:
+        exists = payload_result.get("exists")
+        last_report_date = payload_result.get("last_report_date")
+
+        if exists and last_report_date:
+            email_status = self._send_existing_report_email(
+                payload,
+                run_id,
+                event_id,
+                last_report_date,
+            )
+            action = "AWAIT_REQUESTOR_DECISION"
+            return action, email_status
+
+        action = "REPORT_REQUIRED"
+        self._log_workflow(
+            run_id,
+            "report_required",
+            "No existing dossier found; report creation required.",
+            event_id,
+        )
+        return action, None
+
+    def _send_existing_report_email(
+        self,
+        payload: Mapping[str, Any],
+        run_id: str,
+        event_id: Optional[str],
+        last_report_date: str,
+    ) -> Optional[bool]:
+        recipient = payload.get("creator_email")
+        if not recipient or not self.email_agent:
+            self._log_workflow(
+                run_id,
+                "existing_report_email_skipped",
+                "Existing report email skipped due to configuration.",
+                event_id,
+                error="email_not_configured" if not self.email_agent else "missing_recipient",
+            )
+            return None
+
+        company_name = payload.get("company_name") or "the requested company"
+        try:
+            parsed_last = datetime.fromisoformat(
+                str(last_report_date).replace("Z", "+00:00")
+            )
+            display_date = parsed_last.strftime("%Y-%m-%d")
+        except Exception:  # pragma: no cover - defensive formatting
+            display_date = str(last_report_date)
+
+        subject = f"Existing research available for {company_name}"
+        first_name = recipient.split("@", 1)[0]
         body = (
             f"Hi {first_name},\n\n"
-            f"Good news — we already have a report for {company_name}.\n"
-            f"The latest version is from {date_display}.\n\n"
-            f"What should I do next?\n\n"
-            f"Reply with I USE THE EXISTING — I'll send you the PDF, and you'll also find it in HubSpot under Company → Attachments.\n\n"
-            f"Reply with NEW REPORT — I'll refresh the report, add new findings, and highlight changes.\n\n"
-            "Best regards,\nYour Internal Research Agent"
+            f"We already have a report for {company_name}.\n"
+            f"The latest version is from {display_date}.\n\n"
+            "Reply with I USE THE EXISTING to receive the PDF and reference in HubSpot.\n"
+            "Reply with NEW REPORT if you need an updated dossier.\n\n"
+            "Best regards,\nInternal Research Agent"
         )
-        email_sender.send_email(to=creator_email, subject=subject, body=body)
-        _log_workflow(
-            {
-                "event_id": payload.get("event_id"),
-                "status": "email_sent",
-                "details": {"to": creator_email},
-            }
-        )
-    else:
-        action = "REPORT_REQUIRED"
 
-    artifacts_path: Optional[str] = None
-    if any(payload.get(k) for k in ("industry_group", "industry", "description")):
-        SETTINGS.artifacts_dir.mkdir(parents=True, exist_ok=True)
-        artifacts_file = SETTINGS.artifacts_dir / "matching_crm_companies.json"
-        with artifacts_file.open("w", encoding="utf-8") as fh:
-            json.dump(
-                [
-                    {
-                        "company_name": company_name,
-                        "company_domain": company_domain,
-                        "industry_group": payload.get("industry_group"),
-                        "industry": payload.get("industry"),
-                    }
-                ],
-                fh,
+        try:
+            sent = self.email_agent.send_email(recipient, subject, body)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self._log_workflow(
+                run_id,
+                "existing_report_email_failed",
+                "Failed to send existing report notification.",
+                event_id,
+                error=str(exc),
             )
-        artifacts_path = str(artifacts_file)
+            return False
 
-    _log_agent(action, company_domain, creator_email, artifacts_path)
+        if sent:
+            self._log_workflow(
+                run_id,
+                "existing_report_email_sent",
+                f"Existing report email sent to {recipient}.",
+                event_id,
+            )
+        else:
+            self._log_workflow(
+                run_id,
+                "existing_report_email_failed",
+                f"Existing report email failed for {recipient}.",
+                event_id,
+                error="send_failed",
+            )
+        return bool(sent)
 
-    return {
-        "source": "internal_research",
-        "creator": trigger.get("creator"),
-        "recipient": trigger.get("recipient"),
-        "payload": {"action": action, "level1_samples": samples},
-    }
+    def _log_workflow(
+        self,
+        run_id: str,
+        step: str,
+        message: str,
+        event_id: Optional[str],
+        error: Optional[str] = None,
+    ) -> None:
+        self.workflow_log_manager.append_log(
+            run_id,
+            step,
+            message,
+            event_id=event_id,
+            error=error,
+        )
+
+
+__all__ = ["InternalResearchAgent"]

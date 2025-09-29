@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable
 
+import json
 import pytest
 
 pytest.importorskip("opentelemetry")
@@ -12,6 +13,7 @@ from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from opentelemetry.sdk.trace.export import InMemorySpanExporter, SimpleSpanProcessor
 
 from agents.master_workflow_agent import MasterWorkflowAgent
+from agents.interfaces import BaseResearchAgent
 from agents.workflow_orchestrator import WorkflowOrchestrator
 from config.config import settings
 from utils import observability
@@ -111,9 +113,12 @@ def test_observability_records_metrics_and_traces(monkeypatch, tmp_path):
     )
 
     original_run_dir = settings.run_log_dir
+    original_workflow_dir = settings.workflow_log_dir
     try:
         settings.run_log_dir = tmp_path / "runs"
         settings.run_log_dir.mkdir(parents=True, exist_ok=True)
+        settings.workflow_log_dir = tmp_path / "workflows"
+        settings.workflow_log_dir.mkdir(parents=True, exist_ok=True)
 
         event = {
             "id": "evt-1",
@@ -124,6 +129,28 @@ def test_observability_records_metrics_and_traces(monkeypatch, tmp_path):
             "info": {"company_name": None, "web_domain": ""},
             "is_complete": False,
         }
+
+        class DummySimilarCompaniesAgent(BaseResearchAgent):
+            def __init__(self, artifact_path: str) -> None:
+                self.artifact_path = artifact_path
+
+            def run(self, trigger: Dict[str, Any]) -> Dict[str, Any]:  # type: ignore[override]
+                return {
+                    "source": "similar_companies",
+                    "status": "completed",
+                    "agent": "similar_companies",
+                    "payload": {
+                        "artifact_path": self.artifact_path,
+                        "results": [
+                            {
+                                "company_name": trigger.get("payload", {})
+                                .get("company_name")
+                                or "Example Corp",
+                                "score": 1.0,
+                            }
+                        ],
+                    },
+                }
 
         crm_agent = DummyCrmAgent()
         orchestrator = WorkflowOrchestrator(
@@ -141,6 +168,10 @@ def test_observability_records_metrics_and_traces(monkeypatch, tmp_path):
                 human_agent=DummyHumanAgent(),
                 crm_agent=crm_agent,
             )
+        )
+
+        orchestrator.master_agent.similar_companies_agent = DummySimilarCompaniesAgent(
+            str(tmp_path / "similar_results.json")
         )
 
         orchestrator.run()
@@ -180,9 +211,17 @@ def test_observability_records_metrics_and_traces(monkeypatch, tmp_path):
             metrics_data, "workflow_operation_duration_ms"
         )
         operations = _collect_histogram_operations(latency_metric)
-        assert {"run", "trigger_detection", "extraction", "hitl_dossier", "hitl_missing_info", "crm_dispatch"}.issubset(
-            operations
-        )
+        assert {
+            "run",
+            "trigger_detection",
+            "extraction",
+            "internal_research",
+            "dossier_research",
+            "similar_companies",
+            "hitl_dossier",
+            "hitl_missing_info",
+            "crm_dispatch",
+        }.issubset(operations)
 
         finished_spans = span_exporter.get_finished_spans()
         assert finished_spans, "Expected spans to be exported"
@@ -198,5 +237,44 @@ def test_observability_records_metrics_and_traces(monkeypatch, tmp_path):
             assert span.parent is not None
             assert span.parent.span_id == run_span.context.span_id
             assert span.attributes.get("workflow.run_id") == orchestrator._last_run_id
+
+        workflow_log_path = settings.workflow_log_dir / f"{orchestrator._last_run_id}.jsonl"
+        assert workflow_log_path.exists()
+        log_entries = [
+            json.loads(line)
+            for line in workflow_log_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
+        def _find_log(step: str) -> Dict[str, Any]:
+            for entry in log_entries:
+                if entry.get("step") == step:
+                    return entry
+            raise AssertionError(f"Workflow log entry not found for step {step}")
+
+        def _parse_message(entry: Dict[str, Any]) -> Dict[str, Any]:
+            return json.loads(entry.get("message", "{}"))
+
+        internal_entry = _find_log("research.internal_research")
+        internal_message = _parse_message(internal_entry)
+        assert internal_message["outcome"] == "completed"
+        assert internal_message["stage"] == "internal_research"
+        assert internal_message.get("decision")
+        assert internal_message.get("artifacts")
+
+        dossier_entry = _find_log("research.dossier_research")
+        dossier_message = _parse_message(dossier_entry)
+        assert dossier_message["outcome"] == "completed"
+        assert dossier_message["stage"] == "dossier_research"
+        assert dossier_message.get("artifacts")
+
+        similar_entry = _find_log("research.similar_companies")
+        similar_message = _parse_message(similar_entry)
+        assert similar_message["outcome"] == "completed"
+        assert similar_message["stage"] == "similar_companies"
+        assert similar_message.get("result_count") is not None
+        assert similar_message.get("artifacts")
     finally:
+        span_exporter.clear()
         settings.run_log_dir = original_run_dir
+        settings.workflow_log_dir = original_workflow_dir

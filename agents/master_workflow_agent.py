@@ -1,12 +1,6 @@
-"""
-MasterWorkflowAgent: Pure logic agent for polling and event-processing.
+"""MasterWorkflowAgent: Pure logic agent for polling and event-processing."""
 
-# Notes:
-# - This agent contains only the polling, trigger detection, extraction, human-in-the-loop, and CRM logic.
-# - It exposes process_all_events(), but does NOT handle orchestration, status, or logging setup.
-# - All business logic is encapsulated here, orchestration is handled in WorkflowOrchestrator.
-"""
-
+import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,11 +34,7 @@ from logs.workflow_log_manager import WorkflowLogManager
 from utils.trigger_loader import load_trigger_words
 from utils.pii import mask_pii
 from utils.audit_log import AuditLog
-from utils.observability import (
-    observe_operation,
-    record_hitl_outcome,
-    record_trigger_match,
-)
+from utils.observability import observe_operation, record_hitl_outcome, record_trigger_match
 
 logger = logging.getLogger("MasterWorkflowAgent")
 
@@ -508,25 +498,52 @@ class MasterWorkflowAgent:
         force: bool = False,
     ) -> Optional[Dict[str, Any]]:
         if agent is None:
+            self._log_research_step(
+                agent_name,
+                event_id,
+                "skipped",
+                details={"reason": "agent_unavailable"},
+            )
             return None
 
         research_store = event_result.setdefault("research", {})
         if agent_name in research_store and not force:
-            return research_store[agent_name]
+            existing = research_store[agent_name]
+            self._log_research_step(
+                agent_name,
+                event_id,
+                "cached",
+                result=existing if isinstance(existing, dict) else None,
+            )
+            return existing
 
         trigger = self._build_research_trigger(event, info, event_id)
-        try:
-            result = agent.run(trigger)
-        except Exception as exc:  # pragma: no cover - defensive guard
-            logger.exception(
-                "%s research agent failed for event %s", agent_name, event_id
-            )
-            event_result.setdefault("research_errors", []).append(
-                {"agent": agent_name, "error": str(exc)}
-            )
-            return research_store.get(agent_name)
+        attributes = {"event.id": str(event_id)} if event_id is not None else None
+        with observe_operation(agent_name, attributes):
+            try:
+                result = agent.run(trigger)
+            except Exception as exc:  # pragma: no cover - defensive guard
+                logger.exception(
+                    "%s research agent failed for event %s", agent_name, event_id
+                )
+                event_result.setdefault("research_errors", []).append(
+                    {"agent": agent_name, "error": str(exc)}
+                )
+                self._log_research_step(
+                    agent_name,
+                    event_id,
+                    "error",
+                    error=str(exc),
+                )
+                return research_store.get(agent_name)
 
         research_store[agent_name] = result
+        self._log_research_step(
+            agent_name,
+            event_id,
+            "completed",
+            result=result if isinstance(result, dict) else None,
+        )
         return result
 
     def _run_internal_research(
@@ -538,7 +555,22 @@ class MasterWorkflowAgent:
         *,
         force: bool,
     ) -> Optional[Dict[str, Any]]:
-        if not self.internal_research_agent or not self._has_research_inputs(info):
+        if not self.internal_research_agent:
+            self._log_research_step(
+                "internal_research",
+                event_id,
+                "skipped",
+                details={"reason": "agent_unavailable"},
+            )
+            return event_result.get("research", {}).get("internal_research")
+
+        if not self._has_research_inputs(info):
+            self._log_research_step(
+                "internal_research",
+                event_id,
+                "skipped",
+                details={"reason": "missing_inputs"},
+            )
             return event_result.get("research", {}).get("internal_research")
 
         return self._run_research_agent(
@@ -585,6 +617,13 @@ class MasterWorkflowAgent:
                 event_id,
                 force=True,
             )
+        elif requires_dossier:
+            self._log_research_step(
+                "dossier_research",
+                event_id,
+                "skipped",
+                details={"reason": "missing_inputs"},
+            )
 
         if self._can_run_similar(info):
             self._run_research_agent(
@@ -595,6 +634,13 @@ class MasterWorkflowAgent:
                 info,
                 event_id,
                 force=True,
+            )
+        else:
+            self._log_research_step(
+                "similar_companies",
+                event_id,
+                "skipped",
+                details={"reason": "missing_inputs"},
             )
 
     def _can_run_dossier(self, info: Dict[str, Any]) -> bool:
@@ -689,6 +735,78 @@ class MasterWorkflowAgent:
 
         if hasattr(self, "_config_watcher"):
             self._config_watcher.stop()
+
+    def _log_research_step(
+        self,
+        agent_name: str,
+        event_id: Optional[Any],
+        outcome: str,
+        *,
+        result: Optional[Dict[str, Any]] = None,
+        error: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not self.workflow_log_manager or not self.run_id:
+            return
+
+        data: Dict[str, Any] = {"stage": agent_name, "outcome": outcome}
+
+        if event_id is not None:
+            data["event_id"] = str(event_id)
+
+        if details:
+            data["details"] = details
+
+        if result:
+            status = result.get("status")
+            if status:
+                data["status"] = status
+
+            source = result.get("source")
+            if source:
+                data["source"] = source
+
+            payload = result.get("payload")
+            artifacts: Dict[str, str] = {}
+            if isinstance(result.get("artifact_path"), str):
+                artifacts.setdefault("primary", str(result["artifact_path"]))
+
+            if isinstance(payload, dict):
+                decision = payload.get("action") or payload.get("status")
+                if decision:
+                    data["decision"] = decision
+
+                payload_artifact = payload.get("artifact_path")
+                if isinstance(payload_artifact, str):
+                    artifacts.setdefault("primary", payload_artifact)
+
+                payload_artifacts = payload.get("artifacts")
+                if isinstance(payload_artifacts, dict):
+                    for key, value in payload_artifacts.items():
+                        if isinstance(value, str):
+                            artifacts[key] = value
+
+                results = payload.get("results")
+                if isinstance(results, list):
+                    data["result_count"] = len(results)
+
+            if artifacts:
+                data["artifacts"] = artifacts
+
+        if error:
+            data["error"] = error
+
+        message = json.dumps(data, ensure_ascii=False, sort_keys=True)
+        try:
+            self.workflow_log_manager.append_log(
+                self.run_id,
+                f"research.{agent_name}",
+                message,
+                event_id=str(event_id) if event_id is not None else None,
+                error=error,
+            )
+        except Exception:  # pragma: no cover - defensive guard
+            logger.exception("Failed to append research workflow log for %s", agent_name)
 
     def _resolve_dossier_status(self, response: Dict[str, Any]) -> str:
         status = response.get("status")

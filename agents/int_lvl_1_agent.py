@@ -162,10 +162,12 @@ class IntLvl1SimilarCompaniesAgent(BaseResearchAgent):
             or ""
         )
         context["company_name_normalised"] = normalize_text(context["company_name"])
-        for field in self._match_config.fields:
-            raw_value = payload.get(field) or payload.get(f"company_{field}")
-            context[field] = raw_value or ""
-            context[f"{field}_normalised"] = normalize_text(raw_value)
+        for criteria_field in self._match_config.fields:
+            raw_value = payload.get(criteria_field) or payload.get(
+                f"company_{criteria_field}"
+            )
+            context[criteria_field] = raw_value or ""
+            context[f"{criteria_field}_normalised"] = normalize_text(raw_value)
         description_tokens = _tokenize(context.get("description_normalised", ""))
         context["description_tokens"] = description_tokens
         return context
@@ -252,26 +254,26 @@ class IntLvl1SimilarCompaniesAgent(BaseResearchAgent):
             score += self._match_config.weights.get("name", 0.0)
             matched_fields.append("name")
 
-        for field in self._match_config.fields:
-            candidate_value = properties.get(field)
+        for criteria_field in self._match_config.fields:
+            candidate_value = properties.get(criteria_field)
             normalised_candidate_value = normalize_text(candidate_value)
-            target_value = target_context.get(f"{field}_normalised", "")
-            weight = self._match_config.weights.get(field, 1.0)
+            target_value = target_context.get(f"{criteria_field}_normalised", "")
+            weight = self._match_config.weights.get(criteria_field, 1.0)
 
             if not target_value or not normalised_candidate_value:
                 continue
 
-            if field == "description":
+            if criteria_field == "description":
                 overlap_score = self._description_overlap(
                     normalised_candidate_value,
                     target_context.get("description_tokens", []),
                 )
                 if overlap_score > 0:
                     score += weight * overlap_score
-                    matched_fields.append(field)
+                    matched_fields.append(criteria_field)
             elif normalised_candidate_value == target_value:
                 score += weight
-                matched_fields.append(field)
+                matched_fields.append(criteria_field)
 
         matched_fields = sorted(set(matched_fields))
 

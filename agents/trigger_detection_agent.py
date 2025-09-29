@@ -1,5 +1,4 @@
-import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from agents.factory import register_agent
 from agents.interfaces import BaseTriggerAgent
@@ -16,10 +15,6 @@ class TriggerDetectionAgent(BaseTriggerAgent):
         else:
             # Default trigger words, falls keine übergeben wurden
             self.trigger_words = (normalize_text("trigger word"),)
-
-        self._patterns: Tuple[re.Pattern[str], ...] = tuple(
-            re.compile(re.escape(word)) for word in self.trigger_words
-        )
 
     def check(self, event: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -47,8 +42,8 @@ class TriggerDetectionAgent(BaseTriggerAgent):
 
         normalized_text = normalize_text(text)
 
-        for word, pattern in zip(self.trigger_words, self._patterns):
-            if pattern.search(normalized_text):
+        for word in self.trigger_words:
+            if word in normalized_text:
                 trigger_type = "hard" if field_name == "summary" else "soft"
                 return {
                     "trigger": True,

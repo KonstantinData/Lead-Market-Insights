@@ -18,7 +18,7 @@ class TriggerDetectionAgent(BaseTriggerAgent):
             self.trigger_words = (normalize_text("trigger word"),)
 
         self._patterns: Tuple[re.Pattern[str], ...] = tuple(
-            re.compile{re.escape(word)} for word in self.trigger_words
+            re.compile(re.escape(word)) for word in self.trigger_words
         )
 
     def check(self, event: Dict[str, Any]) -> Dict[str, Any]:
@@ -41,9 +41,7 @@ class TriggerDetectionAgent(BaseTriggerAgent):
 
         return self._check_text_field(text, field_name)
 
-    def _check_text_field(
-        self, text: Optional[str], field_name: str
-    ) -> Dict[str, Any]:
+    def _check_text_field(self, text: Optional[str], field_name: str) -> Dict[str, Any]:
         if not text:
             return self._default_response()
 

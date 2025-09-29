@@ -177,6 +177,39 @@ def test_audit_log_records_dossier_decline(tmp_path) -> None:
         settings.run_log_dir = original_run_dir
 
 
+def test_soft_trigger_dossier_request_pending(tmp_path) -> None:
+    backend = DummyBackend({"status": "pending", "details": {"note": "Awaiting team"}})
+    original_run_dir = settings.run_log_dir
+    original_workflow_dir = settings.workflow_log_dir
+    temp_run_dir = tmp_path / "runs"
+    temp_workflow_dir = tmp_path / "workflows"
+    temp_run_dir.mkdir()
+    temp_workflow_dir.mkdir()
+    agent: Optional[MasterWorkflowAgent] = None
+    try:
+        settings.run_log_dir = temp_run_dir
+        settings.workflow_log_dir = temp_workflow_dir
+        agent = _prepare_agent(backend)
+
+        agent.process_all_events()
+
+        assert agent._send_calls == []
+        assert backend.requests, "Pending backend should receive request"
+
+        log_contents = agent.log_file_path.read_text(encoding="utf-8")
+        assert "decision pending" in log_contents
+
+        workflow_files = list(temp_workflow_dir.glob("*.jsonl"))
+        assert workflow_files, "Workflow reminder logs should be recorded"
+        workflow_log_text = workflow_files[0].read_text(encoding="utf-8")
+        assert "hitl_dossier_pending" in workflow_log_text
+    finally:
+        if agent is not None:
+            agent.finalize_run_logs()
+        settings.run_log_dir = original_run_dir
+        settings.workflow_log_dir = original_workflow_dir
+
+
 def test_audit_log_records_missing_info_flow(tmp_path) -> None:
     original_run_dir = settings.run_log_dir
     temp_run_dir = tmp_path / "runs"

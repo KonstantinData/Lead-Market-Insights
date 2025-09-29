@@ -50,8 +50,8 @@ flowchart LR
    scoring layer to decide whether automation should continue.
 3. **Extraction** converts event metadata into structured dossiers, reusing LLM helpers and
    deterministic parsers. Confidence scores accompany each field.
-4. **Research** (optional) enriches dossiers with public context such as company profiles
-   or industry notes.
+4. **Research** enriches dossiers with public context such as company profiles,
+   internal knowledge-base lookups, and similar-company analysis.
 5. **Human-in-the-loop** receives tasks for incomplete dossiers, ensuring compliance
    policies are honoured before anything is sent downstream.
 6. **CRM dispatch** pushes finalised dossiers into CRM or knowledge systems, recording
@@ -61,6 +61,80 @@ flowchart LR
 
 The orchestrator stitches these agents together, sharing configuration through the central
 `Settings` object and propagating the `run_id` for observability.
+
+## Research agent collaboration
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Polling
+    participant Extraction
+    participant Orchestrator
+    participant Internal as InternalResearch
+    participant Dossier as DossierResearch
+    participant Similar as SimilarCompaniesL1
+    participant Human
+    participant Reporting
+    participant CRM
+
+    Polling->>Orchestrator: Candidate events
+    Orchestrator->>Extraction: Perform extraction
+    Extraction-->>Orchestrator: Structured dossier
+    Orchestrator->>Internal: Normalised dossier + run_id
+    Internal-->>Orchestrator: Existing dossier decision
+    alt Existing dossier found
+        Orchestrator->>Reporting: Compile PDFs from stored artefacts
+    else Refresh required
+        Orchestrator->>Dossier: Generate company_detail_research.json
+        Dossier-->>Orchestrator: Dossier artefact metadata
+        Orchestrator->>Similar: Generate similar_companies_level1.json
+        Similar-->>Orchestrator: Similar company artefact metadata
+        Orchestrator->>Reporting: Convert artefacts into PDFs
+    end
+    Orchestrator->>Human: HITL decision requests (if needed)
+    Human-->>Orchestrator: Approve / modify / decline
+    Orchestrator->>CRM: Final payload with artefacts + links
+```
+
+`InternalResearchAgent` always runs first and can short-circuit the pipeline when an existing dossier is valid. When a refresh is required, the orchestrator fans out to `DossierResearchAgent` and the `similar_companies_level1` agent. The reporting utility then turns JSON artefacts into PDFs for distribution.
+
+## Existing dossier reuse and refresh
+
+The internal research agent maintains company-scoped folders in `RESEARCH_ARTIFACT_DIR/internal_research`. Each folder stores the latest dossier manifest with timestamps and ownership metadata. During a workflow run, the agent:
+
+1. Checks the manifest for freshness (default: within the last 30 days) and whether the organiser requested a refresh.
+2. If still fresh, copies the manifest into the current run folder (`research/workflow_runs/<run_id>/summary.json`) and logs a `reuse` decision.
+3. If stale, posts a refresh task to the human agent. Reminders and escalations are derived from `human_in_the_loop/` and `reminders/` configurations.
+4. Once an operator approves, new dossier and similar-company research runs are triggered and the refreshed manifest replaces the historical version.
+
+This approach provides deterministic reuse of prior work while keeping an auditable history of refresh decisions.
+
+## Human-in-the-loop decision architecture
+
+Human reviews are orchestrated through structured messages emitted by `MasterWorkflowAgent`. Each message includes:
+
+- The workflow `run_id` and source agent (`research.internal_research`, `hitl.assignment`, etc.).
+- The current dossier status (`existing_dossier`, `refresh_requested`, `missing_research_inputs`).
+- A recommended action (`approve_refresh`, `supply_missing_details`, `confirm_delivery`).
+
+Reminder logic is implemented with the `reminders` package:
+
+1. Upon assignment, a timer is scheduled for the first reminder window.
+2. If no response is recorded, reminder events escalate through configured channels (email, Slack, PagerDuty).
+3. Each reminder updates the audit trail stored under `log_storage/run_history/workflows/<run_id>/hitl.json` with timestamps and escalation levels.
+4. A final escalation notifies the alerting agent, ensuring unresolved research requests surface in observability dashboards.
+
+## Research artefact production and delivery
+
+Research agents create JSON artefacts in deterministic locations:
+
+- `internal_research/<run_id>/internal_research.json` – existing dossier manifest, assigned researcher, freshness indicators.
+- `dossier_research/<run_id>/company_detail_research.json` – the comprehensive company dossier.
+- `similar_companies_level1/<run_id>/similar_companies_level1.json` – comparable company catalogue.
+
+`utils.reporting.convert_research_artifacts_to_pdfs` consumes these JSON documents and writes PDFs to `RESEARCH_PDF_DIR/<run_id>/`. The CRM agent receives both the JSON and PDF paths. When `CRM_ATTACHMENT_BASE_URL` is set, the orchestrator appends stable URLs to the final payload so CRM operators can access artefacts without downloading attachments.
+
+Refer to [`docs/research_artifacts.md`](research_artifacts.md) for full schema references and sample outputs delivered to event organisers.
 
 ## Deployment topology
 

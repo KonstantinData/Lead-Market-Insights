@@ -1,0 +1,44 @@
+{
+  "company_name": "Example Analytics",
+  "run_id": "run-123",
+  "event_id": "evt-456",
+  "generated_at": "2024-01-01T12:00:00+00:00",
+  "results": [
+    {
+      "id": "1",
+      "name": "Example Analytics",
+      "domain": "example.com",
+      "score": 10.0,
+      "matching_fields": [
+        "description",
+        "name",
+        "product",
+        "segment"
+      ],
+      "properties": {
+        "name": "Example Analytics",
+        "segment": "Enterprise",
+        "product": "Insight Platform",
+        "description": "Predictive analytics tools for marketing departments.",
+        "domain": "example.com"
+      }
+    },
+    {
+      "id": "2",
+      "name": "Example Insights",
+      "domain": "insights.example",
+      "score": 3.0,
+      "matching_fields": [
+        "description",
+        "product"
+      ],
+      "properties": {
+        "name": "Example Insights",
+        "segment": "Mid-Market",
+        "product": "Insight Platform",
+        "description": "Analytics for marketing and sales teams.",
+        "domain": "insights.example"
+      }
+    }
+  ]
+}

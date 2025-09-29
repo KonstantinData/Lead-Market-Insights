@@ -1,0 +1,38 @@
+{
+  "report_type": "Company Detail Research",
+  "run_id": "run-123",
+  "event_id": "evt-456",
+  "generated_at": "2024-01-01T12:00:00+00:00",
+  "company": {
+    "name": "Example Corp",
+    "domain": "example.com",
+    "location": "New York, USA",
+    "industry": "Technology",
+    "description": "A sample organisation for testing purposes."
+  },
+  "summary": "Example Corp builds example solutions.",
+  "insights": [
+    "Revenue grew 25% year over year.",
+    "Expanded into two new markets in 2023."
+  ],
+  "sources": [
+    "https://example.com/press",
+    "https://news.example.com/article"
+  ],
+  "raw_input": {
+    "company_name": "Example Corp",
+    "company_domain": "example.com",
+    "company_location": "New York, USA",
+    "company_industry": "Technology",
+    "company_description": "A sample organisation for testing purposes.",
+    "summary": "Example Corp builds example solutions.",
+    "insights": [
+      "Revenue grew 25% year over year.",
+      "Expanded into two new markets in 2023."
+    ],
+    "sources": [
+      "https://example.com/press",
+      "https://news.example.com/article"
+    ]
+  }
+}

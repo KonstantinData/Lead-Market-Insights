@@ -1,6 +1,7 @@
 import json
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Callable, Iterable, Mapping
 
 import pytest
 
@@ -55,7 +56,8 @@ def _candidate(
     return {"id": company_id, "properties": properties}
 
 
-def _base_trigger() -> dict[str, object]:
+@pytest.fixture()
+def base_trigger() -> dict[str, object]:
     return {
         "run_id": "run-123",
         "event_id": "evt-456",
@@ -66,6 +68,21 @@ def _base_trigger() -> dict[str, object]:
             "description": "Delivers predictive analytics for marketing teams.",
         },
     }
+
+
+@pytest.fixture()
+def trigger_factory(base_trigger: dict[str, object]) -> Callable[..., dict[str, object]]:
+    def _factory(**updates: object) -> dict[str, object]:
+        trigger = json.loads(json.dumps(base_trigger))
+        payload = trigger["payload"]
+        if isinstance(updates.get("payload"), dict):
+            payload.update(updates["payload"])  # type: ignore[arg-type]
+        for key, value in updates.items():
+            if key != "payload":
+                trigger[key] = value
+        return trigger
+
+    return _factory
 
 
 @pytest.fixture()
@@ -105,8 +122,10 @@ def tmp_agent(tmp_path: Path) -> IntLvl1SimilarCompaniesAgent:
     )
 
 
-def test_ranked_results_are_limited_and_persisted(tmp_agent: IntLvl1SimilarCompaniesAgent, tmp_path: Path) -> None:
-    trigger = _base_trigger()
+def test_ranked_results_are_limited_and_persisted(
+    tmp_agent: IntLvl1SimilarCompaniesAgent, tmp_path: Path, trigger_factory
+) -> None:
+    trigger = trigger_factory()
 
     result = tmp_agent.run(trigger)
 
@@ -163,3 +182,50 @@ def test_missing_company_name_raises_value_error(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError):
         agent.run({"payload": {}})
+
+
+def test_candidates_without_valid_properties_are_ignored(tmp_path: Path) -> None:
+    integration = _StubIntegration(
+        [
+            {"id": "invalid", "properties": None},
+            {"id": "blank", "properties": {}},
+            _candidate("valid", "Example Analytics", description="Analytics"),
+        ]
+    )
+
+    agent = IntLvl1SimilarCompaniesAgent(
+        config=_Config(tmp_path), hubspot_integration=integration, result_limit=5
+    )
+
+    trigger = {"payload": {"company_name": "Example Analytics", "description": "Analytics"}}
+    results = agent.run(trigger)["payload"]["results"]
+
+    assert [item["id"] for item in results] == ["valid"]
+
+
+def test_similar_companies_schema_snapshot(
+    tmp_agent: IntLvl1SimilarCompaniesAgent, trigger_factory, monkeypatch
+) -> None:
+    class _FixedDatetime:
+        @classmethod
+        def now(cls, tz=None):
+            base = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+            if tz:
+                return base.astimezone(tz)
+            return base
+
+    monkeypatch.setattr("agents.int_lvl_1_agent.datetime", _FixedDatetime)
+
+    trigger = trigger_factory()
+    result = tmp_agent.run(trigger)
+
+    artifact_path = Path(result["payload"]["artifact_path"])
+    saved_payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+
+    snapshot_path = (
+        Path(__file__).resolve().parent / "snapshots" / "similar_companies_level1.json"
+    )
+    expected_payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+
+    assert saved_payload == expected_payload
+    assert saved_payload["results"] == result["payload"]["results"]

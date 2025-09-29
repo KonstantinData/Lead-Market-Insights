@@ -32,6 +32,7 @@ from agents.interfaces import (
 from agents.local_storage_agent import LocalStorageAgent
 from config.config import settings
 from config.watcher import LlmConfigurationWatcher
+from logs.workflow_log_manager import WorkflowLogManager
 from utils.trigger_loader import load_trigger_words
 from utils.pii import mask_pii
 from utils.audit_log import AuditLog
@@ -92,6 +93,7 @@ class MasterWorkflowAgent:
 
         # Local storage for log artefacts
         self.storage_agent = LocalStorageAgent(settings.run_log_dir, logger=logger)
+        self.workflow_log_manager = WorkflowLogManager(settings.workflow_log_dir)
 
         self.run_id: str = ""
         self.run_directory: Path = self.storage_agent.base_dir
@@ -122,6 +124,13 @@ class MasterWorkflowAgent:
         self.audit_log = AuditLog(audit_log_path, logger=logger)
         if hasattr(self.human_agent, "set_audit_log"):
             self.human_agent.set_audit_log(self.audit_log)
+        if hasattr(self.human_agent, "set_run_context"):
+            try:
+                self.human_agent.set_run_context(
+                    self.run_id, self.workflow_log_manager
+                )
+            except Exception:  # pragma: no cover - defensive guard
+                logger.exception("Failed to set run context on human agent")
 
         for existing_handler in list(logger.handlers):
             if isinstance(existing_handler, logging.FileHandler) and getattr(
@@ -211,7 +220,11 @@ class MasterWorkflowAgent:
                 ):
                     response = self.human_agent.request_dossier_confirmation(event, info)
                 audit_id = response.get("audit_id")
-                if response.get("dossier_required"):
+                status = self._resolve_dossier_status(response)
+                if status == "pending":
+                    self._log_dossier_pending(event_id, audit_id, response)
+                    record_hitl_outcome("dossier", "pending")
+                elif response.get("dossier_required"):
                     logger.info(
                         "Organizer approved dossier for event %s [audit_id=%s]: %s",
                         event_id,
@@ -266,7 +279,11 @@ class MasterWorkflowAgent:
                 ):
                     response = self.human_agent.request_dossier_confirmation(event, info)
                 audit_id = response.get("audit_id")
-                if response.get("dossier_required"):
+                status = self._resolve_dossier_status(response)
+                if status == "pending":
+                    self._log_dossier_pending(event_id, audit_id, response)
+                    record_hitl_outcome("dossier", "pending")
+                elif response.get("dossier_required"):
                     logger.info(
                         "Organizer approved dossier for event %s [audit_id=%s]: %s",
                         event_id,
@@ -344,8 +361,44 @@ class MasterWorkflowAgent:
             metadata=metadata,
         )
 
+        if hasattr(self.human_agent, "shutdown"):
+            try:
+                self.human_agent.shutdown()
+            except Exception:  # pragma: no cover - defensive guard
+                logger.exception("Failed to shutdown human agent reminders")
+
         if hasattr(self, "_config_watcher"):
             self._config_watcher.stop()
+
+    def _resolve_dossier_status(self, response: Dict[str, Any]) -> str:
+        status = response.get("status")
+        if status:
+            return str(status)
+        decision = response.get("dossier_required")
+        if decision is True:
+            return "approved"
+        if decision is False:
+            return "declined"
+        return "pending"
+
+    def _log_dossier_pending(
+        self,
+        event_id: Optional[Any],
+        audit_id: Optional[str],
+        response: Dict[str, Any],
+    ) -> None:
+        logger.info(
+            "Organizer decision pending for event %s [audit_id=%s]",
+            event_id,
+            audit_id or "n/a",
+        )
+        details = self._mask_for_logging(response.get("details"))
+        if details:
+            logger.info(
+                "Pending dossier reminder context for event %s: %s",
+                event_id,
+                details,
+            )
 
     def _apply_llm_settings(self, current_settings) -> None:
         """Copy the latest LLM settings from the shared settings object."""

@@ -1,10 +1,14 @@
 import inspect
 import logging
-from typing import Any, Dict, Optional
+from dataclasses import dataclass
+from datetime import timedelta
+from typing import Any, Dict, Optional, Sequence
 
 from agents.factory import register_agent
 from agents.interfaces import BaseHumanAgent
 from config.config import settings
+from logs.workflow_log_manager import WorkflowLogManager
+from reminders.reminder_escalation import ReminderEscalation
 from utils.audit_log import AuditLog
 from utils.pii import mask_pii
 
@@ -18,7 +22,19 @@ logger = logging.getLogger(__name__)
 
 @register_agent(BaseHumanAgent, "human_in_loop", "default", is_default=True)
 class HumanInLoopAgent(BaseHumanAgent):
-    def __init__(self, communication_backend: Optional[Any] = None) -> None:
+    @dataclass
+    class DossierReminderPolicy:
+        initial_delay: timedelta = timedelta(hours=4)
+        follow_up_delays: Sequence[timedelta] = (timedelta(hours=24),)
+        escalation_delay: Optional[timedelta] = timedelta(hours=48)
+        escalation_recipient: Optional[str] = None
+
+    def __init__(
+        self,
+        communication_backend: Optional[Any] = None,
+        *,
+        reminder_policy: Optional["HumanInLoopAgent.DossierReminderPolicy"] = None,
+    ) -> None:
         """
         Create the HITL agent.
 
@@ -32,11 +48,31 @@ class HumanInLoopAgent(BaseHumanAgent):
         """
         self.communication_backend = communication_backend
         self.audit_log: Optional[AuditLog] = None
+        self.workflow_log_manager: Optional[WorkflowLogManager] = None
+        self.run_id: Optional[str] = None
+        self.reminder_policy = reminder_policy or self.DossierReminderPolicy()
+        self.reminder_escalation: Optional[ReminderEscalation] = None
+        self._ensure_reminder_escalation()
 
     def set_audit_log(self, audit_log: AuditLog) -> None:
         """Attach an audit logger used to persist request/response metadata."""
 
         self.audit_log = audit_log
+
+    def set_run_context(
+        self,
+        run_id: str,
+        workflow_log_manager: WorkflowLogManager,
+    ) -> None:
+        """Set the workflow run context used for reminder/escalation logging."""
+
+        self.run_id = run_id
+        self.workflow_log_manager = workflow_log_manager
+        if self.reminder_escalation:
+            self.reminder_escalation.run_id = run_id
+            self.reminder_escalation.workflow_log_manager = workflow_log_manager
+        else:
+            self._ensure_reminder_escalation()
 
     def request_info(
         self, event: Dict[str, Any], extracted: Dict[str, Any]
@@ -211,6 +247,15 @@ class HumanInLoopAgent(BaseHumanAgent):
             )
             if audit_id:
                 normalized["audit_id"] = audit_id
+        self._post_process_decision(
+            normalized,
+            audit_id=audit_id,
+            contact=contact,
+            subject=subject,
+            message=message,
+            event=event,
+            info=info,
+        )
         return normalized
 
     def _resolve_backend_handler(self) -> Optional[Any]:
@@ -333,8 +378,11 @@ class HumanInLoopAgent(BaseHumanAgent):
         Normalizes the response from a backend or simulation to a standard structure.
         """
         if isinstance(response, dict):
-            dossier_required = response.get("dossier_required")
-            if dossier_required is None:
+            if "dossier_required" in response:
+                dossier_required = response.get("dossier_required")
+            elif response.get("status") in {"pending", None}:
+                dossier_required = None
+            else:
                 dossier_required = bool(response)
             details = response.get("details")
             if isinstance(details, dict):
@@ -347,14 +395,24 @@ class HumanInLoopAgent(BaseHumanAgent):
                 }
             else:
                 details = {"raw_response": details}
+            status = response.get("status")
+            resolved_status = self._status_from_decision(dossier_required)
             return {
-                "dossier_required": bool(dossier_required),
+                "dossier_required": dossier_required,
                 "details": details,
+                "status": status or resolved_status,
             }
 
+        if isinstance(response, bool):
+            decision = response
+        elif response is None:
+            decision = None
+        else:
+            decision = bool(response)
         return {
-            "dossier_required": bool(response),
+            "dossier_required": decision,
             "details": {"raw_response": response},
+            "status": self._status_from_decision(decision),
         }
 
     def _mask_for_message(self, payload: Any) -> Any:
@@ -365,3 +423,230 @@ class HumanInLoopAgent(BaseHumanAgent):
             whitelist=getattr(settings, "pii_field_whitelist", None),
             mode=getattr(settings, "compliance_mode", "standard"),
         )
+
+    def shutdown(self) -> None:
+        """Cancel any scheduled reminders when the agent is torn down."""
+
+        if self.reminder_escalation:
+            self.reminder_escalation.cancel_pending()
+
+    # ------------------------------------------------------------------
+    # Reminder orchestration helpers
+    # ------------------------------------------------------------------
+    def _ensure_reminder_escalation(self) -> None:
+        if self.reminder_escalation:
+            return
+        email_agent = self._resolve_email_agent_for_reminders()
+        if email_agent is None:
+            return
+        self.reminder_escalation = ReminderEscalation(
+            email_agent,
+            workflow_log_manager=self.workflow_log_manager,
+            run_id=self.run_id,
+        )
+
+    def _resolve_email_agent_for_reminders(self) -> Optional[Any]:
+        backend = self.communication_backend
+        if backend is None:
+            return None
+        if hasattr(backend, "send_email"):
+            return backend
+        candidate = getattr(backend, "email_agent", None)
+        if candidate is not None and hasattr(candidate, "send_email"):
+            return candidate
+        return None
+
+    def _post_process_decision(
+        self,
+        normalized: Dict[str, Any],
+        *,
+        audit_id: Optional[str],
+        contact: Dict[str, Any],
+        subject: str,
+        message: str,
+        event: Dict[str, Any],
+        info: Dict[str, Any],
+    ) -> None:
+        status = self._determine_status(normalized)
+        if status != "pending":
+            return
+
+        pending_audit_id = audit_id or normalized.get("audit_id")
+        self._log_workflow(
+            "hitl_dossier_pending",
+            f"Organizer decision pending; reminders initiated [audit_id={pending_audit_id or 'n/a'}]",
+        )
+        self._initiate_reminder_sequence(
+            audit_id=pending_audit_id,
+            contact=contact,
+            subject=subject,
+            message=message,
+            event=event,
+            info=info,
+            details=normalized.get("details", {}),
+        )
+
+    def _determine_status(self, payload: Dict[str, Any]) -> str:
+        status = payload.get("status")
+        if status:
+            return str(status)
+        decision = payload.get("dossier_required")
+        resolved = self._status_from_decision(decision)
+        payload["status"] = resolved
+        return resolved
+
+    def _status_from_decision(self, decision: Any) -> str:
+        if decision is True:
+            return "approved"
+        if decision is False:
+            return "declined"
+        return "pending"
+
+    def _initiate_reminder_sequence(
+        self,
+        *,
+        audit_id: Optional[str],
+        contact: Dict[str, Any],
+        subject: str,
+        message: str,
+        event: Dict[str, Any],
+        info: Dict[str, Any],
+        details: Dict[str, Any],
+    ) -> None:
+        if not contact:
+            return
+        contact_email = contact.get("email")
+        if not contact_email:
+            self._log_workflow(
+                "hitl_dossier_reminder_skipped",
+                f"No organizer email available for reminders [audit_id={audit_id or 'n/a'}]",
+            )
+            return
+
+        if not self.reminder_escalation:
+            self._log_workflow(
+                "hitl_dossier_reminder_skipped",
+                f"Reminder escalation not configured for {contact_email} [audit_id={audit_id or 'n/a'}]",
+            )
+            return
+
+        policy = self.reminder_policy
+        if not policy:
+            return
+
+        metadata = {
+            "audit_id": audit_id or "n/a",
+            "contact": contact_email,
+            "event_id": event.get("id"),
+            "workflow_step": "hitl_dossier",
+        }
+
+        cumulative_seconds = 0.0
+        initial_seconds = max(policy.initial_delay.total_seconds(), 0)
+        cumulative_seconds += initial_seconds
+        self.reminder_escalation.schedule_reminder(
+            contact_email,
+            self._build_reminder_subject(subject),
+            self._build_reminder_message(message, attempt=1, details=details),
+            cumulative_seconds,
+            metadata=metadata,
+        )
+
+        for attempt_index, delay in enumerate(policy.follow_up_delays, start=2):
+            cumulative_seconds += max(delay.total_seconds(), 0)
+            self.reminder_escalation.schedule_reminder(
+                contact_email,
+                self._build_reminder_subject(subject),
+                self._build_reminder_message(
+                    message,
+                    attempt=attempt_index,
+                    details=details,
+                ),
+                cumulative_seconds,
+                metadata=metadata,
+            )
+
+        if policy.escalation_delay is not None:
+            escalation_seconds = max(policy.escalation_delay.total_seconds(), 0)
+            escalation_recipient = (
+                policy.escalation_recipient or contact_email
+            )
+            self.reminder_escalation.schedule_escalation(
+                escalation_recipient,
+                self._build_escalation_subject(subject),
+                self._build_escalation_message(
+                    message,
+                    contact,
+                    event,
+                    info,
+                    details,
+                    audit_id=audit_id,
+                ),
+                escalation_seconds,
+                metadata={
+                    **metadata,
+                    "escalation_recipient": escalation_recipient,
+                },
+            )
+
+    def _build_reminder_subject(self, original_subject: str) -> str:
+        return f"Reminder: {original_subject}"
+
+    def _build_reminder_message(
+        self,
+        original_message: str,
+        *,
+        attempt: int,
+        details: Dict[str, Any],
+    ) -> str:
+        lines = [
+            "Hello,",
+            "",
+            "This is a friendly reminder about the dossier confirmation request below.",
+            f"Reminder attempt {attempt}.",
+            "",
+            original_message,
+        ]
+        note = details.get("note") or details.get("reason")
+        if note:
+            lines.extend(["", f"Previous context: {note}"])
+        lines.append("")
+        lines.append("Please respond at your earliest convenience.")
+        return "\n".join(lines)
+
+    def _build_escalation_subject(self, original_subject: str) -> str:
+        return f"Escalation: {original_subject}"
+
+    def _build_escalation_message(
+        self,
+        original_message: str,
+        contact: Dict[str, Any],
+        event: Dict[str, Any],
+        info: Dict[str, Any],
+        details: Dict[str, Any],
+        *,
+        audit_id: Optional[str],
+    ) -> str:
+        event_id = event.get("id") or "<unknown>"
+        company = info.get("company_name") or info.get("web_domain") or "the company"
+        lines = [
+            "Escalation notice:",
+            "",
+            "The organizer has not responded to the dossier confirmation request.",
+            f"Event ID: {event_id}",
+            f"Company: {company}",
+            f"Audit trail reference: {audit_id or details.get('audit_id') or 'n/a'}",
+            "",
+            "Original request message:",
+            original_message,
+            "",
+            "Please review and take the necessary action.",
+        ]
+        contact_label = self._format_contact_label(contact)
+        lines.append(f"Organizer contact: {contact_label}")
+        return "\n".join(lines)
+
+    def _log_workflow(self, step: str, message: str) -> None:
+        if not (self.workflow_log_manager and self.run_id):
+            return
+        self.workflow_log_manager.append_log(self.run_id, step, message)

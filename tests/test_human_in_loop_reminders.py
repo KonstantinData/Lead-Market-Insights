@@ -64,7 +64,7 @@ def test_pending_confirmation_triggers_reminders(tmp_path) -> None:
     time.sleep(0.4)
 
     assert backend.sent_emails, "Reminders should trigger email sends"
-    assert backend.sent_emails[0]["subject"].startswith("Reminder:" )
+    assert backend.sent_emails[0]["subject"].startswith("Reminder:")
     assert any(email["subject"].startswith("Escalation:") for email in backend.sent_emails)
 
     workflow_files = list(workflow_dir.glob("*.jsonl"))

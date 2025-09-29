@@ -1,0 +1,11 @@
+Hi {recipient_name},
+
+We already have a dossier for {company_name}.
+The latest version was generated on {last_report_date}.
+
+Use the link below to open the dossier in the CRM attachment portal.
+
+Reply with I USE THE EXISTING if the current dossier works for you.
+Reply with NEW REPORT if you need an updated dossier.
+
+{signature}

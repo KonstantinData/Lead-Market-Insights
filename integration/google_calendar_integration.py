@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import json
-import logging
+import asyncio
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Sequence, Union
-from urllib import parse, request
-from urllib.error import HTTPError, URLError
-from datetime import datetime, timedelta, timezone  # <--- HIER: timezone ergänzt!
+from urllib import parse
 
 from config.config import Settings
+from utils.async_http import AsyncHTTP, run_async
 
 
 @dataclass
@@ -28,14 +27,10 @@ TimeInput = Union[datetime, str]
 
 
 class GoogleCalendarIntegration:
-    """
-    High-level Google Calendar integration.
-    Public methods (e.g. fetch_events) handle authentication and token refresh internally.
-    Private members (e.g. _access_token, _ensure_access_token) are implementation details.
-    """
+    """High-level Google Calendar integration with async HTTP support."""
 
     DEFAULT_SCOPE: str = "https://www.googleapis.com/auth/calendar.readonly"
-    GOOGLE_CALENDAR_API_URL: str = "https://www.googleapis.com/calendar/v3"
+    GOOGLE_CALENDAR_API_URL: str = "https://www.googleapis.com"
 
     def __init__(
         self,
@@ -58,12 +53,16 @@ class GoogleCalendarIntegration:
         self.cal_lookahead_days = self._settings.cal_lookahead_days
         self.cal_lookback_days = self._settings.cal_lookback_days
 
+        self._calendar_http = AsyncHTTP(
+            base_url=self.GOOGLE_CALENDAR_API_URL,
+            timeout=float(self.request_timeout),
+        )
+        self._token_http = AsyncHTTP(timeout=float(self.request_timeout))
+
     # ------------------------------------------------------------------
     # Credential helpers
     # ------------------------------------------------------------------
-    def _prepare_credentials(
-        self, credentials: Optional[Dict[str, str]]
-    ) -> OAuthCredentials:
+    def _prepare_credentials(self, credentials: Optional[Dict[str, str]]) -> OAuthCredentials:
         if credentials is None:
             credentials = self._load_credentials_from_env()
 
@@ -106,16 +105,15 @@ class GoogleCalendarIntegration:
     # ------------------------------------------------------------------
     # Access token helpers
     # ------------------------------------------------------------------
-    def _ensure_access_token(self) -> None:
+    async def _ensure_access_token_async(self) -> None:
         token_expired = False
         if self._token_expiry is not None:
             token_expired = datetime.now(timezone.utc) >= self._token_expiry
 
         if not self._access_token or token_expired:
-            self._refresh_access_token()
+            await self._refresh_access_token_async()
 
-    def _refresh_access_token(self) -> None:
-        logging.debug("Refreshing Google Calendar access token")
+    async def _refresh_access_token_async(self) -> None:
         payload = parse.urlencode(
             {
                 "client_id": self._credentials.client_id,
@@ -123,25 +121,15 @@ class GoogleCalendarIntegration:
                 "refresh_token": self._credentials.refresh_token,
                 "grant_type": "refresh_token",
             }
-        ).encode("utf-8")
+        )
 
-        token_request = request.Request(
+        response = await self._token_http.post(
             self._credentials.token_uri,
             data=payload,
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
-
-        try:
-            with request.urlopen(
-                token_request, timeout=self.request_timeout
-            ) as response:
-                token_payload = json.load(response)
-        except HTTPError as exc:  # pragma: no cover - network interaction
-            logging.error("Google OAuth token refresh failed: %s", exc)
-            raise
-        except URLError as exc:  # pragma: no cover - network interaction
-            logging.error("Unable to reach Google OAuth token endpoint: %s", exc)
-            raise
+        response.raise_for_status()
+        token_payload = response.json()
 
         access_token = token_payload.get("access_token")
         if not access_token:
@@ -159,6 +147,24 @@ class GoogleCalendarIntegration:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+    async def fetch_events_async(
+        self,
+        start_time: TimeInput,
+        end_time: TimeInput,
+        *,
+        max_results: Optional[int] = None,
+        query: Optional[str] = None,
+    ) -> List[dict]:
+        await self._ensure_access_token_async()
+        return await self._list_events_async(
+            start_time=start_time,
+            end_time=end_time,
+            max_results=max_results,
+            query=query,
+            single_events=True,
+            order_by="startTime",
+        )
+
     def fetch_events(
         self,
         start_time: TimeInput,
@@ -167,27 +173,37 @@ class GoogleCalendarIntegration:
         max_results: Optional[int] = None,
         query: Optional[str] = None,
     ) -> List[dict]:
-        """
-        Public facade: ensures token validity and fetches events.
+        return run_async(
+            self.fetch_events_async(
+                start_time,
+                end_time,
+                max_results=max_results,
+                query=query,
+            )
+        )
 
-        Args:
-            start_time (datetime|str): RFC3339 string or datetime (will be normalized internally).
-            end_time (datetime|str): RFC3339 string or datetime.
-            max_results (int|None): optional limit.
-            query (str|None): optional search query.
+    async def list_events_async(
+        self,
+        *,
+        max_results: int = 20,
+        time_min: Optional[datetime] = None,
+        time_max: Optional[datetime] = None,
+        query: Optional[str] = None,
+        single_events: bool = True,
+        order_by: str = "startTime",
+    ) -> List[dict]:
+        await self._ensure_access_token_async()
 
-        Returns:
-            list[dict]: Calendar events.
-        """
+        if time_min is None:
+            time_min = datetime.now(timezone.utc)
 
-        self._ensure_access_token()
-        return self._list_events(
-            start_time=start_time,
-            end_time=end_time,
+        return await self._list_events_async(
+            start_time=time_min,
+            end_time=time_max,
             max_results=max_results,
             query=query,
-            single_events=True,
-            order_by="startTime",
+            single_events=single_events,
+            order_by=order_by,
         )
 
     def list_events(
@@ -200,40 +216,74 @@ class GoogleCalendarIntegration:
         single_events: bool = True,
         order_by: str = "startTime",
     ) -> List[dict]:
-        """Return events from the configured Google Calendar."""
-
-        self._ensure_access_token()
-
-        if time_min is None:
-            time_min = datetime.now(timezone.utc)
-
-        return self._list_events(
-            start_time=time_min,
-            end_time=time_max,
-            max_results=max_results,
-            query=query,
-            single_events=single_events,
-            order_by=order_by,
+        return run_async(
+            self.list_events_async(
+                max_results=max_results,
+                time_min=time_min,
+                time_max=time_max,
+                query=query,
+                single_events=single_events,
+                order_by=order_by,
+            )
         )
 
-    def get_access_token(self) -> str:
-        """Return a valid OAuth access token, refreshing it if necessary."""
-
-        self._ensure_access_token()
+    async def get_access_token_async(self) -> str:
+        await self._ensure_access_token_async()
         if not self._access_token:
             raise RuntimeError("Google OAuth access token is not available")
         return self._access_token
 
-    def _authorized_request(self, url: str) -> Dict[str, object]:
-        request_obj = request.Request(
-            url,
-            headers={"Authorization": f"Bearer {self._access_token}"},
+    def get_access_token(self) -> str:
+        return run_async(self.get_access_token_async())
+
+    async def iter_all_events_async(self, time_min: str, time_max: str) -> List[dict]:
+        await self._ensure_access_token_async()
+        all_events: List[dict] = []
+        page_token: Optional[str] = None
+
+        while True:
+            page = await self.fetch_events_page_async(
+                time_min=time_min,
+                time_max=time_max,
+                page_token=page_token,
+            )
+            all_events.extend(page.get("items", []))
+            page_token = page.get("nextPageToken")
+            if not page_token:
+                break
+
+        return all_events
+
+    async def fetch_events_page_async(
+        self,
+        *,
+        time_min: str,
+        time_max: str,
+        page_token: Optional[str] = None,
+        max_results: int = 2500,
+    ) -> Dict[str, object]:
+        token = await self.get_access_token_async()
+        headers = {"Authorization": f"Bearer {token}"}
+        params = {
+            "timeMin": time_min,
+            "timeMax": time_max,
+            "singleEvents": "true",
+            "orderBy": "startTime",
+            "maxResults": max_results,
+        }
+        if page_token:
+            params["pageToken"] = page_token
+
+        calendar_encoded = parse.quote(self.calendar_id, safe="@")
+        response = await self._calendar_http.get(
+            f"/calendar/v3/calendars/{calendar_encoded}/events",
+            params=params,
+            headers=headers,
         )
+        response.raise_for_status()
+        return response.json()
 
-        with request.urlopen(request_obj, timeout=self.request_timeout) as response:
-            return json.load(response)
-
-    def _list_events(
+    async def _list_events_async(
         self,
         *,
         start_time: Optional[TimeInput],
@@ -260,26 +310,25 @@ class GoogleCalendarIntegration:
         if query:
             parameters["q"] = query
 
-        encoded_params = parse.urlencode(parameters)
+        token = await self.get_access_token_async()
+        headers = {"Authorization": f"Bearer {token}"}
+
         calendar_encoded = parse.quote(self.calendar_id, safe="@")
-        url = (
-            f"{self.GOOGLE_CALENDAR_API_URL}/calendars/{calendar_encoded}/events?{encoded_params}"
+        response = await self._calendar_http.get(
+            f"/calendar/v3/calendars/{calendar_encoded}/events",
+            params=parameters,
+            headers=headers,
         )
-
-        logging.info("Listing Google Calendar events from '%s'", self.calendar_id)
-
-        try:
-            response = self._authorized_request(url)
-        except HTTPError as exc:  # pragma: no cover - network interaction
-            logging.error("Error listing events from Google Calendar: %s", exc)
-            raise
-        except URLError as exc:  # pragma: no cover - network interaction
-            logging.error("Unable to reach Google Calendar API: %s", exc)
-            raise
-
-        events = response.get("items", [])
-        logging.debug("Retrieved %d Google Calendar events", len(events))
+        response.raise_for_status()
+        payload = response.json()
+        events = payload.get("items", [])
         return events
+
+    async def aclose(self) -> None:
+        await asyncio.gather(
+            self._calendar_http.aclose(),
+            self._token_http.aclose(),
+        )
 
     @staticmethod
     def _normalize_time_input(value: TimeInput) -> str:

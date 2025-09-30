@@ -1,10 +1,12 @@
 import logging
-import smtplib
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 from typing import Iterable, Optional, Sequence, Union
+
+from utils.async_http import run_async
+from utils.async_smtp import send_email_ssl
 
 
 class EmailAgent:
@@ -20,7 +22,7 @@ class EmailAgent:
         self.password = password
         self.sender_email = sender_email
 
-    def send_email(
+    async def send_email_async(
         self,
         recipient,
         subject,
@@ -52,14 +54,42 @@ class EmailAgent:
             msg.attach(attachment_part)
 
         try:
-            with smtplib.SMTP_SSL(self.smtp_server, self.smtp_port) as server:
-                server.login(self.username, self.password)
-                server.sendmail(self.sender_email, recipient, msg.as_string())
+            await send_email_ssl(
+                host=self.smtp_server,
+                username=self.username,
+                password=self.password,
+                port=self.smtp_port,
+                message=msg.as_string(),
+                to_addrs=[recipient],
+            )
             logging.info(f"Email sent to {recipient} with subject '{subject}'")
             return True
         except Exception as e:
             logging.error(f"Failed to send email to {recipient}: {e}")
             return False
+
+    def send_email(
+        self,
+        recipient,
+        subject,
+        body,
+        html_body=None,
+        *,
+        attachments: Optional[Sequence[Union[str, Path]]] = None,
+        attachment_links: Optional[Iterable[str]] = None,
+    ):
+        """Synchronous facade that dispatches to the async implementation."""
+
+        return run_async(
+            self.send_email_async(
+                recipient,
+                subject,
+                body,
+                html_body,
+                attachments=attachments,
+                attachment_links=attachment_links,
+            )
+        )
 
     def _normalize_links(self, links: Optional[Iterable[str]]) -> Sequence[str]:
         if not links:

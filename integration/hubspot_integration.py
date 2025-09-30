@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import json
-import logging
-import time
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence
-from urllib import request
-from urllib.error import HTTPError, URLError
 
 from config.config import Settings
+from utils.async_http import AsyncHTTP, run_async
 from utils.text_normalization import normalize_text
 
 
@@ -66,11 +62,19 @@ class HubSpotIntegration:
             max_retries=max(1, resolved_retries),
             retry_backoff_seconds=max(0.0, resolved_backoff),
         )
+        self._http = AsyncHTTP(
+            base_url=self._config.api_base_url,
+            headers={
+                "Authorization": f"Bearer {self._config.access_token}",
+                "Content-Type": "application/json",
+            },
+            timeout=float(self._config.request_timeout),
+        )
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-    def find_company_by_domain(
+    async def find_company_by_domain_async(
         self,
         domain: str,
         *,
@@ -101,7 +105,7 @@ class HubSpotIntegration:
         if properties:
             payload["properties"] = list(properties)
 
-        response_payload = self._post(self.SEARCH_PATH, payload)
+        response_payload = await self._post(self.SEARCH_PATH, payload)
         results: Iterable[Dict[str, object]] = response_payload.get("results", [])
 
         for company in results:
@@ -111,7 +115,15 @@ class HubSpotIntegration:
 
         return next(iter(results), None)
 
-    def list_similar_companies(
+    def find_company_by_domain(
+        self,
+        domain: str,
+        *,
+        properties: Optional[Sequence[str]] = None,
+    ) -> Optional[Dict[str, object]]:
+        return run_async(self.find_company_by_domain_async(domain, properties=properties))
+
+    async def list_similar_companies_async(
         self,
         company_name: str,
         *,
@@ -142,60 +154,35 @@ class HubSpotIntegration:
         if properties:
             payload["properties"] = list(properties)
 
-        response_payload = self._post(self.SEARCH_PATH, payload)
+        response_payload = await self._post(self.SEARCH_PATH, payload)
         results: Iterable[Dict[str, object]] = response_payload.get("results", [])
         return list(results)
+
+    def list_similar_companies(
+        self,
+        company_name: str,
+        *,
+        limit: int = 5,
+        properties: Optional[Sequence[str]] = None,
+    ) -> List[Dict[str, object]]:
+        return run_async(
+            self.list_similar_companies_async(
+                company_name,
+                limit=limit,
+                properties=properties,
+            )
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-    def _post(self, path: str, payload: Dict[str, object]) -> Dict[str, object]:
-        url = f"{self._config.api_base_url}{path}"
-        body = json.dumps(payload).encode("utf-8")
-        headers = {
-            "Authorization": f"Bearer {self._config.access_token}",
-            "Content-Type": "application/json",
-        }
+    async def _post(self, path: str, payload: Dict[str, object]) -> Dict[str, object]:
+        response = await self._http.post(path, json=payload)
+        response.raise_for_status()
+        return response.json()
 
-        req = request.Request(url, data=body, headers=headers, method="POST")
-
-        for attempt in range(1, self._config.max_retries + 1):
-            try:
-                logging.info(
-                    "HubSpot API request",
-                    extra={
-                        "method": "POST",
-                        "url": url,
-                        "attempt": attempt,
-                    },
-                )
-            except TypeError:
-                logging.info("HubSpot API request %s %s (attempt %d)", "POST", url, attempt)
-
-            try:
-                with request.urlopen(req, timeout=self._config.request_timeout) as resp:
-                    raw = resp.read()
-                    return json.loads(raw.decode("utf-8")) if raw else {}
-            except HTTPError as exc:
-                logging.error(
-                    "HubSpot API responded with HTTP error: %s",
-                    exc,
-                )
-                if attempt == self._config.max_retries:
-                    raise
-            except URLError as exc:
-                logging.error("Unable to reach HubSpot API: %s", exc)
-                if attempt == self._config.max_retries:
-                    raise
-
-            self._backoff(attempt)
-
-        return {}
-
-    def _backoff(self, attempt: int) -> None:
-        delay = self._config.retry_backoff_seconds * (2 ** (attempt - 1))
-        if delay > 0:
-            time.sleep(delay)
+    async def aclose(self) -> None:
+        await self._http.aclose()
 
     @staticmethod
     def _normalise_domain(value: str) -> str:

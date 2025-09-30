@@ -5,12 +5,18 @@ from __future__ import annotations
 from typing import Sequence
 
 import aiosmtplib
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_random_exponential,
-)
+import tenacity
+from tenacity import retry, retry_if_exception_type, stop_after_attempt
+
+_wait_random_exponential = getattr(tenacity, "wait_random_exponential", None)
+if _wait_random_exponential is None:
+    from tenacity import wait_exponential_jitter
+
+    def wait_random_exponential(*, multiplier: float, max: float):
+        return wait_exponential_jitter(initial=multiplier, max=max)
+
+else:
+    wait_random_exponential = _wait_random_exponential
 
 from .retry import DEFAULT_MAX_ATTEMPTS, INITIAL_BACKOFF_SECONDS, MAX_BACKOFF_SECONDS
 

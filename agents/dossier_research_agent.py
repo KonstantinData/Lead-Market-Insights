@@ -60,7 +60,7 @@ class DossierResearchAgent(BaseResearchAgent):
     # ------------------------------------------------------------------
     # BaseResearchAgent API
     # ------------------------------------------------------------------
-    def run(self, trigger: Mapping[str, Any]) -> MutableMapping[str, Any]:  # type: ignore[override]
+    async def run(self, trigger: Mapping[str, Any]) -> MutableMapping[str, Any]:  # type: ignore[override]
         payload = self._extract_payload(trigger)
         self._validate_payload(payload)
 

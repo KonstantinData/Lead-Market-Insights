@@ -69,7 +69,7 @@ class DummyCrmAgent:
     def __init__(self) -> None:
         self.sent: list[Dict[str, Any]] = []
 
-    def send(self, event: Dict[str, Any], info: Dict[str, Any]) -> None:
+    async def send(self, event: Dict[str, Any], info: Dict[str, Any]) -> None:
         self.sent.append({"event": event, "info": info})
 
 
@@ -134,7 +134,7 @@ def test_observability_records_metrics_and_traces(monkeypatch, tmp_path):
             def __init__(self, artifact_path: str) -> None:
                 self.artifact_path = artifact_path
 
-            def run(self, trigger: Dict[str, Any]) -> Dict[str, Any]:  # type: ignore[override]
+            async def run(self, trigger: Dict[str, Any]) -> Dict[str, Any]:  # type: ignore[override]
                 return {
                     "source": "similar_companies",
                     "status": "completed",

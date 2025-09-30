@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -127,7 +128,7 @@ def test_ranked_results_are_limited_and_persisted(
 ) -> None:
     trigger = trigger_factory()
 
-    result = tmp_agent.run(trigger)
+    result = asyncio.run(tmp_agent.run(trigger))
 
     payload = result["payload"]
     assert payload["company_name"] == "Example Analytics"
@@ -169,7 +170,7 @@ def test_deterministic_ordering_when_scores_equal(tmp_path: Path) -> None:
         }
     }
 
-    results = agent.run(trigger)["payload"]["results"]
+    results = asyncio.run(agent.run(trigger))["payload"]["results"]
     assert [item["name"] for item in results] == ["Alpha Labs", "Beta Systems"]
 
 
@@ -181,7 +182,7 @@ def test_missing_company_name_raises_value_error(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ValueError):
-        agent.run({"payload": {}})
+        asyncio.run(agent.run({"payload": {}}))
 
 
 def test_candidates_without_valid_properties_are_ignored(tmp_path: Path) -> None:
@@ -198,7 +199,7 @@ def test_candidates_without_valid_properties_are_ignored(tmp_path: Path) -> None
     )
 
     trigger = {"payload": {"company_name": "Example Analytics", "description": "Analytics"}}
-    results = agent.run(trigger)["payload"]["results"]
+    results = asyncio.run(agent.run(trigger))["payload"]["results"]
 
     assert [item["id"] for item in results] == ["valid"]
 
@@ -217,7 +218,7 @@ def test_similar_companies_schema_snapshot(
     monkeypatch.setattr("agents.int_lvl_1_agent.datetime", _FixedDatetime)
 
     trigger = trigger_factory()
-    result = tmp_agent.run(trigger)
+    result = asyncio.run(tmp_agent.run(trigger))
 
     artifact_path = Path(result["payload"]["artifact_path"])
     saved_payload = json.loads(artifact_path.read_text(encoding="utf-8"))

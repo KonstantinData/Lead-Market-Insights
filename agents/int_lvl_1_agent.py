@@ -95,7 +95,7 @@ class IntLvl1SimilarCompaniesAgent(BaseResearchAgent):
     # ------------------------------------------------------------------
     # BaseResearchAgent API
     # ------------------------------------------------------------------
-    def run(self, trigger: Mapping[str, Any]) -> MutableMapping[str, Any]:  # type: ignore[override]
+    async def run(self, trigger: Mapping[str, Any]) -> MutableMapping[str, Any]:  # type: ignore[override]
         payload = self._extract_payload(trigger)
         company_name = self._normalise_company_name(payload)
         if not company_name:

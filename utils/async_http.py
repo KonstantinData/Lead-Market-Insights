@@ -8,17 +8,25 @@ from typing import Any, Mapping, Optional
 
 import httpx
 
-# Replaced wait_exponential_jitter with wait_random_exponential (actual Tenacity API)
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_random_exponential,
-)
+import tenacity
+from tenacity import retry, retry_if_exception_type, stop_after_attempt
+
+_wait_random_exponential = getattr(tenacity, "wait_random_exponential", None)
+if _wait_random_exponential is None:
+    from tenacity import wait_exponential_jitter
+
+    def wait_random_exponential(*, multiplier: float, max: float):
+        return wait_exponential_jitter(initial=multiplier, max=max)
+
+else:
+    wait_random_exponential = _wait_random_exponential
 
 from .retry import DEFAULT_MAX_ATTEMPTS, INITIAL_BACKOFF_SECONDS, MAX_BACKOFF_SECONDS
 
 logger = logging.getLogger(__name__)
+
+_RUN_ASYNC_DEPRECATION_MESSAGE = "run_async deprecated, removal in PR5"
+_run_async_warning_emitted = False
 
 DEFAULT_CONNECT_TIMEOUT = 5.0
 DEFAULT_READ_TIMEOUT = 20.0
@@ -107,6 +115,12 @@ class AsyncHTTP:
 
 def run_async(coro):
     """Execute an async coroutine from synchronous code."""
+    global _run_async_warning_emitted
+
+    if not _run_async_warning_emitted:
+        logger.warning(_RUN_ASYNC_DEPRECATION_MESSAGE)
+        _run_async_warning_emitted = True
+
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:

@@ -6,10 +6,12 @@ Entrypoint for the Agentic Intelligence Research workflow.
 # - All orchestration, error handling, and logging is now handled in WorkflowOrchestrator.
 """
 
+import asyncio
+
 from dotenv import load_dotenv
 
 
-def main() -> None:
+async def main() -> None:
     load_dotenv()
 
     import logging
@@ -25,4 +27,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -4,18 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from dataclasses import dataclass
 from typing import Dict, Iterable, Optional, Sequence
 from urllib import parse, request
 from urllib.error import HTTPError, URLError
 from datetime import datetime, timedelta, timezone  # <--- HIER: timezone ergänzt!
 
-from dotenv import load_dotenv
-
-load_dotenv()
-CAL_LOOKBACK_DAYS = int(os.getenv("CAL_LOOKBACK_DAYS", "1"))
-CAL_LOOKAHEAD_DAYS = int(os.getenv("CAL_LOOKAHEAD_DAYS", "14"))
+from config.config import Settings
 
 
 @dataclass
@@ -43,16 +38,18 @@ class GoogleCalendarIntegration:
         scopes: Optional[Sequence[str]] = None,
         request_timeout: int = 10,
         token_leeway: int = 60,
+        settings: Optional[Settings] = None,
     ) -> None:
+        self._settings = settings or Settings()
         self.scopes = tuple(scopes) if scopes else (self.DEFAULT_SCOPE,)
-        self.calendar_id = calendar_id or os.getenv(
-            "GOOGLE_CALENDAR_ID", "info@condata.io"
-        )
+        self.calendar_id = calendar_id or self._settings.google_calendar_id
         self._credentials = self._prepare_credentials(credentials)
         self.request_timeout = request_timeout
         self.token_leeway = max(token_leeway, 0)
         self._access_token: Optional[str] = self._credentials.token
         self._token_expiry: Optional[datetime] = None
+        self.cal_lookahead_days = self._settings.cal_lookahead_days
+        self.cal_lookback_days = self._settings.cal_lookback_days
 
     # ------------------------------------------------------------------
     # Credential helpers
@@ -86,37 +83,7 @@ class GoogleCalendarIntegration:
     def _load_credentials_from_env(self) -> Dict[str, str]:
         """Load OAuth credentials from environment variables."""
 
-        env_mapping = {
-            "client_id": "GOOGLE_CLIENT_ID",
-            "client_secret": "GOOGLE_CLIENT_SECRET",
-            "refresh_token": "GOOGLE_REFRESH_TOKEN",
-            # `token_uri` kannst du hardcoden (Standard) oder optional aus ENV laden:
-            "token_uri": "GOOGLE_TOKEN_URI",  # optional; Standard s.u.
-            # KEIN persistenter Access-Token in ENV!
-        }
-
-        credentials = {
-            key: value
-            for key, env_name in env_mapping.items()
-            if (value := os.getenv(env_name))
-        }
-
-        optional_env = {
-            "auth_uri": "GOOGLE_AUTH_URI",
-            "project_id": "GOOGLE_PROJECT_ID",
-            "redirect_uris": "GOOGLE_REDIRECT_URIS",
-        }
-
-        for key, env_name in optional_env.items():
-            value = os.getenv(env_name)
-            if value:
-                credentials[key] = value
-
-        auth_provider_key = os.getenv(
-            "GOOGLE_AUTH_PROVIDER_X509_CERT_URL"
-        ) or os.getenv("GHOOGLE_AUTH_PROVIDER_X509_CERT_URL")
-        if auth_provider_key:
-            credentials["auth_provider_x509_cert_url"] = auth_provider_key
+        credentials = dict(self._settings.google_oauth_credentials)
 
         if redirect_uris := credentials.get("redirect_uris"):
             credentials["redirect_uris"] = self._parse_redirect_uris(redirect_uris)

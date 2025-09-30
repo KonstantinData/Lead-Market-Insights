@@ -234,6 +234,9 @@ class Settings:
         self.google_oauth_credentials: Dict[str, str] = (
             self._load_google_oauth_credentials()
         )
+        self.google_api_base_url: str = (
+            _get_env_var("GOOGLE_API_BASE_URL") or "https://www.googleapis.com"
+        )
 
         project_root = Path(__file__).resolve().parents[1]
         default_log_root = project_root / "log_storage" / "run_history"

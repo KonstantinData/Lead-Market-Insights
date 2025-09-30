@@ -51,6 +51,9 @@ stricter privacy requirements.
   legal review ticket in the pull request description.
 * When introducing new agents, update [`docs/architecture.md`](architecture.md) to explain the
   data flow and specify the controls applied at each stage.
+* During the release process, add the note "ZIP-Snapshot ohne .git/ – Herkunft/Historie extern
+  prüfen." whenever publishing artefacts created from a repository snapshot to make missing Git
+  history explicit for audit reviewers.
 
 ## Incident response
 

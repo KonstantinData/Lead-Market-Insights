@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -17,6 +18,10 @@ if str(PROJECT_ROOT) not in sys.path:
 STUBS = PROJECT_ROOT / "tests" / "stubs"
 if STUBS.exists() and str(STUBS) not in sys.path:
     sys.path.insert(0, str(STUBS))
+
+
+DEFAULT_TEST_GOOGLE_CALENDAR_ID = "test-calendar@example.com"
+os.environ.setdefault("GOOGLE_CALENDAR_ID", DEFAULT_TEST_GOOGLE_CALENDAR_ID)
 
 
 @pytest.fixture

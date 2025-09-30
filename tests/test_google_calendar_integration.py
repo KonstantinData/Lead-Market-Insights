@@ -1,24 +1,23 @@
-import json
-import sys
+from __future__ import annotations
+
 from datetime import datetime, timedelta, timezone
-from io import BytesIO
-from pathlib import Path
 from typing import Dict
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
 from integration.google_calendar_integration import GoogleCalendarIntegration
+from utils.async_http import run_async
 
 
-class FakeResponse(BytesIO):
-    def __enter__(self):
-        return self
+class DummyResponse:
+    def __init__(self, payload: Dict[str, object]):
+        self._payload = payload
 
-    def __exit__(self, exc_type, exc, tb):
-        self.close()
-        return False
+    def raise_for_status(self) -> None:  # pragma: no cover - simple stub
+        return None
+
+    def json(self) -> Dict[str, object]:
+        return self._payload
 
 
 @pytest.fixture
@@ -44,63 +43,57 @@ def test_init_without_required_env(monkeypatch):
         GoogleCalendarIntegration()
 
 
-def test_refresh_access_token(monkeypatch, base_credentials):
+def test_refresh_access_token_async(monkeypatch, base_credentials):
     integration = GoogleCalendarIntegration(credentials=base_credentials)
+    response_payload = {"access_token": "new-token", "expires_in": 3600}
 
-    payload = {"access_token": "new-token", "expires_in": 3600}
-
-    def fake_urlopen(req, timeout):
-        assert req.full_url == base_credentials["token_uri"]
-        body = dict(item.split("=") for item in req.data.decode("utf-8").split("&"))
+    async def fake_post(url, data=None, headers=None):
+        assert url == base_credentials["token_uri"]
+        body = dict(item.split("=") for item in data.split("&"))
         assert body["client_id"] == base_credentials["client_id"]
         assert body["client_secret"] == base_credentials["client_secret"]
         assert body["refresh_token"] == base_credentials["refresh_token"]
-        assert body["grant_type"] == "refresh_token"
-        return FakeResponse(json.dumps(payload).encode("utf-8"))
+        assert headers["Content-Type"] == "application/x-www-form-urlencoded"
+        return DummyResponse(response_payload)
 
-    monkeypatch.setattr("integration.google_calendar_integration.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(integration._token_http, "post", fake_post)
 
-    integration._refresh_access_token()
+    run_async(integration._refresh_access_token_async())
 
     assert integration._access_token == "new-token"
     assert integration._token_expiry is not None
     assert integration._token_expiry > datetime.now(timezone.utc)
 
-
-def test_list_events_uses_authorized_request(monkeypatch, base_credentials):
+def test_list_events_async_uses_authorized_request(mocker, base_credentials):
     credentials = {**base_credentials, "token": "existing"}
     integration = GoogleCalendarIntegration(credentials=credentials)
     integration._token_expiry = datetime.now(timezone.utc) + timedelta(hours=1)
 
-    def fake_urlopen(req, timeout):
-        assert req.headers["Authorization"] == "Bearer existing"
-        assert "maxResults=5" in req.full_url
-        response_payload = {"items": [{"id": "1"}]}
-        return FakeResponse(json.dumps(response_payload).encode("utf-8"))
+    mocked_response = DummyResponse({"items": [{"id": "1"}]})
+    integration._calendar_http.get = mocker.AsyncMock(return_value=mocked_response)
 
-    monkeypatch.setattr(
-        "integration.google_calendar_integration.request.urlopen",
-        fake_urlopen
-    )
+    events = run_async(integration.list_events_async(max_results=5))
 
-    events = integration.list_events(max_results=5)
-
+    integration._calendar_http.get.assert_awaited_once()
+    call_kwargs = integration._calendar_http.get.call_args.kwargs
+    assert call_kwargs["params"]["maxResults"] == 5
+    assert call_kwargs["headers"]["Authorization"] == "Bearer existing"
     assert events == [{"id": "1"}]
 
-
-def test_fetch_events_calls_internal_methods(mocker, base_credentials):
+def test_fetch_events_async_delegates_to_list(mocker, base_credentials):
     integration = GoogleCalendarIntegration(credentials=base_credentials)
 
-    mocker.patch.object(integration, "_ensure_access_token")
-    mocker.patch.object(integration, "_list_events", return_value=[{"id": "evt_1"}])
+    mocker.patch.object(integration, "_ensure_access_token_async")
+    integration._list_events_async = mocker.AsyncMock(return_value=[{"id": "evt_1"}])
 
-    events = integration.fetch_events(
+    events = run_async(
+        integration.fetch_events_async(
         "2025-01-01T00:00:00Z",
         "2025-01-02T00:00:00Z",
-    )
+    ))
 
-    integration._ensure_access_token.assert_called_once()
-    integration._list_events.assert_called_once_with(
+    integration._ensure_access_token_async.assert_awaited_once()
+    integration._list_events_async.assert_awaited_once_with(
         start_time="2025-01-01T00:00:00Z",
         end_time="2025-01-02T00:00:00Z",
         max_results=None,

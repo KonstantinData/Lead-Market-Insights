@@ -1,7 +1,3 @@
-"""Unit tests for the EmailAgent attachment and link handling."""
-
-from __future__ import annotations
-
 import email
 from email import policy
 from pathlib import Path
@@ -12,30 +8,11 @@ import pytest
 from agents.email_agent import EmailAgent
 
 
-class _DummyServer:
-    def __init__(self, sent_messages: List[str]):
-        self._sent_messages = sent_messages
+def _install_dummy_async_smtp(monkeypatch: pytest.MonkeyPatch, sent_messages: List[str]) -> None:
+    async def fake_send_email_ssl(*, host, username, password, port, message, to_addrs):
+        sent_messages.append(message)
 
-    def __enter__(self) -> "_DummyServer":
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:  # pragma: no cover - context cleanup
-        return None
-
-    def login(self, username: str, password: str) -> None:
-        return None
-
-    def sendmail(self, sender: str, recipient: str, message: str) -> None:
-        self._sent_messages.append(message)
-
-
-def _install_dummy_smtp(monkeypatch: pytest.MonkeyPatch, sent_messages: List[str]) -> None:
-    from agents import email_agent as email_agent_module
-
-    def _factory(*_args, **_kwargs):
-        return _DummyServer(sent_messages)
-
-    monkeypatch.setattr(email_agent_module.smtplib, "SMTP_SSL", _factory)
+    monkeypatch.setattr("agents.email_agent.send_email_ssl", fake_send_email_ssl)
 
 
 def test_email_agent_attaches_pdfs_and_links(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -43,7 +20,7 @@ def test_email_agent_attaches_pdfs_and_links(tmp_path: Path, monkeypatch: pytest
     attachment.write_bytes(b"%PDF-1.4 test")
 
     sent_messages: List[str] = []
-    _install_dummy_smtp(monkeypatch, sent_messages)
+    _install_dummy_async_smtp(monkeypatch, sent_messages)
 
     agent = EmailAgent("smtp.example.com", 465, "user", "pass", "sender@example.com")
     portal_link = "https://crm.example.com/attachments/run-123/report"
@@ -77,7 +54,7 @@ def test_email_agent_attaches_pdfs_and_links(tmp_path: Path, monkeypatch: pytest
 
 def test_email_agent_handles_missing_attachments_gracefully(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     sent_messages: List[str] = []
-    _install_dummy_smtp(monkeypatch, sent_messages)
+    _install_dummy_async_smtp(monkeypatch, sent_messages)
 
     agent = EmailAgent("smtp.example.com", 465, "user", "pass", "sender@example.com")
 

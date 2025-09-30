@@ -1,23 +1,38 @@
 import logging
+from typing import List
 
 import pytest
 
-import agents.event_polling_agent as event_polling_agent
 from agents.event_polling_agent import EventPollingAgent
 
 
 class DummyCalendar:
-    def __init__(self, events):
+    def __init__(self, events: List[dict]):
         self._events = events
 
-    def list_events(self, *, max_results):
+    async def list_events_async(self, *, max_results: int):
         assert max_results == 100
         return list(self._events)
 
+    async def fetch_events_async(self, *args, **kwargs):
+        return list(self._events)
+
+    async def get_access_token_async(self):
+        return "token"
+
+
+class DummyContacts:
+    def __init__(self, contacts: List[dict]):
+        self._contacts = contacts
+
+    async def list_contacts_async(self, *, page_size: int = 10):
+        assert page_size == 10
+        return list(self._contacts)
+
 
 @pytest.fixture
-def dummy_calendar(monkeypatch):
-    events = [
+def dummy_calendar_events():
+    return [
         {"id": "1", "summary": "Projektmeeting"},
         {"id": "2", "eventType": "birthday", "summary": "Birthday: Alice"},
         {"id": "3", "summary": "Teamabend", "description": "Geburtstag feiern"},
@@ -25,16 +40,11 @@ def dummy_calendar(monkeypatch):
         {"id": "5", "summary": "Produkt-Review"},
     ]
 
-    dummy = DummyCalendar(events)
-    monkeypatch.setattr(
-        event_polling_agent, "GoogleCalendarIntegration", lambda: dummy
-    )
-    return events
 
-
-def test_poll_skips_birthday_events(dummy_calendar, caplog):
+def test_poll_skips_birthday_events(dummy_calendar_events, caplog):
     caplog.set_level(logging.DEBUG)
-    agent = EventPollingAgent()
+    calendar = DummyCalendar(dummy_calendar_events)
+    agent = EventPollingAgent(calendar_integration=calendar)
 
     polled_events = list(agent.poll())
 
@@ -50,7 +60,7 @@ def test_poll_skips_birthday_events(dummy_calendar, caplog):
 
 def test_agent_uses_public_fetch_events(mocker):
     integration = mocker.Mock()
-    integration.fetch_events.return_value = [{"id": "e1"}]
+    integration.fetch_events_async = mocker.AsyncMock(return_value=[{"id": "e1"}])
 
     agent = EventPollingAgent(calendar_integration=integration)
 
@@ -59,10 +69,23 @@ def test_agent_uses_public_fetch_events(mocker):
         "2025-01-02T00:00:00Z",
     )
 
-    integration.fetch_events.assert_called_once_with(
+    integration.fetch_events_async.assert_awaited_once_with(
         start_time="2025-01-01T00:00:00Z",
         end_time="2025-01-02T00:00:00Z",
         max_results=None,
         query=None,
     )
     assert events == [{"id": "e1"}]
+
+
+def test_poll_contacts_uses_async_flow(dummy_calendar_events, mocker):
+    calendar = DummyCalendar(dummy_calendar_events)
+    contacts = DummyContacts([{"resourceName": "people/1"}])
+
+    agent = EventPollingAgent(
+        calendar_integration=calendar,
+        contacts_integration=contacts,
+    )
+
+    contacts_result = agent.poll_contacts()
+    assert contacts_result == [{"resourceName": "people/1"}]

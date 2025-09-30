@@ -30,7 +30,6 @@ class GoogleCalendarIntegration:
     """High-level Google Calendar integration with async HTTP support."""
 
     DEFAULT_SCOPE: str = "https://www.googleapis.com/auth/calendar.readonly"
-    GOOGLE_CALENDAR_API_URL: str = "https://www.googleapis.com"
 
     def __init__(
         self,
@@ -54,7 +53,7 @@ class GoogleCalendarIntegration:
         self.cal_lookback_days = self._settings.cal_lookback_days
 
         self._calendar_http = AsyncHTTP(
-            base_url=self.GOOGLE_CALENDAR_API_URL,
+            base_url=self._settings.google_api_base_url,
             timeout=float(self.request_timeout),
         )
         self._token_http = AsyncHTTP(timeout=float(self.request_timeout))

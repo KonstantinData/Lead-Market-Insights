@@ -8,13 +8,13 @@ Entrypoint for the Agentic Intelligence Research workflow.
 
 from dotenv import load_dotenv
 
-load_dotenv()
 
-import logging
-from agents.workflow_orchestrator import WorkflowOrchestrator
+def main() -> None:
+    load_dotenv()
 
-if __name__ == "__main__":
-    # Set up logging (optional: customize as needed)
+    import logging
+    from agents.workflow_orchestrator import WorkflowOrchestrator
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s [run_id=%(run_id)s] %(message)s",
@@ -22,3 +22,7 @@ if __name__ == "__main__":
 
     orchestrator = WorkflowOrchestrator()
     orchestrator.run()
+
+
+if __name__ == "__main__":
+    main()

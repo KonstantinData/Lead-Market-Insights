@@ -18,7 +18,7 @@ Both template pairs expect the following context keys when rendered:
 | --- | ----------- | ----- |
 | `recipient_name` | Friendly name for the recipient. | Typically the local-part of the email address. |
 | `company_name` | Target company covered by the dossier. | | 
-| `last_report_date` | (Existing dossier template only) Date/time formatted as `YYYY-MM-DD HH:MM` in Europe/Berlin. | |
+| `last_report_date` | (Existing dossier template only) Date/time formatted as `TT.MM.JJJJ HH:MM CET`. | |
 | `highlights` | (Final delivery template only) Bullet list or paragraph summarising key insights. | Optional; renderers may pass an empty string. |
 | `signature` | Signature block (text or HTML). | Defaults provided by `InternalResearchAgent`. |
 

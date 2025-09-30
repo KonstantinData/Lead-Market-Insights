@@ -29,19 +29,7 @@ The dossier research agent produces a structured JSON report titled "Company Det
 Research". It captures the metadata required to brief event organisers and downstream
 CRM teams.
 
-```json
-{
-  "report_type": "Company Detail Research",
-  "run_id": "run-123",
-  "event_id": "evt-456",
-  "generated_at": "2024-01-01 13:00",
-  "company": {
-    "name": "Example Corp",
-    "domain": "example.com",
-    "location": "New York, USA",
-    "industry": "Technology",
-    "description": "A sample organisation for testing purposes."
-  },
+'loggingissue'
   "summary": "Example Corp builds example solutions.",
   "insights": [
     "Revenue grew 25% year over year.",
@@ -76,7 +64,7 @@ competitive positioning or cross-sell suggestions.
   "company_name": "Example Analytics",
   "run_id": "run-123",
   "event_id": "evt-456",
-  "generated_at": "2024-01-01 13:00",
+  "generated_at": "01.01.2024 13:00 CET",
   "results": [
     {
       "id": "1",
@@ -112,7 +100,7 @@ include:
 - `status` – `reuse`, `refresh_requested`, or `not_found`.
 - `source_artifact` – the absolute path to the prior dossier that was reused.
 - `owner` – the last researcher to update the dossier.
-- `expires_at` – timestamp formatted as `YYYY-MM-DD HH:MM` (Europe/Berlin) indicating when a
+- `expires_at` – timestamp formatted as `TT.MM.JJJJ HH:MM CET` indicating when a
   refresh should be triggered.
 
 If a refresh is required the manifest also lists `reminder_schedule` entries that feed

@@ -2,11 +2,24 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import logging
 from enum import Enum
-from typing import Any, Callable, Iterable, List, MutableMapping, Optional
+from typing import Any, Callable, Iterable, List, Mapping, MutableMapping, Optional
 
 import requests
+
+from utils.async_http import AsyncHTTP, run_async
+
+
+def _maybe_sign(payload: dict, secret: Optional[str]) -> Mapping[str, str]:
+    if not secret:
+        return {}
+    body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    sig = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    return {"X-Signature": f"sha256={sig}"}
 
 
 class AlertSeverity(str, Enum):
@@ -181,5 +194,13 @@ class AlertAgent:
             "severity": severity.value,
             "context": dict(context),
         }
-        headers = channel.get("headers") or {"Content-Type": "application/json"}
-        requests.post(url, json=payload, headers=headers, timeout=5)
+        extra_headers = _maybe_sign(payload, channel.get("signature_key"))
+        headers = {
+            **(channel.get("headers") or {"Content-Type": "application/json"}),
+            **extra_headers,
+        }
+        http = AsyncHTTP(timeout=5.0)
+        try:
+            run_async(http.post(url, json=payload, headers=headers))
+        finally:
+            run_async(http.aclose())

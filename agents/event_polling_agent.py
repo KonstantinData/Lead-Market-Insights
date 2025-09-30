@@ -6,6 +6,7 @@ from agents.interfaces import BasePollingAgent
 from integration.google_calendar_integration import GoogleCalendarIntegration
 from integration.google_contacts_integration import GoogleContactsIntegration
 from utils.async_http import run_async
+from utils.pii import mask_pii
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ class EventPollingAgent(BasePollingAgent):
                         event.get("id", ""),
                     )
                     continue
-                logger.info(f"Polled calendar event: {event}")
+                logger.info("Polled calendar event: %s", mask_pii(event))
                 filtered.append(event)
             return filtered
         except Exception as e:
@@ -127,7 +128,7 @@ class EventPollingAgent(BasePollingAgent):
         try:
             contacts = await self.contacts.list_contacts_async(page_size=10)
             for contact in contacts:
-                logger.info(f"Polled contact: {contact}")
+                logger.info("Polled contact: %s", mask_pii(contact))
             return list(contacts)
         except Exception as e:
             logger.error(f"Google Contacts polling failed: {e}")

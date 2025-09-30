@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 class errors:
     class SMTPException(Exception):
         """Base SMTP exception used by the stub."""

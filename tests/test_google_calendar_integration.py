@@ -1,12 +1,10 @@
 from __future__ import annotations
-
 from datetime import datetime, timedelta, timezone
 from typing import Dict
 
 import pytest
 
 from integration.google_calendar_integration import GoogleCalendarIntegration
-from utils.async_http import run_async
 
 
 class DummyResponse:
@@ -30,6 +28,11 @@ def base_credentials() -> Dict[str, str]:
     }
 
 
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
 def test_init_without_required_env(monkeypatch):
     for key in (
         "GOOGLE_CLIENT_ID",
@@ -43,7 +46,8 @@ def test_init_without_required_env(monkeypatch):
         GoogleCalendarIntegration()
 
 
-def test_refresh_access_token_async(monkeypatch, base_credentials):
+@pytest.mark.anyio("asyncio")
+async def test_refresh_access_token_async(monkeypatch, base_credentials):
     integration = GoogleCalendarIntegration(credentials=base_credentials)
     response_payload = {"access_token": "new-token", "expires_in": 3600}
 
@@ -58,13 +62,15 @@ def test_refresh_access_token_async(monkeypatch, base_credentials):
 
     monkeypatch.setattr(integration._token_http, "post", fake_post)
 
-    run_async(integration._refresh_access_token_async())
+    await integration._refresh_access_token_async()
 
     assert integration._access_token == "new-token"
     assert integration._token_expiry is not None
     assert integration._token_expiry > datetime.now(timezone.utc)
 
-def test_list_events_async_uses_authorized_request(mocker, base_credentials):
+
+@pytest.mark.anyio("asyncio")
+async def test_list_events_async_uses_authorized_request(mocker, base_credentials):
     credentials = {**base_credentials, "token": "existing"}
     integration = GoogleCalendarIntegration(credentials=credentials)
     integration._token_expiry = datetime.now(timezone.utc) + timedelta(hours=1)
@@ -72,7 +78,7 @@ def test_list_events_async_uses_authorized_request(mocker, base_credentials):
     mocked_response = DummyResponse({"items": [{"id": "1"}]})
     integration._calendar_http.get = mocker.AsyncMock(return_value=mocked_response)
 
-    events = run_async(integration.list_events_async(max_results=5))
+    events = await integration.list_events_async(max_results=5)
 
     integration._calendar_http.get.assert_awaited_once()
     call_kwargs = integration._calendar_http.get.call_args.kwargs
@@ -80,17 +86,18 @@ def test_list_events_async_uses_authorized_request(mocker, base_credentials):
     assert call_kwargs["headers"]["Authorization"] == "Bearer existing"
     assert events == [{"id": "1"}]
 
-def test_fetch_events_async_delegates_to_list(mocker, base_credentials):
+
+@pytest.mark.anyio("asyncio")
+async def test_fetch_events_async_delegates_to_list(mocker, base_credentials):
     integration = GoogleCalendarIntegration(credentials=base_credentials)
 
     mocker.patch.object(integration, "_ensure_access_token_async")
     integration._list_events_async = mocker.AsyncMock(return_value=[{"id": "evt_1"}])
 
-    events = run_async(
-        integration.fetch_events_async(
+    events = await integration.fetch_events_async(
         "2025-01-01T00:00:00Z",
         "2025-01-02T00:00:00Z",
-    ))
+    )
 
     integration._ensure_access_token_async.assert_awaited_once()
     integration._list_events_async.assert_awaited_once_with(

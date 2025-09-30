@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import random
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Optional, Sequence, Tuple, Type, Union
+from typing import Any, Callable, Optional, Tuple, Type, Union
 
 
 class RetryError(Exception):

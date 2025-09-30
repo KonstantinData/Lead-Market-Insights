@@ -13,6 +13,7 @@ from uuid import uuid4
 from agents.factory import register_agent
 from agents.interfaces import BaseResearchAgent
 from config.config import settings
+from utils.datetime_formatting import format_report_datetime
 
 
 class DossierResearchAgent(BaseResearchAgent):
@@ -122,7 +123,7 @@ class DossierResearchAgent(BaseResearchAgent):
     def _build_dossier_payload(
         self, payload: Mapping[str, Any], run_id: str, event_id: str
     ) -> OrderedDict[str, Any]:
-        generated_at = datetime.now(timezone.utc).isoformat()
+        generated_at = format_report_datetime(datetime.now(timezone.utc))
 
         company_section = OrderedDict()
         company_values = {

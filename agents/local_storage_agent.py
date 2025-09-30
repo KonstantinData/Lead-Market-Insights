@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
+
+from utils.datetime_formatting import current_berlin_timestamp
 
 
 Metadata = Dict[str, object]
@@ -78,7 +79,7 @@ class LocalStorageAgent:
         entry: Metadata = {
             "run_id": run_id,
             "log_path": log_reference,
-            "recorded_at": datetime.now(timezone.utc).isoformat(),
+            "recorded_at": current_berlin_timestamp(),
         }
         if metadata:
             entry.update(metadata)

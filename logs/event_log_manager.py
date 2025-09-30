@@ -1,9 +1,10 @@
 import json
 import logging
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+from utils.datetime_formatting import current_berlin_timestamp
 
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -35,7 +36,7 @@ class EventLogManager:
         """Persist the event payload to disk."""
 
         payload = dict(data)
-        payload["last_updated"] = datetime.now(timezone.utc).isoformat()
+        payload["last_updated"] = current_berlin_timestamp()
 
         event_file = self._event_file(event_id)
         with event_file.open("w", encoding="utf-8") as handle:

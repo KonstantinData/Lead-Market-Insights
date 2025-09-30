@@ -7,9 +7,10 @@ import logging
 import threading
 import uuid
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
+
+from utils.datetime_formatting import current_berlin_timestamp
 
 
 @dataclass
@@ -86,7 +87,7 @@ class AuditLog:
         entry_id = audit_id or uuid.uuid4().hex
         record = AuditRecord(
             audit_id=entry_id,
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=current_berlin_timestamp(),
             event_id=event_id,
             request_type=request_type,
             stage=stage,

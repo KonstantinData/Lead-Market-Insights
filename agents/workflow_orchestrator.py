@@ -9,12 +9,13 @@ WorkflowOrchestrator: Central orchestrator for the Agentic Intelligence Research
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Sequence
+from typing import Any, Dict, Mapping, Optional, Sequence, Union
 
 from agents.alert_agent import AlertAgent, AlertSeverity
 from agents.master_workflow_agent import MasterWorkflowAgent
 from config.config import settings
 from utils.observability import configure_observability, generate_run_id, workflow_run
+from utils.reporting import convert_research_artifacts_to_pdfs
 
 logger = logging.getLogger("WorkflowOrchestrator")
 
@@ -116,17 +117,21 @@ class WorkflowOrchestrator:
 
         sanitized: list[Dict[str, object]] = []
         for entry in results:
-            sanitized.append(
-                {
-                    "event_id": entry.get("event_id"),
-                    "status": entry.get("status"),
-                    "crm_dispatched": entry.get("crm_dispatched", False),
-                    "trigger": entry.get("trigger"),
-                    "extraction": entry.get("extraction"),
-                    "research": entry.get("research"),
-                    "research_errors": entry.get("research_errors", []),
-                }
-            )
+            sanitized_entry = {
+                "event_id": entry.get("event_id"),
+                "status": entry.get("status"),
+                "crm_dispatched": entry.get("crm_dispatched", False),
+                "trigger": entry.get("trigger"),
+                "extraction": entry.get("extraction"),
+                "research": entry.get("research"),
+                "research_errors": entry.get("research_errors", []),
+            }
+
+            pdf_artifacts = self._generate_pdf_artifacts(run_id, entry)
+            if pdf_artifacts:
+                sanitized_entry["pdf_artifacts"] = pdf_artifacts
+
+            sanitized.append(sanitized_entry)
 
         summary_path.write_text(
             json.dumps(sanitized, ensure_ascii=False, indent=2),
@@ -137,6 +142,61 @@ class WorkflowOrchestrator:
             run_id,
             summary_path.as_posix(),
         )
+
+    def _generate_pdf_artifacts(
+        self, run_id: str, result_entry: Mapping[str, object]
+    ) -> Optional[Dict[str, str]]:
+        research_section = result_entry.get("research")
+        if not isinstance(research_section, Mapping):
+            return None
+
+        dossier = research_section.get("dossier_research")
+        similar = research_section.get("similar_companies_level1")
+        if not isinstance(dossier, Mapping) or not isinstance(similar, Mapping):
+            return None
+
+        dossier_source = self._resolve_pdf_source(dossier)
+        similar_source = self._resolve_pdf_source(similar)
+        if dossier_source is None or similar_source is None:
+            return None
+
+        output_dir = Path(settings.research_pdf_dir) / run_id
+        event_id = result_entry.get("event_id")
+
+        try:
+            return convert_research_artifacts_to_pdfs(
+                dossier_source, similar_source, output_dir=output_dir
+            )
+        except ImportError as exc:
+            logger.warning(
+                "Skipping PDF generation for event %s due to missing dependency: %s",
+                event_id,
+                exc,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to generate PDF artefacts for event %s", event_id
+            )
+        return None
+
+    @staticmethod
+    def _resolve_pdf_source(
+        research_result: Mapping[str, object]
+    ) -> Optional[Union[str, Path, Mapping[str, Any]]]:
+        payload = research_result.get("payload")
+        if isinstance(payload, Mapping):
+            return payload
+
+        artifact_path = research_result.get("artifact_path")
+        if isinstance(artifact_path, str) and artifact_path:
+            return artifact_path
+
+        if isinstance(payload, Mapping):  # pragma: no cover - defensive double check
+            nested_path = payload.get("artifact_path")
+            if isinstance(nested_path, str) and nested_path:
+                return nested_path
+
+        return None
 
     def _report_research_errors(
         self, run_id: str, results: Sequence[Dict[str, object]]

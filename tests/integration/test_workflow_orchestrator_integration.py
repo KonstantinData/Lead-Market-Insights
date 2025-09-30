@@ -190,11 +190,39 @@ def test_orchestrator_records_research_artifacts_and_email_details(
     monkeypatch, tmp_path: Path
 ) -> None:
     summary_root = tmp_path / "research" / "artifacts"
+    pdf_root = tmp_path / "research" / "pdfs"
     monkeypatch.setattr(
         workflow_orchestrator.settings,
         "research_artifact_dir",
         str(summary_root),
         raising=False,
+    )
+    monkeypatch.setattr(
+        workflow_orchestrator.settings,
+        "research_pdf_dir",
+        str(pdf_root),
+        raising=False,
+    )
+
+    generated_calls = []
+
+    def fake_convert(dossier, similar, *, output_dir):
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        dossier_path = output_dir / "dossier_research.pdf"
+        similar_path = output_dir / "similar_companies.pdf"
+        dossier_path.write_text("pdf", encoding="utf-8")
+        similar_path.write_text("pdf", encoding="utf-8")
+        generated_calls.append((dossier, similar, output_dir))
+        return {
+            "dossier_pdf": dossier_path.as_posix(),
+            "similar_companies_pdf": similar_path.as_posix(),
+        }
+
+    monkeypatch.setattr(
+        workflow_orchestrator,
+        "convert_research_artifacts_to_pdfs",
+        fake_convert,
     )
 
     snapshot_dir = Path(__file__).resolve().parents[1] / "unit" / "snapshots"
@@ -299,3 +327,16 @@ def test_orchestrator_records_research_artifacts_and_email_details(
     final_email = master_agent.results[0]["final_email"]
     assert final_email["attachments"] == ["stub/dossier.pdf"]
     assert final_email["links"][0].startswith("https://")
+
+    assert generated_calls
+    dossier_arg, similar_arg, output_dir = generated_calls[0]
+    assert dossier_arg == dossier_snapshot
+    assert similar_arg["results"] == similar_snapshot["results"]
+    assert output_dir == Path(workflow_orchestrator.settings.research_pdf_dir) / run_id
+
+    pdf_artifacts = entry.get("pdf_artifacts")
+    assert pdf_artifacts
+    dossier_pdf = Path(pdf_artifacts["dossier_pdf"])
+    similar_pdf = Path(pdf_artifacts["similar_companies_pdf"])
+    assert dossier_pdf.exists()
+    assert similar_pdf.exists()

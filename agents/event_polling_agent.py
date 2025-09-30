@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Optional
 
 from agents.factory import register_agent
 from agents.interfaces import BasePollingAgent
@@ -11,11 +11,17 @@ logger = logging.getLogger(__name__)
 
 @register_agent(BasePollingAgent, "event_polling", "default", is_default=True)
 class EventPollingAgent(BasePollingAgent):
-    def __init__(self, config: Any = None):
+    def __init__(
+        self,
+        config: Any = None,
+        *,
+        calendar_integration: Optional[GoogleCalendarIntegration] = None,
+        contacts_integration: Optional[GoogleContactsIntegration] = None,
+    ):
         self.config = config
-        self.calendar = GoogleCalendarIntegration()
+        self.calendar = calendar_integration or GoogleCalendarIntegration()
         # Access token wird per Calendar-Integration gemanaged
-        self.contacts = None
+        self.contacts = contacts_integration
 
     @staticmethod
     def _is_birthday_event(event: Dict[str, Any]) -> bool:
@@ -68,14 +74,32 @@ class EventPollingAgent(BasePollingAgent):
             logger.error(f"Google Calendar polling failed: {e}")
             raise
 
+    def poll_events(
+        self,
+        start_time,
+        end_time,
+        *,
+        max_results: Optional[int] = None,
+        query: Optional[str] = None,
+    ) -> Iterable[Dict[str, Any]]:
+        """Return events using the calendar integration's public facade."""
+
+        return self.calendar.fetch_events(
+            start_time=start_time,
+            end_time=end_time,
+            max_results=max_results,
+            query=query,
+        )
+
     def poll_contacts(self) -> Iterable[Dict[str, Any]]:
         """
         Polls contacts (read-only) and logs them.
         """
-        # Stelle sicher, dass Access Token gültig ist
-        self.calendar._ensure_access_token()
+        access_token = self.calendar.get_access_token()
         if not self.contacts:
-            self.contacts = GoogleContactsIntegration(self.calendar._access_token)
+            self.contacts = GoogleContactsIntegration(access_token)
+        else:
+            self.contacts.access_token = access_token
         try:
             contacts = self.contacts.list_contacts(page_size=10)
             for contact in contacts:

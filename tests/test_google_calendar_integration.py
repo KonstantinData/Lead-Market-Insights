@@ -88,6 +88,29 @@ def test_list_events_uses_authorized_request(monkeypatch, base_credentials):
     assert events == [{"id": "1"}]
 
 
+def test_fetch_events_calls_internal_methods(mocker, base_credentials):
+    integration = GoogleCalendarIntegration(credentials=base_credentials)
+
+    mocker.patch.object(integration, "_ensure_access_token")
+    mocker.patch.object(integration, "_list_events", return_value=[{"id": "evt_1"}])
+
+    events = integration.fetch_events(
+        "2025-01-01T00:00:00Z",
+        "2025-01-02T00:00:00Z",
+    )
+
+    integration._ensure_access_token.assert_called_once()
+    integration._list_events.assert_called_once_with(
+        start_time="2025-01-01T00:00:00Z",
+        end_time="2025-01-02T00:00:00Z",
+        max_results=None,
+        query=None,
+        single_events=True,
+        order_by="startTime",
+    )
+    assert events == [{"id": "evt_1"}]
+
+
 def test_parse_redirect_uris():
     raw_value = (
         "https://a.example/return, https://b.example/return, ,https://c.example/return"

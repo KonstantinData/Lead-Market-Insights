@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import Dict, Iterable, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Union
 from urllib import parse, request
 from urllib.error import HTTPError, URLError
 from datetime import datetime, timedelta, timezone  # <--- HIER: timezone ergänzt!
@@ -24,8 +24,15 @@ class OAuthCredentials:
     token: Optional[str] = None
 
 
+TimeInput = Union[datetime, str]
+
+
 class GoogleCalendarIntegration:
-    """Interact with Google Calendar via the public REST API."""
+    """
+    High-level Google Calendar integration.
+    Public methods (e.g. fetch_events) handle authentication and token refresh internally.
+    Private members (e.g. _access_token, _ensure_access_token) are implementation details.
+    """
 
     DEFAULT_SCOPE: str = "https://www.googleapis.com/auth/calendar.readonly"
     GOOGLE_CALENDAR_API_URL: str = "https://www.googleapis.com/calendar/v3"
@@ -152,6 +159,37 @@ class GoogleCalendarIntegration:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+    def fetch_events(
+        self,
+        start_time: TimeInput,
+        end_time: TimeInput,
+        *,
+        max_results: Optional[int] = None,
+        query: Optional[str] = None,
+    ) -> List[dict]:
+        """
+        Public facade: ensures token validity and fetches events.
+
+        Args:
+            start_time (datetime|str): RFC3339 string or datetime (will be normalized internally).
+            end_time (datetime|str): RFC3339 string or datetime.
+            max_results (int|None): optional limit.
+            query (str|None): optional search query.
+
+        Returns:
+            list[dict]: Calendar events.
+        """
+
+        self._ensure_access_token()
+        return self._list_events(
+            start_time=start_time,
+            end_time=end_time,
+            max_results=max_results,
+            query=query,
+            single_events=True,
+            order_by="startTime",
+        )
+
     def list_events(
         self,
         *,
@@ -161,31 +199,72 @@ class GoogleCalendarIntegration:
         query: Optional[str] = None,
         single_events: bool = True,
         order_by: str = "startTime",
-    ) -> Iterable[dict]:
+    ) -> List[dict]:
         """Return events from the configured Google Calendar."""
 
         self._ensure_access_token()
 
+        if time_min is None:
+            time_min = datetime.now(timezone.utc)
+
+        return self._list_events(
+            start_time=time_min,
+            end_time=time_max,
+            max_results=max_results,
+            query=query,
+            single_events=single_events,
+            order_by=order_by,
+        )
+
+    def get_access_token(self) -> str:
+        """Return a valid OAuth access token, refreshing it if necessary."""
+
+        self._ensure_access_token()
+        if not self._access_token:
+            raise RuntimeError("Google OAuth access token is not available")
+        return self._access_token
+
+    def _authorized_request(self, url: str) -> Dict[str, object]:
+        request_obj = request.Request(
+            url,
+            headers={"Authorization": f"Bearer {self._access_token}"},
+        )
+
+        with request.urlopen(request_obj, timeout=self.request_timeout) as response:
+            return json.load(response)
+
+    def _list_events(
+        self,
+        *,
+        start_time: Optional[TimeInput],
+        end_time: Optional[TimeInput],
+        max_results: Optional[int],
+        query: Optional[str],
+        single_events: bool,
+        order_by: str,
+    ) -> List[dict]:
         parameters = {
-            "maxResults": max_results,
             "singleEvents": "true" if single_events else "false",
             "orderBy": order_by,
         }
 
-        if time_min is None:
-            time_min = datetime.now(timezone.utc)
+        if max_results is not None:
+            parameters["maxResults"] = max_results
 
-        parameters["timeMin"] = self._to_rfc3339(time_min)
+        if start_time is not None:
+            parameters["timeMin"] = self._normalize_time_input(start_time)
 
-        if time_max is not None:
-            parameters["timeMax"] = self._to_rfc3339(time_max)
+        if end_time is not None:
+            parameters["timeMax"] = self._normalize_time_input(end_time)
 
         if query:
             parameters["q"] = query
 
         encoded_params = parse.urlencode(parameters)
         calendar_encoded = parse.quote(self.calendar_id, safe="@")
-        url = f"{self.GOOGLE_CALENDAR_API_URL}/calendars/{calendar_encoded}/events?{encoded_params}"
+        url = (
+            f"{self.GOOGLE_CALENDAR_API_URL}/calendars/{calendar_encoded}/events?{encoded_params}"
+        )
 
         logging.info("Listing Google Calendar events from '%s'", self.calendar_id)
 
@@ -202,14 +281,13 @@ class GoogleCalendarIntegration:
         logging.debug("Retrieved %d Google Calendar events", len(events))
         return events
 
-    def _authorized_request(self, url: str) -> Dict[str, object]:
-        request_obj = request.Request(
-            url,
-            headers={"Authorization": f"Bearer {self._access_token}"},
-        )
-
-        with request.urlopen(request_obj, timeout=self.request_timeout) as response:
-            return json.load(response)
+    @staticmethod
+    def _normalize_time_input(value: TimeInput) -> str:
+        if isinstance(value, datetime):
+            return GoogleCalendarIntegration._to_rfc3339(value)
+        if isinstance(value, str):
+            return value
+        raise TypeError("start_time and end_time must be datetime or RFC3339 string")
 
     @staticmethod
     def _to_rfc3339(moment: datetime) -> str:

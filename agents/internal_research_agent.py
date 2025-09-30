@@ -17,6 +17,7 @@ from agents.email_agent import EmailAgent
 from config.config import settings
 from logs.workflow_log_manager import WorkflowLogManager
 from reminders.reminder_escalation import ReminderEscalation
+from utils.datetime_formatting import format_report_datetime
 
 NormalizedPayload = Dict[str, Any]
 
@@ -495,13 +496,7 @@ class InternalResearchAgent(BaseResearchAgent):
             return None
 
         company_name = payload.get("company_name") or "the requested company"
-        try:
-            parsed_last = datetime.fromisoformat(
-                str(last_report_date).replace("Z", "+00:00")
-            )
-            display_date = parsed_last.strftime("%Y-%m-%d")
-        except Exception:  # pragma: no cover - defensive formatting
-            display_date = str(last_report_date)
+        display_date = format_report_datetime(last_report_date)
 
         subject = f"Existing research available for {company_name}"
         first_name = recipient.split("@", 1)[0]

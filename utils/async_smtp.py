@@ -5,7 +5,12 @@ from __future__ import annotations
 from typing import Sequence
 
 import aiosmtplib
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_random_exponential,
+)
 
 from .retry import DEFAULT_MAX_ATTEMPTS, INITIAL_BACKOFF_SECONDS, MAX_BACKOFF_SECONDS
 
@@ -16,7 +21,9 @@ DEFAULT_TIMEOUT = 20.0
 @retry(
     reraise=True,
     stop=stop_after_attempt(DEFAULT_MAX_ATTEMPTS),
-    wait=wait_exponential_jitter(initial=INITIAL_BACKOFF_SECONDS, max=MAX_BACKOFF_SECONDS),
+    wait=wait_random_exponential(
+        multiplier=INITIAL_BACKOFF_SECONDS, max=MAX_BACKOFF_SECONDS
+    ),
     retry=retry_if_exception_type((aiosmtplib.errors.SMTPException, TimeoutError)),
 )
 async def send_email_ssl(
@@ -36,10 +43,11 @@ async def send_email_ssl(
     await client.connect()
     try:
         await client.login(username, password)
-        await client.sendmail(from_addr=username, to_addrs=list(to_addrs), message=message)
+        await client.sendmail(
+            from_addr=username, to_addrs=list(to_addrs), message=message
+        )
     finally:
         try:
             await client.quit()
         except aiosmtplib.errors.SMTPException:
-            # Ensure connection is cleaned even if QUIT fails.
             await client.close()

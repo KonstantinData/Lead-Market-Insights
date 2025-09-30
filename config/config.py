@@ -227,6 +227,11 @@ class Settings:
         self.cal_lookahead_days: int = _get_int_env("CAL_LOOKAHEAD_DAYS", 14)
         self.cal_lookback_days: int = _get_int_env("CAL_LOOKBACK_DAYS", 1)
 
+        self.google_calendar_id: str = _get_env_var("GOOGLE_CALENDAR_ID") or "info@condata.io"
+        self.google_oauth_credentials: Dict[str, str] = (
+            self._load_google_oauth_credentials()
+        )
+
         project_root = Path(__file__).resolve().parents[1]
         default_log_root = project_root / "log_storage" / "run_history"
 
@@ -444,6 +449,41 @@ class Settings:
         self._load_storage_extensions()
         self._load_llm_configuration(self._raw_agent_config)
         self._load_prompt_configuration(self._raw_agent_config)
+
+    def _load_google_oauth_credentials(self) -> Dict[str, str]:
+        """Return Google OAuth credentials defined via environment variables."""
+
+        env_mapping = {
+            "client_id": "GOOGLE_CLIENT_ID",
+            "client_secret": "GOOGLE_CLIENT_SECRET",
+            "refresh_token": "GOOGLE_REFRESH_TOKEN",
+            "token_uri": "GOOGLE_TOKEN_URI",
+        }
+
+        credentials = {
+            key: value
+            for key, env_name in env_mapping.items()
+            if (value := _get_env_var(env_name))
+        }
+
+        optional_mapping = {
+            "auth_uri": "GOOGLE_AUTH_URI",
+            "project_id": "GOOGLE_PROJECT_ID",
+            "redirect_uris": "GOOGLE_REDIRECT_URIS",
+        }
+
+        for key, env_name in optional_mapping.items():
+            value = _get_env_var(env_name)
+            if value:
+                credentials[key] = value
+
+        auth_provider = _get_env_var("GOOGLE_AUTH_PROVIDER_X509_CERT_URL") or _get_env_var(
+            "GHOOGLE_AUTH_PROVIDER_X509_CERT_URL"
+        )
+        if auth_provider:
+            credentials["auth_provider_x509_cert_url"] = auth_provider
+
+        return credentials
 
 
 # Notes: Singleton instance for importing settings in other modules

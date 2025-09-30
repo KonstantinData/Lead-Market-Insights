@@ -34,7 +34,7 @@ CRM teams.
   "report_type": "Company Detail Research",
   "run_id": "run-123",
   "event_id": "evt-456",
-  "generated_at": "2024-01-01T12:00:00+00:00",
+  "generated_at": "01.01.2024 13:00 CET",
   "company": {
     "name": "Example Corp",
     "domain": "example.com",
@@ -76,7 +76,7 @@ competitive positioning or cross-sell suggestions.
   "company_name": "Example Analytics",
   "run_id": "run-123",
   "event_id": "evt-456",
-  "generated_at": "2024-01-01T12:00:00+00:00",
+  "generated_at": "01.01.2024 13:00 CET",
   "results": [
     {
       "id": "1",
@@ -112,7 +112,8 @@ include:
 - `status` – `reuse`, `refresh_requested`, or `not_found`.
 - `source_artifact` – the absolute path to the prior dossier that was reused.
 - `owner` – the last researcher to update the dossier.
-- `expires_at` – ISO timestamp indicating when a refresh should be triggered.
+- `expires_at` – timestamp formatted as `TT.MM.JJJJ HH:MM CET` indicating when a
+  refresh should be triggered.
 
 If a refresh is required the manifest also lists `reminder_schedule` entries that feed
 into the HITL escalation loop.

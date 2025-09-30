@@ -7,7 +7,14 @@ import logging
 from typing import Any, Mapping, Optional
 
 import httpx
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
+
+# Replaced wait_exponential_jitter with wait_random_exponential (actual Tenacity API)
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_random_exponential,
+)
 
 from .retry import DEFAULT_MAX_ATTEMPTS, INITIAL_BACKOFF_SECONDS, MAX_BACKOFF_SECONDS
 
@@ -41,7 +48,11 @@ class AsyncHTTP:
         self._client = httpx.AsyncClient(
             base_url=base_url or "",
             headers=dict(headers or {}),
-            timeout=httpx.Timeout(total_timeout, connect=DEFAULT_CONNECT_TIMEOUT, read=DEFAULT_READ_TIMEOUT),
+            timeout=httpx.Timeout(
+                total_timeout,
+                connect=DEFAULT_CONNECT_TIMEOUT,
+                read=DEFAULT_READ_TIMEOUT,
+            ),
             follow_redirects=follow_redirects,
         )
 
@@ -51,7 +62,10 @@ class AsyncHTTP:
     @retry(
         reraise=True,
         stop=stop_after_attempt(DEFAULT_MAX_ATTEMPTS),
-        wait=wait_exponential_jitter(initial=INITIAL_BACKOFF_SECONDS, max=MAX_BACKOFF_SECONDS),
+        # Jittered exponential backoff using Tenacity's built-in helper
+        wait=wait_random_exponential(
+            multiplier=INITIAL_BACKOFF_SECONDS, max=MAX_BACKOFF_SECONDS
+        ),
         retry=retry_if_exception_type(httpx.HTTPError),
         before=_log_retry,
     )
@@ -93,12 +107,13 @@ class AsyncHTTP:
 
 def run_async(coro):
     """Execute an async coroutine from synchronous code."""
-
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         loop = None
 
     if loop and loop.is_running():
-        raise RuntimeError("Cannot run coroutine synchronously while an event loop is running")
+        raise RuntimeError(
+            "Cannot run coroutine synchronously while an event loop is running"
+        )
     return asyncio.run(coro)

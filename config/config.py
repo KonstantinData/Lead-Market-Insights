@@ -227,7 +227,10 @@ class Settings:
         self.cal_lookahead_days: int = _get_int_env("CAL_LOOKAHEAD_DAYS", 14)
         self.cal_lookback_days: int = _get_int_env("CAL_LOOKBACK_DAYS", 1)
 
-        self.google_calendar_id: str = _get_env_var("GOOGLE_CALENDAR_ID") or "info@condata.io"
+        value = _get_env_var("GOOGLE_CALENDAR_ID")
+        if not value:
+            raise EnvironmentError("GOOGLE_CALENDAR_ID must be set")
+        self.google_calendar_id: str = value
         self.google_oauth_credentials: Dict[str, str] = (
             self._load_google_oauth_credentials()
         )

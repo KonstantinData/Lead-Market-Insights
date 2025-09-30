@@ -3,11 +3,21 @@
 import importlib
 from pathlib import Path
 
+import pytest
+
 
 def reload_settings():
     config_module = importlib.import_module("config.config")
     importlib.reload(config_module)
     return config_module.settings
+
+
+def test_google_calendar_id_required(monkeypatch):
+    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
+    monkeypatch.delenv("GOOGLE_CALENDAR_ID", raising=False)
+
+    with pytest.raises(EnvironmentError):
+        reload_settings()
 
 
 def test_log_storage_dir_defaults(monkeypatch):

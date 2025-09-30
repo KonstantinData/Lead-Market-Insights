@@ -19,6 +19,24 @@ if STUBS.exists() and str(STUBS) not in sys.path:
     sys.path.insert(0, str(STUBS))
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _ensure_google_calendar_id() -> None:
+    """Guarantee a deterministic calendar identifier during tests.
+
+    The production configuration now requires ``GOOGLE_CALENDAR_ID`` to be
+    provided explicitly. Unit tests do not rely on a real calendar, so we
+    inject a stable placeholder to keep imports lightweight while still
+    exercising the stricter configuration behaviour in integration tests.
+    """
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setenv("GOOGLE_CALENDAR_ID", "test-calendar@example.com")
+    try:
+        yield
+    finally:
+        monkeypatch.undo()
+
+
 @pytest.fixture
 def isolated_agent_registry(monkeypatch):
     """Provide an isolated registry for agent factory tests.

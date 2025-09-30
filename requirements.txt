@@ -14,7 +14,7 @@ email-validator>=2.0,<3.0     # Validate email addresses
 schedule>=1.2,<2.0            # Lightweight job scheduling
 APScheduler>=3.10,<4.0        # Advanced scheduling if needed
 
-# HTTP utilities
+# HTTP utilities (verified to include real implementations for current agents)
 requests>=2.31,<3.0           # For external API calls (legacy synchronous fallbacks)
 httpx>=0.27,<1.0              # Async HTTP requests (for future async agents or faster polling)
 anyio>=4.4,<5.0

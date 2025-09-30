@@ -148,6 +148,8 @@ The orchestrator wires the agents together and coordinates polling, enrichment, 
 python -m agents.workflow_orchestrator
 ```
 
+> **Async migration phase:** `utils.async_http.run_async` is deprecated and will be removed in PR5.
+
 Individual agents can also be instantiated and exercised directly for targeted tests or integrations.
 
 ## Repository structure

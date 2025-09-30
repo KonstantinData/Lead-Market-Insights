@@ -7,10 +7,10 @@ import logging
 import os
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
 
-import httpx
-
 from agents.factory import register_agent
 from agents.interfaces import BaseTriggerAgent
+from config.config import settings
+from utils.async_http import AsyncHTTP, run_async
 from utils.text_normalization import normalize_text
 
 logger = logging.getLogger(__name__)
@@ -22,12 +22,16 @@ SoftTriggerDetector = Callable[[str, str, Sequence[str]], Sequence[Mapping[str, 
 class _OpenAiSoftTriggerDetector:
     """Wrapper around the OpenAI Responses API for soft trigger detection."""
 
-    _ENDPOINT = "https://api.openai.com/v1/chat/completions"
+    _DEFAULT_BASE = settings.openai_api_base or os.getenv(
+        "OPENAI_API_BASE", "https://api.openai.com"
+    )
+    _ENDPOINT = "/v1/chat/completions"
 
     def __init__(self, api_key: str, *, model: str = "gpt-4o-mini", timeout: float = 30.0) -> None:
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
+        self._http = AsyncHTTP(base_url=self._DEFAULT_BASE, timeout=timeout)
 
     def __call__(
         self, summary: str, description: str, hard_triggers: Sequence[str]
@@ -57,9 +61,8 @@ class _OpenAiSoftTriggerDetector:
             "Content-Type": "application/json",
         }
 
-        with httpx.Client(timeout=self.timeout) as client:
-            response = client.post(self._ENDPOINT, headers=headers, json=payload)
-            response.raise_for_status()
+        response = run_async(self._http.post(self._ENDPOINT, headers=headers, json=payload))
+        response.raise_for_status()
         data = response.json()
         choices = data.get("choices") or []
         if not choices:
@@ -221,10 +224,10 @@ Antworte ausschließlich mit der JSON-Struktur.
 
         detector = self._soft_trigger_detector
         if detector is None:
-            api_key = os.getenv("OPEN_AI_KEY")
+            api_key = os.getenv("OPENAI_API_KEY")
             if not api_key:
                 logger.warning(
-                    "Event %s: OPEN_AI_KEY not available; skipping soft trigger detection",
+                    "Event %s: OPENAI_API_KEY not available; skipping soft trigger detection",
                     event_id,
                 )
                 return []

@@ -293,6 +293,8 @@ class Settings:
             "SERVICE_RATE_LIMIT_", int
         )
 
+        self.openai_api_base: str = _get_env_var("OPENAI_API_BASE") or "https://api.openai.com"
+
         whitelist_env = _get_env_var("PII_FIELD_WHITELIST")
         whitelist = {
             "company_name",

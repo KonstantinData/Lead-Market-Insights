@@ -11,8 +11,6 @@ from typing import Any, Callable, Iterable, List, Mapping, MutableMapping, Optio
 
 import requests
 
-from utils.async_http import AsyncHTTP, run_async
-
 
 def _maybe_sign(payload: dict, secret: Optional[str]) -> Mapping[str, str]:
     if not secret:
@@ -199,8 +197,4 @@ class AlertAgent:
             **(channel.get("headers") or {"Content-Type": "application/json"}),
             **extra_headers,
         }
-        http = AsyncHTTP(timeout=5.0)
-        try:
-            run_async(http.post(url, json=payload, headers=headers))
-        finally:
-            run_async(http.aclose())
+        requests.post(url, json=payload, headers=headers, timeout=5)

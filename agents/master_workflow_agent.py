@@ -1,5 +1,6 @@
 """MasterWorkflowAgent: Pure logic agent for polling and event-processing."""
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -423,7 +424,8 @@ class MasterWorkflowAgent:
         return self.trigger_agent.check(event)
 
     def _send_to_crm_agent(self, event: Dict[str, Any], info: Dict[str, Any]) -> None:
-        self.crm_agent.send(event, info)
+        # TODO: Wird in PR3 auf await umgestellt.
+        asyncio.run(self.crm_agent.send(event, info))
 
     def _create_research_agent(
         self,
@@ -534,7 +536,8 @@ class MasterWorkflowAgent:
         attributes = {"event.id": str(event_id)} if event_id is not None else None
         with observe_operation(agent_name, attributes):
             try:
-                result = agent.run(trigger)
+                # TODO: Wird in PR3 auf await umgestellt.
+                result = asyncio.run(agent.run(trigger))
             except Exception as exc:  # pragma: no cover - defensive guard
                 logger.exception(
                     "%s research agent failed for event %s", agent_name, event_id

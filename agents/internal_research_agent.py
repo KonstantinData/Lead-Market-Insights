@@ -86,7 +86,7 @@ class InternalResearchAgent(BaseResearchAgent):
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-    def run(self, trigger: Mapping[str, Any]) -> NormalizedPayload:  # type: ignore[override]
+    async def run(self, trigger: Mapping[str, Any]) -> NormalizedPayload:  # type: ignore[override]
         payload = self._clone_payload(trigger.get("payload"))
         context = str(trigger.get("source") or "")
         self._normalise_payload(payload)

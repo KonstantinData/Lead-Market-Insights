@@ -73,6 +73,7 @@ class WorkflowOrchestrator:
                 if self.master_agent:
                     if hasattr(self.master_agent, "initialize_run"):
                         self.master_agent.initialize_run(run_context.run_id)
+                    # TODO: Wird in PR3 auf await umgestellt.
                     results = self.master_agent.process_all_events() or []
                     self._report_research_errors(run_context.run_id, results)
                     try:

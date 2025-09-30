@@ -38,6 +38,9 @@ class BaseHumanAgent(ABC):
     """Contract for human-in-the-loop escalation and confirmation flows."""
 
     @abstractmethod
+    # NOTE: Diese Methoden bleiben vorerst synchron, da aktuelle Implementierungen
+    #       keine asynchronen Nebenwirkungen besitzen. Netzwerk-Hooks werden bei
+    #       Bedarf in einem späteren Schritt auf async angehoben.
     def request_info(self, event: Mapping[str, Any], extracted: Dict[str, Any]) -> Dict[str, Any]:
         """Request missing information from a human collaborator."""
 
@@ -50,7 +53,7 @@ class BaseCrmAgent(ABC):
     """Contract for agents that persist qualified events into a CRM system."""
 
     @abstractmethod
-    def send(self, event: Mapping[str, Any], info: Mapping[str, Any]) -> None:
+    async def send(self, event: Mapping[str, Any], info: Mapping[str, Any]) -> None:
         """Persist the event with the extracted information into the CRM system."""
 
 
@@ -58,5 +61,5 @@ class BaseResearchAgent(ABC):
     """Contract for agents that perform internal research workflows."""
 
     @abstractmethod
-    def run(self, trigger: Mapping[str, Any]) -> Mapping[str, Any]:
+    async def run(self, trigger: Mapping[str, Any]) -> Mapping[str, Any]:
         """Execute a research workflow and return a normalized payload."""

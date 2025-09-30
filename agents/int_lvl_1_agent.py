@@ -12,6 +12,7 @@ from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional,
 from agents.factory import register_agent
 from agents.interfaces import BaseResearchAgent
 from config.config import settings
+from utils.datetime_formatting import format_report_datetime
 from integration.hubspot_integration import HubSpotIntegration
 from utils.text_normalization import normalize_text
 
@@ -120,7 +121,7 @@ class IntLvl1SimilarCompaniesAgent(BaseResearchAgent):
             "company_name": target_context["company_name"],
             "run_id": run_id or None,
             "event_id": event_id or None,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": format_report_datetime(datetime.now(timezone.utc)),
             "results": limited_results,
         }
 

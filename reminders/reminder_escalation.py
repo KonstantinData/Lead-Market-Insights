@@ -3,6 +3,8 @@ import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
 
+from utils.datetime_formatting import format_report_datetime
+
 
 class ReminderEscalation:
     """Module for sending reminders and escalation notifications."""
@@ -145,7 +147,7 @@ class ReminderEscalation:
         due_time = datetime.now(timezone.utc) + timedelta(seconds=max(delay_seconds, 0))
         self._append_log(
             f"{action}_scheduled",
-            f"{action.capitalize()} scheduled for {recipient} at {due_time.isoformat()} ({subject})",
+            f"{action.capitalize()} scheduled for {recipient} at {format_report_datetime(due_time)} ({subject})",
             metadata=metadata,
         )
 

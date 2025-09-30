@@ -30,6 +30,7 @@ class GoogleCalendarIntegration:
     """High-level Google Calendar integration with async HTTP support."""
 
     DEFAULT_SCOPE: str = "https://www.googleapis.com/auth/calendar.readonly"
+
     def __init__(
         self,
         credentials: Optional[Dict[str, str]] = None,

@@ -46,3 +46,23 @@ def test_poll_skips_birthday_events(dummy_calendar, caplog):
         and "Skipping birthday event" in record.getMessage()
     ]
     assert len(skipped_logs) == 3
+
+
+def test_agent_uses_public_fetch_events(mocker):
+    integration = mocker.Mock()
+    integration.fetch_events.return_value = [{"id": "e1"}]
+
+    agent = EventPollingAgent(calendar_integration=integration)
+
+    events = agent.poll_events(
+        "2025-01-01T00:00:00Z",
+        "2025-01-02T00:00:00Z",
+    )
+
+    integration.fetch_events.assert_called_once_with(
+        start_time="2025-01-01T00:00:00Z",
+        end_time="2025-01-02T00:00:00Z",
+        max_results=None,
+        query=None,
+    )
+    assert events == [{"id": "e1"}]

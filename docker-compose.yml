@@ -1,8 +1,26 @@
+version: "3.9"
+
 services:
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    container_name: otel-collector
+    command: ["--config=/etc/otelcol/config.yaml"]
+    ports:
+      - "4318:4318"   # OTLP HTTP
+      - "4317:4317"   # OTLP gRPC (not used now, but open for future)
+    volumes:
+      - ./observability/otel/collector-config.yaml:/etc/otelcol/config.yaml:ro
+    environment:
+      LOG_LEVEL: info
+
   leadmi:
     build: .
+    container_name: leadmi
+    depends_on:
+      - otel-collector
     environment:
       SETTINGS_SKIP_DOTENV: "1"
+      # Application-specific keys (still passed through from host if defined):
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_API_BASE: ${OPENAI_API_BASE:-https://api.openai.com}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
@@ -12,6 +30,13 @@ services:
       GOOGLE_CALENDAR_ID: ${GOOGLE_CALENDAR_ID}
       HUBSPOT_ACCESS_TOKEN: ${HUBSPOT_ACCESS_TOKEN}
       HUBSPOT_API_BASE_URL: ${HUBSPOT_API_BASE_URL:-https://api.hubapi.com}
-      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT}
+
+      # Telemetry activation flags:
+      ENABLE_OTEL: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+
+      # Optional future: APP_ENV: "dev"
+
     volumes:
       - ./log_storage:/app/log_storage
+    command: ["python", "main.py"]

@@ -1,133 +1,82 @@
-from __future__ import annotations
+"""
+Central OpenTelemetry tracing setup.
 
-import logging
+Activation rules:
+- Set environment variable ENABLE_OTEL=true (or 1 / yes / on)
+- Set OTEL_EXPORTER_OTLP_ENDPOINT to the base OTLP HTTP endpoint
+  Example: http://otel-collector:4318   (the /v1/traces path is appended automatically)
+
+If either condition is missing, telemetry is skipped silently (only one log line).
+
+This module only enables traces. Metrics/logs can be added later if truly needed.
+"""
+
 import os
+import logging
 from typing import Optional
 
-from opentelemetry import trace, metrics
+from opentelemetry import trace
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
-logger = logging.getLogger(__name__)
+_LOG = logging.getLogger(__name__)
 
-TELEMETRY_AVAILABLE = True
 
-try:
-    from opentelemetry.sdk.resources import Resource
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-    from opentelemetry.sdk.metrics import MeterProvider
-    from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
-        OTLPMetricExporter,
+def setup_telemetry(
+    service_name: str = "lead-market-insights",
+) -> Optional[trace.Tracer]:
+    """
+    Initialize OpenTelemetry tracing if enabled.
+
+    Returns:
+        A tracer instance if telemetry is enabled, otherwise None.
+
+    Conditions:
+    - ENABLE_OTEL must be set to a truthy value.
+    - OTEL_EXPORTER_OTLP_ENDPOINT must be defined (base URL, no /v1/traces suffix).
+
+    Example:
+        ENABLE_OTEL=true
+        OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+    """
+    if not _is_enabled():
+        _LOG.info("Telemetry disabled (ENABLE_OTEL not set to a truthy value).")
+        return None
+
+    base_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+    if not base_endpoint:
+        _LOG.info("Telemetry disabled: OTEL_EXPORTER_OTLP_ENDPOINT not set.")
+        return None
+
+    base_endpoint = base_endpoint.rstrip("/")
+    full_traces_endpoint = f"{base_endpoint}/v1/traces"
+
+    resource = Resource.create(
+        {
+            "service.name": service_name,
+            # Add more attributes if needed:
+            # "deployment.environment": os.getenv("APP_ENV", "dev"),
+        }
     )
-    from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-except ImportError:
-    # Telemetrie-Pakete fehlen – stiller Rückzug
-    TELEMETRY_AVAILABLE = False
-    TracerProvider = object  # type: ignore[assignment]
-    MeterProvider = object  # type: ignore[assignment]
+
+    provider = TracerProvider(resource=resource)
+    exporter = OTLPSpanExporter(endpoint=full_traces_endpoint)
+    provider.add_span_processor(BatchSpanProcessor(exporter))
+    trace.set_tracer_provider(provider)
+
+    tracer = trace.get_tracer(service_name)
+
+    _LOG.info("Telemetry enabled (traces endpoint: %s)", full_traces_endpoint)
+
+    # Optional startup span (helps confirm wiring)
+    with tracer.start_as_current_span("startup"):
+        pass
+
+    return tracer
 
 
-DISABLE_VALUES = {"none", "0", "false", "off"}
-
-
-def _configured_endpoint() -> Optional[str]:
-    """Return the configured OTLP endpoint, if any."""
-
-    for key in (
-        "OTEL_EXPORTER_OTLP_ENDPOINT",
-        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
-        "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
-    ):
-        value = os.environ.get(key, "").strip()
-        if value:
-            return value
-    return None
-
-
-def _is_disabled() -> bool:
-    if os.environ.get("OTEL_DISABLE_DEV", "").lower() in DISABLE_VALUES:
-        return True
-    if os.environ.get("OTEL_TRACES_EXPORTER", "").lower() in DISABLE_VALUES:
-        return True
-    if os.environ.get("OTEL_METRICS_EXPORTER", "").lower() in DISABLE_VALUES:
-        return True
-    return False
-
-
-def _current_tracer_provider() -> object | None:
-    getter = getattr(trace, "get_tracer_provider", None)
-    if callable(getter):
-        try:
-            return getter()
-        except Exception:  # pragma: no cover - defensive fallback
-            return None
-    return None
-
-
-def _current_meter_provider() -> object | None:
-    getter = getattr(metrics, "get_meter_provider", None)
-    if callable(getter):
-        try:
-            return getter()
-        except Exception:  # pragma: no cover - defensive fallback
-            return None
-    return None
-
-
-def setup_telemetry(service_name: str = "leadmi") -> None:
-    """
-    Initialisiert OTLP Tracing + Metrics mit kurzer Timeout-Konfiguration.
-
-    - Verhindert doppelte Initialisierung über Umgebungs-Flag LEADMI_TELEMETRY_INITIALIZED.
-    - Erkennt bereits gesetzte Provider.
-    - Bei Fehler: einmalige WARN, keine Exception nach oben.
-    """
-    if not TELEMETRY_AVAILABLE:
-        logger.info("Telemetry dependencies not installed; skipping.")
-        return
-
-    if _is_disabled():
-        logger.info("Telemetry disabled via environment flags.")
-        return
-
-    if os.environ.get("LEADMI_TELEMETRY_INITIALIZED") == "1":
-        logger.debug("Telemetry already initialized (env flag).")
-        return
-
-    existing_tp = _current_tracer_provider()
-    existing_mp = _current_meter_provider()
-    tracer_type = TracerProvider if isinstance(TracerProvider, type) else None
-    meter_type = MeterProvider if isinstance(MeterProvider, type) else None
-
-    if (tracer_type and isinstance(existing_tp, tracer_type)) or (
-        meter_type and isinstance(existing_mp, meter_type)
-    ):
-        logger.debug("Telemetry providers already present; skipping re-init.")
-        os.environ["LEADMI_TELEMETRY_INITIALIZED"] = "1"
-        return
-
-    if not _configured_endpoint():
-        logger.info("Telemetry skipped (no OTLP endpoint configured).")
-        return
-
-    try:
-        resource = Resource.create({"service.name": service_name})
-
-        tp = TracerProvider(resource=resource)
-        tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(timeout=2)))
-        trace.set_tracer_provider(tp)
-
-        metric_reader = PeriodicExportingMetricReader(
-            OTLPMetricExporter(timeout=2),
-            export_interval_millis=60000,
-        )
-        mp = MeterProvider(resource=resource, metric_readers=[metric_reader])
-        metrics.set_meter_provider(mp)
-
-        # Unterdrücke OTLP-Exporter-Rauschen, wenn Collector nicht da
-        logging.getLogger("opentelemetry.exporter.otlp").setLevel(logging.ERROR)
-
-        os.environ["LEADMI_TELEMETRY_INITIALIZED"] = "1"
-        logger.info("Telemetry initialized (OTLP).")
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Telemetry initialization failed (%s). Continuing without.", exc)
+def _is_enabled() -> bool:
+    val = os.getenv("ENABLE_OTEL", "").lower()
+    return val in {"1", "true", "yes", "on"}

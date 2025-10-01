@@ -1,8 +1,18 @@
+# OpenTelemetry Collector Konfiguration
+# Diese Version:
+# - Aktiviert OTLP (HTTP + gRPC) auf allen Interfaces (0.0.0.0)
+# - Setzt deployment.environment aus APP_ENV
+# - Nutzt den debug Exporter zur Sichtprüfung der eingehenden Spans
+# - Liefert interne Collector-Logs auf Level info
+# Hinweis: debug Exporter NICHT in Produktion lassen – später z.B. durch otlp / jaeger / tempo / loki ersetzen.
+
 receivers:
   otlp:
     protocols:
       http:
+        endpoint: 0.0.0.0:4318
       grpc:
+        endpoint: 0.0.0.0:4317
 
 processors:
   memory_limiter:
@@ -19,16 +29,16 @@ processors:
         value: ${APP_ENV}
 
 exporters:
-  # Replace this with your real backend exporter later (e.g., otlp -> SaaS / Tempo / Jaeger)
-  logging:
-    loglevel: info
+  debug:
+    # basic: kompakte Ausgabe; detailed: sehr ausführlich
+    verbosity: basic
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, resource, batch]
-      exporters: [logging]
+      exporters: [debug]
 
   telemetry:
     logs:

@@ -42,7 +42,7 @@ class DummyExtractionAgent:
     def __init__(self, response: Dict[str, Any]):
         self._response = response
 
-    def extract(self, _event: Dict[str, Any]) -> Dict[str, Any]:
+    async def extract(self, _event: Dict[str, Any]) -> Dict[str, Any]:
         return self._response
 
 

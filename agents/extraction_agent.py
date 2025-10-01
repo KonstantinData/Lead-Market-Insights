@@ -21,11 +21,8 @@ class ExtractionAgent(BaseExtractionAgent):
     def __init__(self):
         pass
 
-    def extract(self, event: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Extracts the company name and web domain from the event data.
-        Returns a dictionary with the extracted info and a completeness flag.
-        """
+    async def extract(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        """Asynchronously extract company metadata from the event payload."""
         try:
             # Notes:
             # Try to find company name in a dedicated field first, fallback to searching in summary or description.

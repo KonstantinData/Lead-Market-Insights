@@ -30,8 +30,12 @@ class BaseExtractionAgent(ABC):
     """Contract for agents that extract structured information from events."""
 
     @abstractmethod
-    def extract(self, event: Mapping[str, Any]) -> Dict[str, Any]:
-        """Return structured information extracted from an event payload."""
+    async def extract(self, event: Mapping[str, Any]) -> Dict[str, Any]:
+        """Return structured information extracted from an event payload.
+
+        Implementations must be defined as async coroutines so callers can
+        `await` extraction even when the underlying work is synchronous.
+        """
 
 
 class BaseHumanAgent(ABC):

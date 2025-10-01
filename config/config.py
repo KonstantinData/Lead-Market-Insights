@@ -262,6 +262,12 @@ class Settings:
         self.hubspot_retry_backoff_seconds: float = _get_float_env(
             "HUBSPOT_RETRY_BACKOFF_SECONDS", 1.0
         )
+        self.max_concurrent_hubspot: int = max(
+            1, _get_int_env("MAX_CONCURRENT_HUBSPOT", 5)
+        )
+        self.max_concurrent_research: int = max(
+            1, _get_int_env("MAX_CONCURRENT_RESEARCH", 3)
+        )
 
         self.agent_log_dir: Path
         self.research_artifact_dir: Path

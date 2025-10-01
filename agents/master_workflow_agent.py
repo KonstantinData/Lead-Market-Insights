@@ -1,5 +1,6 @@
 """MasterWorkflowAgent: Pure logic agent for polling and event-processing."""
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -31,6 +32,7 @@ from agents.local_storage_agent import LocalStorageAgent
 from config.config import settings
 from config.watcher import LlmConfigurationWatcher
 from logs.workflow_log_manager import WorkflowLogManager
+from utils import concurrency
 from utils.audit_log import AuditLog
 from utils.observability import observe_operation, record_hitl_outcome, record_trigger_match
 from utils.pii import mask_pii
@@ -535,7 +537,8 @@ class MasterWorkflowAgent:
         attributes = {"event.id": str(event_id)} if event_id is not None else None
         with observe_operation(agent_name, attributes):
             try:
-                result = await agent.run(trigger)
+                async with concurrency.RESEARCH_TASK_SEMAPHORE:
+                    result = await agent.run(trigger)
             except Exception as exc:  # pragma: no cover - defensive guard
                 logger.exception(
                     "%s research agent failed for event %s", agent_name, event_id
@@ -621,34 +624,45 @@ class MasterWorkflowAgent:
         *,
         requires_dossier: bool,
     ) -> None:
-        if requires_dossier and self._can_run_dossier(info):
-            await self._run_research_agent(
-                self.dossier_research_agent,
-                "dossier_research",
-                event_result,
-                event,
-                info,
-                event_id,
-                force=True,
-            )
-        elif requires_dossier:
-            self._log_research_step(
-                "dossier_research",
-                event_id,
-                "skipped",
-                details={"reason": "missing_inputs"},
-            )
+        runners = []
+
+        if requires_dossier:
+            if self._can_run_dossier(info):
+
+                async def run_dossier() -> None:
+                    await self._run_research_agent(
+                        self.dossier_research_agent,
+                        "dossier_research",
+                        event_result,
+                        event,
+                        info,
+                        event_id,
+                        force=True,
+                    )
+
+                runners.append(run_dossier)
+            else:
+                self._log_research_step(
+                    "dossier_research",
+                    event_id,
+                    "skipped",
+                    details={"reason": "missing_inputs"},
+                )
 
         if self._can_run_similar(info):
-            await self._run_research_agent(
-                self.similar_companies_agent,
-                "similar_companies",
-                event_result,
-                event,
-                info,
-                event_id,
-                force=True,
-            )
+
+            async def run_similar() -> None:
+                await self._run_research_agent(
+                    self.similar_companies_agent,
+                    "similar_companies",
+                    event_result,
+                    event,
+                    info,
+                    event_id,
+                    force=True,
+                )
+
+            runners.append(run_similar)
         else:
             self._log_research_step(
                 "similar_companies",
@@ -656,6 +670,17 @@ class MasterWorkflowAgent:
                 "skipped",
                 details={"reason": "missing_inputs"},
             )
+
+        if not runners:
+            return
+
+        if len(runners) == 1:
+            await runners[0]()
+            return
+
+        async with asyncio.TaskGroup() as group:
+            for runner in runners:
+                group.create_task(runner())
 
     def _can_run_dossier(self, info: Dict[str, Any]) -> bool:
         return bool(info.get("company_name")) and bool(info.get("company_domain"))

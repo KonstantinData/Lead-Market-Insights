@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Dict, List
 
 import asyncio
+import math
+import time
 
 import pytest
 
@@ -29,6 +31,8 @@ def clear_settings_cache(monkeypatch):
     monkeypatch.delenv("HUBSPOT_REQUEST_TIMEOUT", raising=False)
     monkeypatch.delenv("HUBSPOT_MAX_RETRIES", raising=False)
     monkeypatch.delenv("HUBSPOT_RETRY_BACKOFF_SECONDS", raising=False)
+    monkeypatch.delenv("MAX_CONCURRENT_HUBSPOT", raising=False)
+    monkeypatch.delenv("MAX_CONCURRENT_RESEARCH", raising=False)
 
 
 @pytest.fixture
@@ -55,7 +59,7 @@ def test_find_company_by_domain_normalizes_and_matches(monkeypatch, configured_s
         ]
     }
 
-    async def fake_post(path, json=None):
+    async def fake_post(path, json=None, timeout=None):
         assert path == integration.SEARCH_PATH
         captured_payloads.append(json)
         filters = json["filterGroups"][0]["filters"][0]
@@ -82,7 +86,7 @@ def test_list_similar_companies_uses_normalized_name(monkeypatch, configured_set
         ]
     }
 
-    async def fake_post(path, json=None):
+    async def fake_post(path, json=None, timeout=None):
         filters = json["filterGroups"][0]["filters"][0]
         assert filters["value"] == "acme corporation"
         return DummyResponse(response_payload)
@@ -102,3 +106,56 @@ def test_missing_access_token_raises_error(monkeypatch):
 
     with pytest.raises(EnvironmentError):
         HubSpotIntegration(settings=Settings())
+
+
+def test_hubspot_requests_respect_concurrency_limit(
+    monkeypatch, configured_settings
+):
+    import utils.concurrency as concurrency
+
+    previous_hubspot = concurrency.HUBSPOT_SEMAPHORE.limit
+    previous_research = concurrency.RESEARCH_TASK_SEMAPHORE.limit
+    concurrency.reload_limits(hubspot=2, research=previous_research)
+
+    try:
+        integration = HubSpotIntegration(settings=configured_settings)
+
+        response_payload = {
+            "results": [
+                {"id": "1", "properties": {"name": "Acme Corp"}},
+            ]
+        }
+
+        delay = 0.05
+
+        async def slow_post(path, json=None, timeout=None):
+            await asyncio.sleep(delay)
+            return DummyResponse(response_payload)
+
+        monkeypatch.setattr(integration._http, "post", slow_post)
+
+        total_requests = 5
+
+        async def run_requests() -> float:
+            start = time.perf_counter()
+            await asyncio.gather(
+                *(
+                    integration.list_similar_companies("Acme")
+                    for _ in range(total_requests)
+                )
+            )
+            return time.perf_counter() - start
+
+        elapsed = asyncio.run(run_requests())
+        expected_batches = math.ceil(
+            total_requests / concurrency.HUBSPOT_SEMAPHORE.limit
+        )
+        expected_min = expected_batches * delay
+
+        assert (
+            elapsed >= expected_min - 0.02
+        ), f"Expected at least {expected_min:.3f}s but observed {elapsed:.3f}s"
+    finally:
+        concurrency.reload_limits(
+            hubspot=previous_hubspot, research=previous_research
+        )

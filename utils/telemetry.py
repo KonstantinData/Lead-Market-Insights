@@ -1,14 +1,9 @@
 """
-Central OpenTelemetry tracing setup.
+Central OpenTelemetry tracing setup (extended version).
 
-Activation rules:
-- Set environment variable ENABLE_OTEL=true (or 1 / yes / on)
-- Set OTEL_EXPORTER_OTLP_ENDPOINT to the base OTLP HTTP endpoint
-  Example: http://otel-collector:4318   (the /v1/traces path is appended automatically)
-
-If either condition is missing, telemetry is skipped silently (only one log line).
-
-This module only enables traces. Metrics/logs can be added later if truly needed.
+Adds:
+- deployment.environment (from APP_ENV, defaults to dev)
+- service.version (from SERVICE_VERSION, defaults to unknown)
 """
 
 import os
@@ -27,20 +22,6 @@ _LOG = logging.getLogger(__name__)
 def setup_telemetry(
     service_name: str = "lead-market-insights",
 ) -> Optional[trace.Tracer]:
-    """
-    Initialize OpenTelemetry tracing if enabled.
-
-    Returns:
-        A tracer instance if telemetry is enabled, otherwise None.
-
-    Conditions:
-    - ENABLE_OTEL must be set to a truthy value.
-    - OTEL_EXPORTER_OTLP_ENDPOINT must be defined (base URL, no /v1/traces suffix).
-
-    Example:
-        ENABLE_OTEL=true
-        OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-    """
     if not _is_enabled():
         _LOG.info("Telemetry disabled (ENABLE_OTEL not set to a truthy value).")
         return None
@@ -56,8 +37,8 @@ def setup_telemetry(
     resource = Resource.create(
         {
             "service.name": service_name,
-            # Add more attributes if needed:
-            # "deployment.environment": os.getenv("APP_ENV", "dev"),
+            "deployment.environment": os.getenv("APP_ENV", "dev"),
+            "service.version": os.getenv("SERVICE_VERSION", "unknown"),
         }
     )
 
@@ -67,10 +48,13 @@ def setup_telemetry(
     trace.set_tracer_provider(provider)
 
     tracer = trace.get_tracer(service_name)
+    _LOG.info(
+        "Telemetry enabled (endpoint=%s, env=%s, version=%s)",
+        full_traces_endpoint,
+        resource.attributes.get("deployment.environment"),
+        resource.attributes.get("service.version"),
+    )
 
-    _LOG.info("Telemetry enabled (traces endpoint: %s)", full_traces_endpoint)
-
-    # Optional startup span (helps confirm wiring)
     with tracer.start_as_current_span("startup"):
         pass
 

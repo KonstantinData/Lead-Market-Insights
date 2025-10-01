@@ -8,6 +8,8 @@ from opentelemetry import trace, metrics
 
 logger = logging.getLogger(__name__)
 
+TELEMETRY_AVAILABLE = True
+
 try:
     from opentelemetry.sdk.resources import Resource
     from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
@@ -20,12 +22,9 @@ try:
     from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 except ImportError:
     # Telemetrie-Pakete fehlen – stiller Rückzug
-    SdkTracerProvider = object  # type: ignore
-    SdkMeterProvider = object  # type: ignore
-
-    def setup_telemetry(*_, **__):  # type: ignore
-        logger.info("Telemetry dependencies not installed; skipping.")
-        return
+    TELEMETRY_AVAILABLE = False
+    SdkTracerProvider = object  # type: ignore[assignment]
+    SdkMeterProvider = object  # type: ignore[assignment]
 
 
 DISABLE_VALUES = {"none", "0", "false", "off"}
@@ -63,6 +62,10 @@ def setup_telemetry(service_name: str = "leadmi") -> None:
     - Erkennt bereits gesetzte Provider.
     - Bei Fehler: einmalige WARN, keine Exception nach oben.
     """
+    if not TELEMETRY_AVAILABLE:
+        logger.info("Telemetry dependencies not installed; skipping.")
+        return
+
     if _is_disabled():
         logger.info("Telemetry disabled via environment flags.")
         return

@@ -22,6 +22,12 @@ except ImportError:  # pragma: no cover - Python 3.10 fallback
                 super().__init__(message)
                 self.exceptions = list(exceptions)
 
+    # Ensure subsequent imports via ``builtins`` observe the fallback class.
+    import builtins as _builtins
+
+    if getattr(_builtins, "ExceptionGroup", None) is None:  # pragma: no cover - sanity guard
+        _builtins.ExceptionGroup = ExceptionGroup  # type: ignore[attr-defined]
+
 _DEFAULT_HUBSPOT_LIMIT = 5
 _DEFAULT_RESEARCH_LIMIT = 3
 
@@ -229,6 +235,7 @@ def reload_limits(
 
 
 __all__ = [
+    "ExceptionGroup",
     "HUBSPOT_SEMAPHORE",
     "LoggingSemaphore",
     "RESEARCH_TASK_SEMAPHORE",

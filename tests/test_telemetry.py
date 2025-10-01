@@ -1,25 +1,32 @@
-from __future__ import annotations
+import importlib.util
+import pytest
 
-import logging
+# Skip falls Exporter nicht installiert (CI robust halten)
+if (
+    importlib.util.find_spec("opentelemetry.exporter.otlp.proto.http.trace_exporter")
+    is None
+):
+    pytest.skip(
+        "OTLP exporter not installed; skipping telemetry tests.",
+        allow_module_level=True,
+    )
 
 from utils.telemetry import setup_telemetry
 
 
-def test_setup_telemetry_skips_without_endpoint(monkeypatch, caplog):
-    for env in (
-        "OTEL_EXPORTER_OTLP_ENDPOINT",
-        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
-        "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
-    ):
-        monkeypatch.delenv(env, raising=False)
+def test_setup_telemetry_disabled(monkeypatch, caplog):
+    monkeypatch.setenv("ENABLE_OTEL", "false")
+    tracer = setup_telemetry(service_name="test-svc")
+    assert tracer is None
+    assert any("Telemetry disabled" in m for m in caplog.messages)
 
-    def _fail(*_args, **_kwargs):  # pragma: no cover - sanity guard
-        raise AssertionError("Telemetry initialisation should be skipped")
 
-    monkeypatch.setattr("utils.telemetry.TracerProvider", _fail)
-
-    caplog.set_level(logging.INFO)
-
-    setup_telemetry(service_name="test-service")
-
-    assert "Telemetry skipped (no OTLP endpoint configured)." in caplog.text
+def test_setup_telemetry_enabled(monkeypatch, caplog):
+    monkeypatch.setenv("ENABLE_OTEL", "true")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")
+    monkeypatch.delenv("OTEL_DISABLE_DEV", raising=False)
+    tracer = setup_telemetry(service_name="test-svc")
+    # tracer kann None sein, falls Exporter fehlt trotz find_spec -> robust prüfen
+    assert tracer is not None or any(
+        "unavailable" in m.lower() for m in caplog.messages
+    )

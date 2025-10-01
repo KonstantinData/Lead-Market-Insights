@@ -10,9 +10,8 @@ try:
 except ImportError:
     setup_telemetry = None  # type: ignore
 
-# NEW: env validation + compatibility imports
 from utils.env_validation import validate_environment
-from utils.env_compat import apply_env_compat  # <--- ADDED
+from utils.env_compat import apply_env_compat
 
 
 class _RunIdLoggingFilter(logging.Filter):
@@ -32,18 +31,19 @@ def _init_logging() -> None:
     if not _run_id_filter_attached:
         root_logger.addFilter(_run_id_filter)
         _run_id_filter_attached = True
-    for h in root_logger.handlers:
-        if _run_id_filter not in h.filters:
-            h.addFilter(_run_id_filter)
+    for handler in root_logger.handlers:
+        if _run_id_filter not in handler.filters:
+            handler.addFilter(_run_id_filter)
     if root_logger.handlers:
         return
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s [run_id=%(run_id)s] %(message)s",
     )
-    for h in logging.getLogger().handlers:
-        if _run_id_filter not in h.filters:
-            h.addFilter(_run_id_filter)
+    for handler in logging.getLogger().handlers:
+        if _run_id_filter not in handler.filters:
+            handler.addFilter(_run_id_filter)
 
 
 async def _run_once() -> None:
@@ -72,16 +72,19 @@ async def _daemon_loop(interval: int = 300) -> None:
 
 
 async def _async_main() -> None:
+    # Lädt lokal .env (im Container durch SETTINGS_SKIP_DOTENV=1 irrelevant)
     load_dotenv()
-    _init_logging()
 
-    # COMPAT LAYER (runs BEFORE validation)
+    # Legacy-Kompatibilität (OPEN_AI_KEY -> OPENAI_API_KEY)
     apply_env_compat()
+
+    _init_logging()
 
     if not validate_environment(strict=True):
         logging.getLogger(__name__).error("Environment validation failed; exiting.")
         return
 
+    # Telemetrie (Traces)
     if setup_telemetry and os.getenv("OTEL_DISABLE_DEV", "").strip().lower() not in {
         "1",
         "true",
@@ -92,14 +95,16 @@ async def _async_main() -> None:
             setup_telemetry(service_name="lead-market-insights")
         except Exception:
             logging.getLogger(__name__).warning(
-                "Telemetry setup failed; continuing.", exc_info=True
+                "Telemetry setup failed; continuing without instrumentation.",
+                exc_info=True,
             )
 
     run_mode = os.getenv("LEADMI_RUN_MODE", "daemon").lower()
     if run_mode == "oneshot":
         await _run_once()
     else:
-        await _daemon_loop(interval=int(os.getenv("LEADMI_DAEMON_INTERVAL", "300")))
+        interval = int(os.getenv("LEADMI_DAEMON_INTERVAL", "300"))
+        await _daemon_loop(interval=interval)
 
 
 def main() -> None:

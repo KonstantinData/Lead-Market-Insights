@@ -1,11 +1,3 @@
-"""
-Central OpenTelemetry tracing setup (extended version).
-
-Adds:
-- deployment.environment (from APP_ENV, defaults to dev)
-- service.version (from SERVICE_VERSION, defaults to unknown)
-"""
-
 import os
 import logging
 from typing import Optional
@@ -14,25 +6,45 @@ from opentelemetry import trace
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
-_LOG = logging.getLogger(__name__)
+LOG = logging.getLogger(__name__)
+_ACCEPT = {"1", "true", "yes", "on"}
+
+
+def _telemetry_enabled() -> bool:
+    val = os.getenv("ENABLE_OTEL", "")
+    if val.strip().lower() not in _ACCEPT:
+        return False
+    if os.getenv("OTEL_DISABLE_DEV", "").strip().lower() in _ACCEPT:
+        return False
+    return True
 
 
 def setup_telemetry(
     service_name: str = "lead-market-insights",
 ) -> Optional[trace.Tracer]:
-    if not _is_enabled():
-        _LOG.info("Telemetry disabled (ENABLE_OTEL not set to a truthy value).")
+    if not _telemetry_enabled():
+        LOG.info("Telemetry disabled (ENABLE_OTEL not truthy or suppressed).")
         return None
 
-    base_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-    if not base_endpoint:
-        _LOG.info("Telemetry disabled: OTEL_EXPORTER_OTLP_ENDPOINT not set.")
+    endpoint_base = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+    if not endpoint_base:
+        LOG.info("Telemetry disabled: OTEL_EXPORTER_OTLP_ENDPOINT unset.")
         return None
 
-    base_endpoint = base_endpoint.rstrip("/")
-    full_traces_endpoint = f"{base_endpoint}/v1/traces"
+    endpoint_base = endpoint_base.rstrip("/")
+    traces_endpoint = f"{endpoint_base}/v1/traces"
+
+    # Lazy Import – verhindert ImportError wenn Paket im CI fehlt
+    try:
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+            OTLPSpanExporter,
+        )
+    except Exception as exc:
+        LOG.warning(
+            "Telemetry exporter unavailable (%s). Running without tracing.", exc
+        )
+        return None
 
     resource = Resource.create(
         {
@@ -43,24 +55,23 @@ def setup_telemetry(
     )
 
     provider = TracerProvider(resource=resource)
-    exporter = OTLPSpanExporter(endpoint=full_traces_endpoint)
+    exporter = OTLPSpanExporter(endpoint=traces_endpoint)
     provider.add_span_processor(BatchSpanProcessor(exporter))
     trace.set_tracer_provider(provider)
 
     tracer = trace.get_tracer(service_name)
-    _LOG.info(
-        "Telemetry enabled (endpoint=%s, env=%s, version=%s)",
-        full_traces_endpoint,
+    LOG.info(
+        "Telemetry enabled (endpoint=%s env=%s version=%s)",
+        traces_endpoint,
         resource.attributes.get("deployment.environment"),
         resource.attributes.get("service.version"),
     )
 
+    # kurzes Start-Span
     with tracer.start_as_current_span("startup"):
         pass
 
+    if os.getenv("OTEL_METRICS_EXPORTER", "none").lower() == "none":
+        LOG.info("Metrics explicitly disabled (OTEL_METRICS_EXPORTER=none).")
+
     return tracer
-
-
-def _is_enabled() -> bool:
-    val = os.getenv("ENABLE_OTEL", "").lower()
-    return val in {"1", "true", "yes", "on"}

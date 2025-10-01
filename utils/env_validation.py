@@ -5,14 +5,12 @@ from typing import List
 LOG = logging.getLogger(__name__)
 
 
-# We accept either OPENAI_API_KEY or legacy OPEN_AI_KEY
 def _has_openai_key() -> bool:
     return bool(os.getenv("OPENAI_API_KEY") or os.getenv("OPEN_AI_KEY"))
 
 
 REQUIRED = [
-    # sentinel placeholder for openai key; handled separately
-    "__OPENAI_KEY__",
+    "__OPENAI_KEY__",  # wird separat geprüft
     "HUBSPOT_ACCESS_TOKEN",
     "GOOGLE_CLIENT_ID",
     "GOOGLE_CLIENT_SECRET",
@@ -26,10 +24,11 @@ def validate_environment(strict: bool = True) -> bool:
     for key in REQUIRED:
         if key == "__OPENAI_KEY__":
             if not _has_openai_key():
-                missing.append("OPENAI_API_KEY (or legacy OPEN_AI_KEY)")
+                missing.append("OPENAI_API_KEY (oder legacy OPEN_AI_KEY)")
             continue
         if not os.getenv(key):
             missing.append(key)
+
     if missing:
         LOG.error("Missing required environment variables: %s", ", ".join(missing))
         if strict:

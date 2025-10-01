@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any, Dict, Iterable
 
 from agents.master_workflow_agent import MasterWorkflowAgent
@@ -17,7 +18,7 @@ class DummyTriggerAgent:
     def __init__(self, trigger_type: str = "hard") -> None:
         self._trigger_type = trigger_type
 
-    def check(self, _event: Dict[str, Any]) -> Dict[str, Any]:
+    async def check(self, _event: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "trigger": True,
             "type": self._trigger_type,
@@ -98,7 +99,7 @@ def test_master_agent_masks_logged_events(tmp_path):
             extraction_agent=DummyExtractionAgent(),
         )
 
-        agent.process_all_events()
+        asyncio.run(agent.process_all_events())
 
         log_text = agent.log_file_path.read_text(encoding="utf-8")
         assert "organizer@example.com" not in log_text
@@ -146,7 +147,7 @@ def test_human_agent_masks_messages(tmp_path):
             extraction_agent=DummyExtractionAgent(),
         )
 
-        agent.process_all_events()
+        asyncio.run(agent.process_all_events())
 
         assert backend.requests, "Backend should receive a request"
         message = backend.requests[0]["message"]

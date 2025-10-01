@@ -1,11 +1,12 @@
+import asyncio
 import logging
+import warnings
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 from typing import Iterable, Optional, Sequence, Union
 
-from utils.async_http import run_async
 from utils.async_smtp import send_email_ssl
 
 
@@ -78,18 +79,32 @@ class EmailAgent:
         attachments: Optional[Sequence[Union[str, Path]]] = None,
         attachment_links: Optional[Iterable[str]] = None,
     ):
-        """Synchronous facade that dispatches to the async implementation."""
+        """Synchronous facade kept for backwards compatibility."""
 
-        return run_async(
-            self.send_email_async(
-                recipient,
-                subject,
-                body,
-                html_body,
-                attachments=attachments,
-                attachment_links=attachment_links,
-            )
+        warnings.warn(
+            "EmailAgent.send_email is deprecated; use send_email_async instead.",
+            DeprecationWarning,
+            stacklevel=2,
         )
+
+        try:
+            return asyncio.run(
+                self.send_email_async(
+                    recipient,
+                    subject,
+                    body,
+                    html_body=html_body,
+                    attachments=attachments,
+                    attachment_links=attachment_links,
+                )
+            )
+        except RuntimeError as exc:
+            if "asyncio.run() cannot be called" in str(exc):
+                raise RuntimeError(
+                    "EmailAgent.send_email cannot be invoked while an event loop is running. "
+                    "Call send_email_async instead."
+                ) from exc
+            raise
 
     def _normalize_links(self, links: Optional[Iterable[str]]) -> Sequence[str]:
         if not links:

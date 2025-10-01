@@ -30,8 +30,8 @@ surface area that each workflow stage must expose:
 
 | Interface | Required methods | Default implementation |
 |-----------|-----------------|------------------------|
-| `BasePollingAgent` | `poll()` *(async)*, `poll_contacts()` | [`EventPollingAgent`](event_polling_agent.py) |
-| `BaseTriggerAgent` | `check(event)` | [`TriggerDetectionAgent`](trigger_detection_agent.py) |
+| `BasePollingAgent` | `poll()` *(async)*, `poll_contacts()` *(async)* | [`EventPollingAgent`](event_polling_agent.py) |
+| `BaseTriggerAgent` | `check(event)` *(async)* | [`TriggerDetectionAgent`](trigger_detection_agent.py) |
 | `BaseExtractionAgent` | `extract(event)` | [`ExtractionAgent`](extraction_agent.py) |
 | `BaseHumanAgent` | `request_info(event, extracted)`, `request_dossier_confirmation(event, info)` | [`HumanInLoopAgent`](human_in_loop_agent.py) |
 | `BaseCrmAgent` | `send(event, info)` | [`LoggingCrmAgent`](crm_agent.py) |

@@ -2,21 +2,25 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import os
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Union
 
 from agents.factory import register_agent
 from agents.interfaces import BaseTriggerAgent
 from config.config import settings
-from utils.async_http import AsyncHTTP, run_async
+from utils.async_http import AsyncHTTP
 from utils.text_normalization import normalize_text
 
 logger = logging.getLogger(__name__)
 
 
-SoftTriggerDetector = Callable[[str, str, Sequence[str]], Sequence[Mapping[str, Any]]]
+SoftTriggerDetector = Callable[
+    [str, str, Sequence[str]],
+    Union[Sequence[Mapping[str, Any]], Awaitable[Sequence[Mapping[str, Any]]]],
+]
 
 
 class _OpenAiSoftTriggerDetector:
@@ -33,7 +37,7 @@ class _OpenAiSoftTriggerDetector:
         self.timeout = timeout
         self._http = AsyncHTTP(base_url=self._DEFAULT_BASE, timeout=timeout)
 
-    def __call__(
+    async def __call__(
         self, summary: str, description: str, hard_triggers: Sequence[str]
     ) -> Sequence[Mapping[str, Any]]:
         payload = {
@@ -61,7 +65,9 @@ class _OpenAiSoftTriggerDetector:
             "Content-Type": "application/json",
         }
 
-        response = run_async(self._http.post(self._ENDPOINT, headers=headers, json=payload))
+        response = await self._http.post(
+            self._ENDPOINT, headers=headers, json=payload
+        )
         response.raise_for_status()
         data = response.json()
         choices = data.get("choices") or []
@@ -152,7 +158,7 @@ Antworte ausschließlich mit der JSON-Struktur.
 
         self._soft_trigger_detector = soft_trigger_detector
 
-    def check(self, event: Dict[str, Any]) -> Dict[str, Any]:
+    async def check(self, event: Dict[str, Any]) -> Dict[str, Any]:
         """Evaluate an event for hard and soft triggers."""
 
         event_id = event.get("id")
@@ -170,7 +176,7 @@ Antworte ausschließlich mit der JSON-Struktur.
 
         logger.info("Event %s: No hard triggers found; evaluating soft triggers", event_id)
 
-        soft_matches = self._detect_soft_triggers(event)
+        soft_matches = await self._detect_soft_triggers(event)
         if soft_matches:
             first_match = soft_matches[0]
             logger.info(
@@ -210,7 +216,7 @@ Antworte ausschließlich mit der JSON-Struktur.
                 return result
         return None
 
-    def _detect_soft_triggers(self, event: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    async def _detect_soft_triggers(self, event: Mapping[str, Any]) -> List[Dict[str, Any]]:
         summary = event.get("summary") or ""
         description = event.get("description") or ""
         event_id = event.get("id")
@@ -235,6 +241,8 @@ Antworte ausschließlich mit der JSON-Struktur.
 
         try:
             raw_matches = detector(summary, description, self.original_trigger_words)
+            if inspect.isawaitable(raw_matches):
+                raw_matches = await raw_matches
         except Exception as exc:  # pragma: no cover - defensive guard
             logger.exception("Event %s: Soft trigger detection failed: %s", event_id, exc)
             return []

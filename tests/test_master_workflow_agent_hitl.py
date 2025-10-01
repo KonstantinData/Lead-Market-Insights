@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any, Dict, Iterable, List, Optional
 
 from agents.master_workflow_agent import MasterWorkflowAgent
@@ -43,7 +44,7 @@ class DummyTriggerAgent:
     def __init__(self, result: Dict[str, Any]):
         self._result = result
 
-    def check(self, _event: Dict[str, Any]) -> Dict[str, Any]:
+    async def check(self, _event: Dict[str, Any]) -> Dict[str, Any]:
         return self._result
 
 
@@ -78,7 +79,7 @@ def _prepare_agent(backend: DummyBackend) -> MasterWorkflowAgent:
     )
     agent._send_calls: List[Dict[str, Any]] = []
 
-    def _capture_send(to_event: Dict[str, Any], event_info: Dict[str, Any]) -> None:
+    async def _capture_send(to_event: Dict[str, Any], event_info: Dict[str, Any]) -> None:
         agent._send_calls.append({"event": to_event, "info": event_info})
 
     agent._send_to_crm_agent = _capture_send  # type: ignore[assignment]
@@ -91,7 +92,7 @@ def test_soft_trigger_dossier_request_accepted() -> None:
     )
     agent = _prepare_agent(backend)
 
-    agent.process_all_events()
+    asyncio.run(agent.process_all_events())
 
     assert len(agent._send_calls) == 1
     assert agent._send_calls[0]["info"]["company_name"] == "Example Corp"
@@ -108,7 +109,7 @@ def test_soft_trigger_dossier_request_declined() -> None:
     )
     agent = _prepare_agent(backend)
 
-    agent.process_all_events()
+    asyncio.run(agent.process_all_events())
 
     assert agent._send_calls == []
     assert len(backend.requests) == 1
@@ -127,7 +128,7 @@ def test_audit_log_records_dossier_acceptance(tmp_path) -> None:
         settings.run_log_dir = temp_run_dir
         agent = _prepare_agent(backend)
 
-        agent.process_all_events()
+        asyncio.run(agent.process_all_events())
 
         entries = agent.audit_log.load_entries()
         assert len(entries) == 2
@@ -159,7 +160,7 @@ def test_audit_log_records_dossier_decline(tmp_path) -> None:
         settings.run_log_dir = temp_run_dir
         agent = _prepare_agent(backend)
 
-        agent.process_all_events()
+        asyncio.run(agent.process_all_events())
 
         entries = agent.audit_log.load_entries()
         assert len(entries) == 2
@@ -190,7 +191,7 @@ def test_soft_trigger_dossier_request_pending(tmp_path) -> None:
         settings.workflow_log_dir = temp_workflow_dir
         agent = _prepare_agent(backend)
 
-        agent.process_all_events()
+        asyncio.run(agent.process_all_events())
 
         assert agent._send_calls == []
         assert backend.requests, "Pending backend should receive request"
@@ -243,12 +244,12 @@ def test_audit_log_records_missing_info_flow(tmp_path) -> None:
         )
         agent._send_calls = []  # type: ignore[attr-defined]
 
-        def _capture_send(to_event: Dict[str, Any], event_info: Dict[str, Any]) -> None:
+        async def _capture_send(to_event: Dict[str, Any], event_info: Dict[str, Any]) -> None:
             agent._send_calls.append({"event": to_event, "info": event_info})
 
         agent._send_to_crm_agent = _capture_send  # type: ignore[assignment]
 
-        agent.process_all_events()
+        asyncio.run(agent.process_all_events())
 
         entries = agent.audit_log.load_entries()
         assert len(entries) == 2

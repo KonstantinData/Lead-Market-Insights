@@ -11,7 +11,7 @@ import asyncio
 from dotenv import load_dotenv
 
 
-async def main() -> None:
+async def _async_main() -> None:
     load_dotenv()
 
     import logging
@@ -23,8 +23,12 @@ async def main() -> None:
     )
 
     orchestrator = WorkflowOrchestrator()
-    orchestrator.run()
+    await orchestrator.run()
+
+
+def main() -> None:
+    asyncio.run(_async_main())
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

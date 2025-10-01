@@ -8,6 +8,8 @@ import aiosmtplib
 import tenacity
 from tenacity import retry, retry_if_exception_type, stop_after_attempt
 
+from .retry import DEFAULT_MAX_ATTEMPTS, INITIAL_BACKOFF_SECONDS, MAX_BACKOFF_SECONDS
+
 _wait_random_exponential = getattr(tenacity, "wait_random_exponential", None)
 if _wait_random_exponential is None:
     from tenacity import wait_exponential_jitter
@@ -17,8 +19,6 @@ if _wait_random_exponential is None:
 
 else:
     wait_random_exponential = _wait_random_exponential
-
-from .retry import DEFAULT_MAX_ATTEMPTS, INITIAL_BACKOFF_SECONDS, MAX_BACKOFF_SECONDS
 
 DEFAULT_SMTP_PORT = 465
 DEFAULT_TIMEOUT = 20.0

@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any, Dict, Iterable
 
 from agents.master_workflow_agent import MasterWorkflowAgent
@@ -15,7 +16,7 @@ class DummyTriggerAgent:
     def __init__(self, result: Dict[str, Any]):
         self._result = result
 
-    def check(self, _event: Dict[str, Any]) -> Dict[str, Any]:
+    async def check(self, _event: Dict[str, Any]) -> Dict[str, Any]:
         return dict(self._result)
 
 
@@ -39,7 +40,7 @@ def test_hard_trigger_with_complete_info_dispatches_without_unhandled_state() ->
 
     dispatched: Dict[str, Any] = {"called": False}
 
-    def _fake_process_crm_dispatch(
+    async def _fake_process_crm_dispatch(
         _event: Dict[str, Any],
         _info: Dict[str, Any],
         event_result: Dict[str, Any],
@@ -55,7 +56,7 @@ def test_hard_trigger_with_complete_info_dispatches_without_unhandled_state() ->
     agent._process_crm_dispatch = _fake_process_crm_dispatch  # type: ignore[assignment]
 
     try:
-        results = agent.process_all_events()
+        results = asyncio.run(agent.process_all_events())
     finally:
         agent.finalize_run_logs()
 

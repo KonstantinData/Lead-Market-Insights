@@ -56,7 +56,7 @@ class WorkflowOrchestrator:
             self.storage_agent = None
             self._handle_exception(exc, handled=True, context={"phase": "initialisation"})
 
-    def run(self):
+    async def run(self) -> None:
         run_id = generate_run_id()
         with workflow_run(run_id=run_id) as run_context:
             self._last_run_id = run_context.run_id
@@ -73,8 +73,7 @@ class WorkflowOrchestrator:
                 if self.master_agent:
                     if hasattr(self.master_agent, "initialize_run"):
                         self.master_agent.initialize_run(run_context.run_id)
-                    # TODO: Wird in PR3 auf await umgestellt.
-                    results = self.master_agent.process_all_events() or []
+                    results = await self.master_agent.process_all_events() or []
                     self._report_research_errors(run_context.run_id, results)
                     try:
                         self._store_research_outputs(run_context.run_id, results)

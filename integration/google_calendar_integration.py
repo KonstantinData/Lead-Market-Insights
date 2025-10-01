@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import warnings
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Sequence, Union
 from urllib import parse
 
 from config.config import Settings
-from utils.async_http import AsyncHTTP, run_async
+from utils.async_http import AsyncHTTP
 
 
 @dataclass
@@ -172,13 +173,13 @@ class GoogleCalendarIntegration:
         max_results: Optional[int] = None,
         query: Optional[str] = None,
     ) -> List[dict]:
-        return run_async(
-            self.fetch_events_async(
-                start_time,
-                end_time,
-                max_results=max_results,
-                query=query,
-            )
+        warnings.warn(
+            "GoogleCalendarIntegration.fetch_events is deprecated; use fetch_events_async instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        raise RuntimeError(
+            "GoogleCalendarIntegration.fetch_events is no longer supported. Use fetch_events_async instead."
         )
 
     async def list_events_async(
@@ -215,15 +216,13 @@ class GoogleCalendarIntegration:
         single_events: bool = True,
         order_by: str = "startTime",
     ) -> List[dict]:
-        return run_async(
-            self.list_events_async(
-                max_results=max_results,
-                time_min=time_min,
-                time_max=time_max,
-                query=query,
-                single_events=single_events,
-                order_by=order_by,
-            )
+        warnings.warn(
+            "GoogleCalendarIntegration.list_events is deprecated; use list_events_async instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        raise RuntimeError(
+            "GoogleCalendarIntegration.list_events is no longer supported. Use list_events_async instead."
         )
 
     async def get_access_token_async(self) -> str:
@@ -233,7 +232,14 @@ class GoogleCalendarIntegration:
         return self._access_token
 
     def get_access_token(self) -> str:
-        return run_async(self.get_access_token_async())
+        warnings.warn(
+            "GoogleCalendarIntegration.get_access_token is deprecated; use get_access_token_async instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        raise RuntimeError(
+            "GoogleCalendarIntegration.get_access_token is no longer supported. Use get_access_token_async instead."
+        )
 
     async def iter_all_events_async(self, time_min: str, time_max: str) -> List[dict]:
         await self._ensure_access_token_async()

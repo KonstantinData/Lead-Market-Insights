@@ -65,9 +65,11 @@ def test_agent_uses_public_fetch_events(mocker):
 
     agent = EventPollingAgent(calendar_integration=integration)
 
-    events = agent.poll_events(
-        "2025-01-01T00:00:00Z",
-        "2025-01-02T00:00:00Z",
+    events = asyncio.run(
+        agent.poll_events_async(
+            "2025-01-01T00:00:00Z",
+            "2025-01-02T00:00:00Z",
+        )
     )
 
     integration.fetch_events_async.assert_awaited_once_with(
@@ -88,5 +90,5 @@ def test_poll_contacts_uses_async_flow(dummy_calendar_events, mocker):
         contacts_integration=contacts,
     )
 
-    contacts_result = agent.poll_contacts()
+    contacts_result = asyncio.run(agent.poll_contacts())
     assert contacts_result == [{"resourceName": "people/1"}]

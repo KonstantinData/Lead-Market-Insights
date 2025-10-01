@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Iterable, Mapping, Sequence
 
+import asyncio
+
 import pytest
 
 from agents.trigger_detection_agent import TriggerDetectionAgent
@@ -12,7 +14,7 @@ def test_agent_normalises_hard_triggers_and_detects_summary_match() -> None:
     agent = TriggerDetectionAgent(trigger_words=["  KücHe  ", "KÜCHE"])
     assert agent.hard_trigger_words == (normalize_text("Küche"),)
 
-    result = agent.check({"summary": "Die KUCHE ist bereit"})
+    result = asyncio.run(agent.check({"summary": "Die KUCHE ist bereit"}))
     assert result["trigger"] is True
     assert result["type"] == "hard"
     assert result["matched_word"] == normalize_text("Küche")
@@ -23,7 +25,9 @@ def test_agent_normalises_hard_triggers_and_detects_summary_match() -> None:
 def test_agent_detects_hard_trigger_in_description() -> None:
     agent = TriggerDetectionAgent(trigger_words=["briefing"])
 
-    result = agent.check({"description": "Bitte bereite das Briefing vor."})
+    result = asyncio.run(
+        agent.check({"description": "Bitte bereite das Briefing vor."})
+    )
     assert result["trigger"] is True
     assert result["type"] == "hard"
     assert result["matched_word"] == "briefing"
@@ -50,7 +54,7 @@ def test_agent_detects_soft_triggers_via_llm(monkeypatch: pytest.MonkeyPatch) ->
         trigger_words=["meeting preparation"], soft_trigger_detector=_detector
     )
 
-    result = agent.check({"summary": "Kick-off mit neuem Kunden"})
+    result = asyncio.run(agent.check({"summary": "Kick-off mit neuem Kunden"}))
     assert result["trigger"] is True
     assert result["type"] == "soft"
     assert result["matched_word"] == soft_match["soft_trigger"]
@@ -70,7 +74,7 @@ def test_agent_ignores_invalid_llm_response(monkeypatch: pytest.MonkeyPatch) -> 
 
     agent = TriggerDetectionAgent(trigger_words=["meeting"], soft_trigger_detector=_detector)
 
-    result = agent.check({"summary": "Quarterly planning"})
+    result = asyncio.run(agent.check({"summary": "Quarterly planning"}))
     assert result == {
         "trigger": False,
         "type": None,
@@ -84,7 +88,7 @@ def test_agent_ignores_invalid_llm_response(monkeypatch: pytest.MonkeyPatch) -> 
 def test_agent_handles_missing_fields() -> None:
     agent = TriggerDetectionAgent(trigger_words=["alert"])
 
-    result = agent.check({})
+    result = asyncio.run(agent.check({}))
     assert result == {
         "trigger": False,
         "type": None,

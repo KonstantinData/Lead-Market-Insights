@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from typing import Dict, List
 
+import asyncio
+
 import pytest
 
 from config.config import Settings
 from integration.hubspot_integration import HubSpotIntegration
-from utils.async_http import run_async
 
 
 class DummyResponse:
@@ -63,7 +64,9 @@ def test_find_company_by_domain_normalizes_and_matches(monkeypatch, configured_s
 
     monkeypatch.setattr(integration._http, "post", fake_post)
 
-    result = run_async(integration.find_company_by_domain_async("HTTPS://Example.com/"))
+    result = asyncio.run(
+        integration.find_company_by_domain_async("HTTPS://Example.com/")
+    )
 
     assert result == response_payload["results"][0]
     assert captured_payloads, "Expected HubSpot request payload to be captured"
@@ -86,7 +89,9 @@ def test_list_similar_companies_uses_normalized_name(monkeypatch, configured_set
 
     monkeypatch.setattr(integration._http, "post", fake_post)
 
-    companies = run_async(integration.list_similar_companies(" Acme Corporation "))
+    companies = asyncio.run(
+        integration.list_similar_companies(" Acme Corporation ")
+    )
 
     assert len(companies) == 2
     assert companies[0]["id"] == "1"

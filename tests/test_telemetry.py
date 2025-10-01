@@ -1,7 +1,6 @@
 import importlib.util
 import pytest
 import logging
-import os
 
 # Skip, wenn Exporter-Modul fehlt (robust gegen fehlende Dev-Abhängigkeiten)
 if (

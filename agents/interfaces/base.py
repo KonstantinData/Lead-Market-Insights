@@ -14,7 +14,7 @@ class BasePollingAgent(ABC):
         """Yield event payloads that should be processed by the workflow."""
 
     @abstractmethod
-    def poll_contacts(self) -> Iterable[Mapping[str, Any]]:
+    async def poll_contacts(self) -> Iterable[Mapping[str, Any]]:
         """Optionally yield contact payloads associated with the events."""
 
 
@@ -22,7 +22,7 @@ class BaseTriggerAgent(ABC):
     """Contract for agents that detect triggers on events."""
 
     @abstractmethod
-    def check(self, event: Mapping[str, Any]) -> Dict[str, Any]:
+    async def check(self, event: Mapping[str, Any]) -> Dict[str, Any]:
         """Return structured trigger detection information for an event."""
 
 

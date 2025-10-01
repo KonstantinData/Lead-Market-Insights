@@ -1,6 +1,5 @@
 """MasterWorkflowAgent: Pure logic agent for polling and event-processing."""
 
-import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -33,7 +32,6 @@ from config.config import settings
 from config.watcher import LlmConfigurationWatcher
 from logs.workflow_log_manager import WorkflowLogManager
 from utils.audit_log import AuditLog
-from utils.async_http import run_async
 from utils.observability import observe_operation, record_hitl_outcome, record_trigger_match
 from utils.pii import mask_pii
 from utils.trigger_loader import load_trigger_words
@@ -166,14 +164,15 @@ class MasterWorkflowAgent:
         logger.setLevel(logging.INFO)
         logger.addHandler(file_handler)
 
-    def process_all_events(self) -> List[Dict[str, Any]]:
+    async def process_all_events(self) -> List[Dict[str, Any]]:
         """Process all available events and return structured run results."""
 
         logger.info("MasterWorkflowAgent: Processing events...")
 
         processed_results: List[Dict[str, Any]] = []
 
-        for event in run_async(self.event_agent.poll()):
+        events = await self.event_agent.poll()
+        for event in events:
             masked_event = self._mask_for_logging(event)
             logger.info("Polled event: %s", masked_event)
             event_id = event.get("id")
@@ -189,7 +188,7 @@ class MasterWorkflowAgent:
             with observe_operation(
                 "trigger_detection", {"event.id": str(event_id)} if event_id else None
             ):
-                trigger_result = self._detect_trigger(event)
+                trigger_result = await self._detect_trigger(event)
             event_result["trigger"] = trigger_result
 
             if not self._meets_confidence_threshold("trigger", trigger_result):
@@ -251,7 +250,7 @@ class MasterWorkflowAgent:
             internal_status = None
             internal_result = None
             if self._has_research_inputs(normalised_info):
-                internal_result = self._run_internal_research(
+                internal_result = await self._run_internal_research(
                     event_result,
                     event,
                     normalised_info,
@@ -269,7 +268,7 @@ class MasterWorkflowAgent:
 
             if trigger_result.get("type") == "hard":
                 if is_complete:
-                    self._process_crm_dispatch(
+                    await self._process_crm_dispatch(
                         event,
                         normalised_info,
                         event_result,
@@ -294,7 +293,7 @@ class MasterWorkflowAgent:
                         filled_info = self._normalise_info_for_research(
                             filled.get("info", {}) or {}
                         )
-                        self._process_crm_dispatch(
+                        await self._process_crm_dispatch(
                             event,
                             filled_info,
                             event_result,
@@ -333,7 +332,7 @@ class MasterWorkflowAgent:
                         self._mask_for_logging(response.get("details")),
                     )
                     record_hitl_outcome("dossier", "approved")
-                    self._process_crm_dispatch(
+                    await self._process_crm_dispatch(
                         event,
                         normalised_info,
                         event_result,
@@ -389,7 +388,7 @@ class MasterWorkflowAgent:
                         filled_info = self._normalise_info_for_research(
                             filled.get("info", {}) or {}
                         )
-                        self._process_crm_dispatch(
+                        await self._process_crm_dispatch(
                             event,
                             filled_info,
                             event_result,
@@ -420,13 +419,12 @@ class MasterWorkflowAgent:
 
         return processed_results
 
-    def _detect_trigger(self, event: Dict[str, Any]) -> Dict[str, Any]:
+    async def _detect_trigger(self, event: Dict[str, Any]) -> Dict[str, Any]:
         # Delegates to trigger agent, checks both summary and description
-        return self.trigger_agent.check(event)
+        return await self.trigger_agent.check(event)
 
-    def _send_to_crm_agent(self, event: Dict[str, Any], info: Dict[str, Any]) -> None:
-        # TODO: Wird in PR3 auf await umgestellt.
-        asyncio.run(self.crm_agent.send(event, info))
+    async def _send_to_crm_agent(self, event: Dict[str, Any], info: Dict[str, Any]) -> None:
+        await self.crm_agent.send(event, info)
 
     def _create_research_agent(
         self,
@@ -502,7 +500,7 @@ class MasterWorkflowAgent:
             trigger["recipient"] = recipient
         return trigger
 
-    def _run_research_agent(
+    async def _run_research_agent(
         self,
         agent: Optional[BaseResearchAgent],
         agent_name: str,
@@ -537,8 +535,7 @@ class MasterWorkflowAgent:
         attributes = {"event.id": str(event_id)} if event_id is not None else None
         with observe_operation(agent_name, attributes):
             try:
-                # TODO: Wird in PR3 auf await umgestellt.
-                result = asyncio.run(agent.run(trigger))
+                result = await agent.run(trigger)
             except Exception as exc:  # pragma: no cover - defensive guard
                 logger.exception(
                     "%s research agent failed for event %s", agent_name, event_id
@@ -563,7 +560,7 @@ class MasterWorkflowAgent:
         )
         return result
 
-    def _run_internal_research(
+    async def _run_internal_research(
         self,
         event_result: Dict[str, Any],
         event: Dict[str, Any],
@@ -590,7 +587,7 @@ class MasterWorkflowAgent:
             )
             return event_result.get("research", {}).get("internal_research")
 
-        return self._run_research_agent(
+        return await self._run_research_agent(
             self.internal_research_agent,
             "internal_research",
             event_result,
@@ -615,7 +612,7 @@ class MasterWorkflowAgent:
                 return action
         return None
 
-    def _execute_precrm_research(
+    async def _execute_precrm_research(
         self,
         event_result: Dict[str, Any],
         event: Dict[str, Any],
@@ -625,7 +622,7 @@ class MasterWorkflowAgent:
         requires_dossier: bool,
     ) -> None:
         if requires_dossier and self._can_run_dossier(info):
-            self._run_research_agent(
+            await self._run_research_agent(
                 self.dossier_research_agent,
                 "dossier_research",
                 event_result,
@@ -643,7 +640,7 @@ class MasterWorkflowAgent:
             )
 
         if self._can_run_similar(info):
-            self._run_research_agent(
+            await self._run_research_agent(
                 self.similar_companies_agent,
                 "similar_companies",
                 event_result,
@@ -666,7 +663,7 @@ class MasterWorkflowAgent:
     def _can_run_similar(self, info: Dict[str, Any]) -> bool:
         return bool(info.get("company_name"))
 
-    def _process_crm_dispatch(
+    async def _process_crm_dispatch(
         self,
         event: Dict[str, Any],
         info: Dict[str, Any],
@@ -680,7 +677,7 @@ class MasterWorkflowAgent:
             event_result["status"] = "missing_research_inputs"
             return
 
-        internal_result = self._run_internal_research(
+        internal_result = await self._run_internal_research(
             event_result,
             event,
             prepared_info,
@@ -696,7 +693,7 @@ class MasterWorkflowAgent:
             return
 
         requires_dossier = internal_status in (None, "REPORT_REQUIRED")
-        self._execute_precrm_research(
+        await self._execute_precrm_research(
             event_result,
             event,
             prepared_info,
@@ -711,7 +708,7 @@ class MasterWorkflowAgent:
         with observe_operation(
             "crm_dispatch", {"event.id": str(event_id)} if event_id else None
         ):
-            self._send_to_crm_agent(event, crm_payload)
+            await self._send_to_crm_agent(event, crm_payload)
 
         event_result["status"] = "dispatched_to_crm"
         event_result["crm_dispatched"] = True

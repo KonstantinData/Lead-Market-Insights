@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 from pathlib import Path
@@ -57,7 +58,7 @@ class RecordingMasterAgent:
     def initialize_run(self, run_id: str) -> None:
         self.initialized_runs.append(run_id)
 
-    def process_all_events(self) -> List[dict[str, object]]:
+    async def process_all_events(self) -> List[dict[str, object]]:
         return list(self.results)
 
     def finalize_run_logs(self) -> None:
@@ -83,7 +84,7 @@ def test_backend_failure_triggers_alert(
     if hasattr(master_agent, "storage_agent"):
         master_agent.storage_agent.reset_failure_count("workflow_run")
 
-    def fail_process():
+    async def fail_process():
         raise ConnectionError("CRM backend unavailable")
 
     monkeypatch.setattr(master_agent, "process_all_events", fail_process)
@@ -93,7 +94,7 @@ def test_backend_failure_triggers_alert(
         alert_agent=alert_agent, master_agent=master_agent, failure_threshold=3
     )
 
-    orchestrator.run()
+    asyncio.run(orchestrator.run())
 
     assert alert_agent.calls
     call = alert_agent.calls[-1]
@@ -116,7 +117,7 @@ def test_repeated_failures_escalate_to_critical(
     if hasattr(master_agent, "storage_agent"):
         master_agent.storage_agent.reset_failure_count("workflow_run")
 
-    def fail_process():
+    async def fail_process():
         raise RuntimeError("transient failure")
 
     monkeypatch.setattr(master_agent, "process_all_events", fail_process)
@@ -126,8 +127,8 @@ def test_repeated_failures_escalate_to_critical(
         alert_agent=alert_agent, master_agent=master_agent, failure_threshold=2
     )
 
-    orchestrator.run()
-    orchestrator.run()
+    asyncio.run(orchestrator.run())
+    asyncio.run(orchestrator.run())
 
     assert len(alert_agent.calls) == 2
     first, second = alert_agent.calls
@@ -291,7 +292,7 @@ def test_orchestrator_records_research_artifacts_and_email_details(
     master_agent = RecordingMasterAgent(log_dir=log_dir, results=research_results)
 
     orchestrator = WorkflowOrchestrator(master_agent=master_agent)
-    orchestrator.run()
+    asyncio.run(orchestrator.run())
 
     run_id = orchestrator._last_run_id
     assert run_id is not None

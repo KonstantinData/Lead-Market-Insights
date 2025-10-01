@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from utils.async_http import AsyncHTTP, run_async
+import warnings
+
+from utils.async_http import AsyncHTTP
 
 
 class GoogleContactsIntegration:
@@ -43,12 +45,13 @@ class GoogleContactsIntegration:
         person_fields: str = "names,emailAddresses",
         page_token: Optional[str] = None,
     ) -> List[Dict[str, object]]:
-        return run_async(
-            self.list_contacts_async(
-                page_size=page_size,
-                person_fields=person_fields,
-                page_token=page_token,
-            )
+        warnings.warn(
+            "GoogleContactsIntegration.list_contacts is deprecated; use list_contacts_async instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        raise RuntimeError(
+            "GoogleContactsIntegration.list_contacts is no longer supported. Use list_contacts_async instead."
         )
 
     async def aclose(self) -> None:

@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence
 
 from config.config import Settings
-from utils.async_http import AsyncHTTP, run_async
+import warnings
+
+from utils.async_http import AsyncHTTP
 from utils.text_normalization import normalize_text
 
 
@@ -121,7 +123,14 @@ class HubSpotIntegration:
         *,
         properties: Optional[Sequence[str]] = None,
     ) -> Optional[Dict[str, object]]:
-        return run_async(self.find_company_by_domain_async(domain, properties=properties))
+        warnings.warn(
+            "HubSpotIntegration.find_company_by_domain is deprecated; use find_company_by_domain_async instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        raise RuntimeError(
+            "HubSpotIntegration.find_company_by_domain is no longer supported. Use find_company_by_domain_async instead."
+        )
 
     async def list_similar_companies(
         self,

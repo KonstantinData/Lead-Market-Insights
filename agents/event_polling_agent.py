@@ -1,11 +1,10 @@
 import logging
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional
 
 from agents.factory import register_agent
 from agents.interfaces import BasePollingAgent
 from integration.google_calendar_integration import GoogleCalendarIntegration
 from integration.google_contacts_integration import GoogleContactsIntegration
-from utils.async_http import run_async
 from utils.pii import mask_pii
 
 logger = logging.getLogger(__name__)
@@ -95,24 +94,7 @@ class EventPollingAgent(BasePollingAgent):
             query=query,
         )
 
-    def poll_events(
-        self,
-        start_time,
-        end_time,
-        *,
-        max_results: Optional[int] = None,
-        query: Optional[str] = None,
-    ) -> Iterable[Dict[str, Any]]:
-        return run_async(
-            self.poll_events_async(
-                start_time,
-                end_time,
-                max_results=max_results,
-                query=query,
-            )
-        )
-
-    async def poll_contacts_async(self) -> List[Dict[str, Any]]:
+    async def poll_contacts(self) -> List[Dict[str, Any]]:
         """
         Polls contacts (read-only) and logs them.
         """
@@ -129,6 +111,3 @@ class EventPollingAgent(BasePollingAgent):
         except Exception as e:
             logger.error(f"Google Contacts polling failed: {e}")
             raise
-
-    def poll_contacts(self) -> Iterable[Dict[str, Any]]:
-        return run_async(self.poll_contacts_async())

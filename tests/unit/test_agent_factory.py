@@ -15,7 +15,7 @@ class DummyPollingAgent(BasePollingAgent):
     async def poll(self):  # pragma: no cover - not exercised in tests
         return []
 
-    def poll_contacts(self):  # pragma: no cover - not exercised in tests
+    async def poll_contacts(self):  # pragma: no cover - not exercised in tests
         return []
 
 

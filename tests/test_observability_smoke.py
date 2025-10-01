@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, Iterable
 
 import json
@@ -31,7 +32,7 @@ class DummyTriggerAgent:
     def __init__(self, result: Dict[str, Any]):
         self._result = result
 
-    def check(self, _event: Dict[str, Any]) -> Dict[str, Any]:
+    async def check(self, _event: Dict[str, Any]) -> Dict[str, Any]:
         return self._result
 
 
@@ -173,7 +174,7 @@ def test_observability_records_metrics_and_traces(monkeypatch, tmp_path):
             str(tmp_path / "similar_results.json")
         )
 
-        orchestrator.run()
+        asyncio.run(orchestrator.run())
 
         assert crm_agent.sent, "CRM agent should have been invoked"
 

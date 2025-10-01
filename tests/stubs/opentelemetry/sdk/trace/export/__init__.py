@@ -1,10 +1,9 @@
 """Span exporters and processors for the stub tracing SDK."""
 
 from __future__ import annotations
-
 """Span exporter utilities for the in-repo OpenTelemetry shim."""
 
-from typing import Iterable, List
+from typing import Iterable, List  # noqa: E402
 
 __all__ = [
     "SpanExporter",

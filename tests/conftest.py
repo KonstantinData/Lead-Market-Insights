@@ -68,14 +68,14 @@ def stub_agent_registry(isolated_agent_registry):
                 }
             ]
 
-        def poll_contacts(self) -> Iterable[Dict[str, object]]:
-            return iter(())
+        async def poll_contacts(self) -> Iterable[Dict[str, object]]:
+            return []
 
     class StubTriggerAgent(BaseTriggerAgent):
         def __init__(self, *, trigger_words=None):
             self.trigger_words = trigger_words or []
 
-        def check(self, event: Dict[str, object]) -> Dict[str, object]:
+        async def check(self, event: Dict[str, object]) -> Dict[str, object]:
             return {
                 "trigger": True,
                 "type": "soft",
@@ -118,14 +118,14 @@ def stub_agent_registry(isolated_agent_registry):
         def __init__(self):
             self.sent: list[Dict[str, object]] = []
 
-        def send(self, event: Dict[str, object], info: Dict[str, object]) -> None:
+        async def send(self, event: Dict[str, object], info: Dict[str, object]) -> None:
             self.sent.append({"event": event, "info": info})
 
     class StubInternalResearchAgent(BaseResearchAgent):
         def __init__(self, *, config: Any = None):
             self.config = config
 
-        def run(self, trigger: Dict[str, Any]) -> Dict[str, Any]:
+        async def run(self, trigger: Dict[str, Any]) -> Dict[str, Any]:
             return {
                 "agent": "internal_research",
                 "status": "REPORT_REQUIRED",
@@ -139,7 +139,7 @@ def stub_agent_registry(isolated_agent_registry):
         def __init__(self, *, config: Any = None):
             self.config = config
 
-        def run(self, trigger: Dict[str, Any]) -> Dict[str, Any]:
+        async def run(self, trigger: Dict[str, Any]) -> Dict[str, Any]:
             return {
                 "agent": "dossier_research",
                 "status": "completed",
@@ -151,7 +151,7 @@ def stub_agent_registry(isolated_agent_registry):
         def __init__(self, *, config: Any = None):
             self.config = config
 
-        def run(self, trigger: Dict[str, Any]) -> Dict[str, Any]:
+        async def run(self, trigger: Dict[str, Any]) -> Dict[str, Any]:
             return {
                 "agent": "similar_companies_level1",
                 "status": "completed",

@@ -1,3 +1,5 @@
+import asyncio
+
 from agents.alert_agent import AlertSeverity
 from agents.workflow_orchestrator import WorkflowOrchestrator
 
@@ -23,7 +25,7 @@ class StubMasterAgent:
         self.log_file_path = "stub.log"
         self.storage_agent = None
 
-    def process_all_events(self):
+    async def process_all_events(self):
         self.process_calls += 1
         if self.fail_process:
             raise RuntimeError("processing error")
@@ -41,7 +43,7 @@ def test_orchestrator_emits_alert_on_handled_exception():
         master_agent=master_agent,
     )
 
-    orchestrator.run()
+    asyncio.run(orchestrator.run())
 
     assert len(alert_agent.calls) == 1
     call = alert_agent.calls[0]
@@ -59,8 +61,8 @@ def test_orchestrator_escalates_alert_on_repeated_failures():
         failure_threshold=2,
     )
 
-    orchestrator.run()
-    orchestrator.run()
+    asyncio.run(orchestrator.run())
+    asyncio.run(orchestrator.run())
 
     assert len(alert_agent.calls) == 2
     first, second = alert_agent.calls

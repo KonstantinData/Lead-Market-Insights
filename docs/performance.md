@@ -19,7 +19,7 @@ Commands executed:
 
 ```bash
 python scripts/perf/generate_fake_events.py
-PERF_RANDOM_SEED=42 python scripts/perf/stress_run.py
+PERF_RANDOM_SEED=42 python -m utils.cli_runner scripts.perf.stress_run:cli
 ```
 
 ## Baseline metrics

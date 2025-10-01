@@ -32,7 +32,8 @@ Environment variables
 
 Example usage::
 
-    PERF_EVENT_COUNT=200 PERF_PARALLELISM=20 python scripts/perf/stress_run.py
+    PERF_EVENT_COUNT=200 PERF_PARALLELISM=20 \
+        python -m utils.cli_runner scripts.perf.stress_run:cli
 
 """
 
@@ -281,7 +282,8 @@ def _persist_results(path: Path, results: Dict[str, object]) -> None:
         json.dump(results, handle, indent=2)
 
 
-async def _async_main() -> None:
+async def cli() -> None:
+    _setup_logging()
     config = load_config()
     if config.random_seed is not None:
         random.seed(config.random_seed)
@@ -295,8 +297,9 @@ async def _async_main() -> None:
 
 
 def main() -> None:
-    _setup_logging()
-    asyncio.run(_async_main())
+    from utils.cli_runner import run_cli
+
+    run_cli(cli)
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import warnings
 from email.mime.application import MIMEApplication
@@ -85,9 +86,25 @@ class EmailAgent:
             DeprecationWarning,
             stacklevel=2,
         )
-        raise RuntimeError(
-            "EmailAgent.send_email is no longer supported. Use send_email_async instead."
-        )
+
+        try:
+            return asyncio.run(
+                self.send_email_async(
+                    recipient,
+                    subject,
+                    body,
+                    html_body=html_body,
+                    attachments=attachments,
+                    attachment_links=attachment_links,
+                )
+            )
+        except RuntimeError as exc:
+            if "asyncio.run() cannot be called" in str(exc):
+                raise RuntimeError(
+                    "EmailAgent.send_email cannot be invoked while an event loop is running. "
+                    "Call send_email_async instead."
+                ) from exc
+            raise
 
     def _normalize_links(self, links: Optional[Iterable[str]]) -> Sequence[str]:
         if not links:

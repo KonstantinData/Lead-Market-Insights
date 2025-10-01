@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import importlib
 import json
 from pathlib import Path
 from typing import List
@@ -12,9 +10,11 @@ import pytest
 
 import agents.master_workflow_agent as master_module
 import agents.workflow_orchestrator as workflow_orchestrator
-import config.config as config_module
 from agents.alert_agent import AlertSeverity
 from agents.workflow_orchestrator import WorkflowOrchestrator
+
+
+pytestmark = pytest.mark.asyncio
 
 
 class DummyAlertAgent:
@@ -71,15 +71,9 @@ def disable_real_watcher(monkeypatch):
     yield
 
 
-def test_backend_failure_triggers_alert(
-    monkeypatch, tmp_path: Path, stub_agent_registry
+async def test_backend_failure_triggers_alert(
+    monkeypatch, orchestrator_environment, stub_agent_registry
 ) -> None:
-    monkeypatch.setenv("RUN_LOG_DIR", str(tmp_path / "runs"))
-    monkeypatch.setenv("RESEARCH_ARTIFACT_DIR", str(tmp_path / "research" / "artifacts"))
-    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
-    reloaded_config = importlib.reload(config_module)
-    monkeypatch.setattr(master_module, "settings", reloaded_config.settings)
-
     master_agent = master_module.MasterWorkflowAgent()
     if hasattr(master_agent, "storage_agent"):
         master_agent.storage_agent.reset_failure_count("workflow_run")
@@ -94,7 +88,7 @@ def test_backend_failure_triggers_alert(
         alert_agent=alert_agent, master_agent=master_agent, failure_threshold=3
     )
 
-    asyncio.run(orchestrator.run())
+    await orchestrator.run()
 
     assert alert_agent.calls
     call = alert_agent.calls[-1]
@@ -104,15 +98,9 @@ def test_backend_failure_triggers_alert(
     assert "escalated" not in call["context"]
 
 
-def test_repeated_failures_escalate_to_critical(
-    monkeypatch, tmp_path: Path, stub_agent_registry
+async def test_repeated_failures_escalate_to_critical(
+    monkeypatch, orchestrator_environment, stub_agent_registry
 ):
-    monkeypatch.setenv("RUN_LOG_DIR", str(tmp_path / "runs"))
-    monkeypatch.setenv("RESEARCH_ARTIFACT_DIR", str(tmp_path / "research" / "artifacts"))
-    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
-    reloaded_config = importlib.reload(config_module)
-    monkeypatch.setattr(master_module, "settings", reloaded_config.settings)
-
     master_agent = master_module.MasterWorkflowAgent()
     if hasattr(master_agent, "storage_agent"):
         master_agent.storage_agent.reset_failure_count("workflow_run")
@@ -127,8 +115,8 @@ def test_repeated_failures_escalate_to_critical(
         alert_agent=alert_agent, master_agent=master_agent, failure_threshold=2
     )
 
-    asyncio.run(orchestrator.run())
-    asyncio.run(orchestrator.run())
+    await orchestrator.run()
+    await orchestrator.run()
 
     assert len(alert_agent.calls) == 2
     first, second = alert_agent.calls
@@ -138,8 +126,8 @@ def test_repeated_failures_escalate_to_critical(
     assert second["context"].get("escalated") is True
 
 
-def test_agent_swaps_can_be_driven_by_configuration(
-    monkeypatch, tmp_path: Path, stub_agent_registry
+async def test_agent_swaps_can_be_driven_by_configuration(
+    monkeypatch, tmp_path: Path, orchestrator_environment, stub_agent_registry
 ):
     config_file = tmp_path / "agent_overrides.json"
     config_file.write_text(
@@ -161,10 +149,6 @@ def test_agent_swaps_can_be_driven_by_configuration(
     )
 
     monkeypatch.setenv("AGENT_CONFIG_FILE", str(config_file))
-    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
-    monkeypatch.setenv("RESEARCH_ARTIFACT_DIR", str(tmp_path / "research" / "artifacts"))
-    reloaded_config = importlib.reload(config_module)
-    monkeypatch.setattr(master_module, "settings", reloaded_config.settings)
 
     master_agent = master_module.MasterWorkflowAgent()
 
@@ -187,23 +171,10 @@ def test_agent_swaps_can_be_driven_by_configuration(
     )
 
 
-def test_orchestrator_records_research_artifacts_and_email_details(
-    monkeypatch, tmp_path: Path
+async def test_orchestrator_records_research_artifacts_and_email_details(
+    monkeypatch, tmp_path: Path, orchestrator_environment
 ) -> None:
-    summary_root = tmp_path / "research" / "artifacts"
-    pdf_root = tmp_path / "research" / "pdfs"
-    monkeypatch.setattr(
-        workflow_orchestrator.settings,
-        "research_artifact_dir",
-        str(summary_root),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        workflow_orchestrator.settings,
-        "research_pdf_dir",
-        str(pdf_root),
-        raising=False,
-    )
+    summary_root = orchestrator_environment["artifact_dir"]
 
     generated_calls = []
 
@@ -292,7 +263,7 @@ def test_orchestrator_records_research_artifacts_and_email_details(
     master_agent = RecordingMasterAgent(log_dir=log_dir, results=research_results)
 
     orchestrator = WorkflowOrchestrator(master_agent=master_agent)
-    asyncio.run(orchestrator.run())
+    await orchestrator.run()
 
     run_id = orchestrator._last_run_id
     assert run_id is not None

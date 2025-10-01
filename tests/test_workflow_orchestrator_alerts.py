@@ -1,7 +1,12 @@
-import asyncio
+from __future__ import annotations
+
+import pytest
 
 from agents.alert_agent import AlertSeverity
 from agents.workflow_orchestrator import WorkflowOrchestrator
+
+
+pytestmark = pytest.mark.asyncio
 
 
 class DummyAlertAgent:
@@ -35,7 +40,7 @@ class StubMasterAgent:
             raise ValueError("finalize error")
 
 
-def test_orchestrator_emits_alert_on_handled_exception():
+async def test_orchestrator_emits_alert_on_handled_exception():
     alert_agent = DummyAlertAgent()
     master_agent = StubMasterAgent(fail_finalize=True)
     orchestrator = WorkflowOrchestrator(
@@ -43,7 +48,7 @@ def test_orchestrator_emits_alert_on_handled_exception():
         master_agent=master_agent,
     )
 
-    asyncio.run(orchestrator.run())
+    await orchestrator.run()
 
     assert len(alert_agent.calls) == 1
     call = alert_agent.calls[0]
@@ -52,7 +57,7 @@ def test_orchestrator_emits_alert_on_handled_exception():
     assert call["context"]["phase"] == "finalize"
 
 
-def test_orchestrator_escalates_alert_on_repeated_failures():
+async def test_orchestrator_escalates_alert_on_repeated_failures():
     alert_agent = DummyAlertAgent()
     master_agent = StubMasterAgent(fail_process=True)
     orchestrator = WorkflowOrchestrator(
@@ -61,8 +66,8 @@ def test_orchestrator_escalates_alert_on_repeated_failures():
         failure_threshold=2,
     )
 
-    asyncio.run(orchestrator.run())
-    asyncio.run(orchestrator.run())
+    await orchestrator.run()
+    await orchestrator.run()
 
     assert len(alert_agent.calls) == 2
     first, second = alert_agent.calls

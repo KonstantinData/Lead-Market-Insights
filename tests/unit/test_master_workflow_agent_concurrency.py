@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 from typing import Any, Dict, Optional
 
@@ -5,6 +7,9 @@ import pytest
 
 from agents.master_workflow_agent import MasterWorkflowAgent
 from utils.concurrency import ExceptionGroup
+
+
+pytestmark = pytest.mark.asyncio
 
 
 def _build_synthetic_agent() -> MasterWorkflowAgent:
@@ -17,7 +22,7 @@ def _build_synthetic_agent() -> MasterWorkflowAgent:
     return agent  # type: ignore[return-value]
 
 
-def test_taskgroup_cancels_parallel_tasks_on_failure() -> None:
+async def test_taskgroup_cancels_parallel_tasks_on_failure() -> None:
     agent = _build_synthetic_agent()
 
     cancelled: Dict[str, bool] = {"similar": False}
@@ -49,14 +54,12 @@ def test_taskgroup_cancels_parallel_tasks_on_failure() -> None:
     info = {"company_name": "Example", "company_domain": "example.com"}
 
     with pytest.raises(ExceptionGroup) as exc_info:
-        asyncio.run(
-            agent._execute_precrm_research(  # type: ignore[attr-defined]
-                event_result,
-                event,
-                info,
-                event_id=event["id"],
-                requires_dossier=True,
-            )
+        await agent._execute_precrm_research(  # type: ignore[attr-defined]
+            event_result,
+            event,
+            info,
+            event_id=event["id"],
+            requires_dossier=True,
         )
 
     assert any(isinstance(err, RuntimeError) for err in exc_info.value.exceptions)

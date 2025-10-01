@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +9,9 @@ from pathlib import Path
 import pytest
 
 from agents.dossier_research_agent import DossierResearchAgent
+
+
+pytestmark = pytest.mark.asyncio
 
 
 class _Config:
@@ -61,12 +63,12 @@ def trigger_factory(base_trigger: dict[str, object]):
     return _factory
 
 
-def test_run_serializes_output_and_persists_artifact(
+async def test_run_serializes_output_and_persists_artifact(
     agent: DossierResearchAgent, trigger_factory
 ) -> None:
     trigger = trigger_factory()
 
-    result = asyncio.run(agent.run(trigger))
+    result = await agent.run(trigger)
 
     dossier = result["payload"]
     assert list(dossier.keys()) == list(DossierResearchAgent.OUTPUT_FIELD_ORDER)
@@ -98,7 +100,7 @@ def test_run_serializes_output_and_persists_artifact(
         (None, [], [], []),
     ],
 )
-def test_sequences_are_normalised(
+async def test_sequences_are_normalised(
     agent: DossierResearchAgent,
     trigger_factory,
     insights_input,
@@ -108,13 +110,13 @@ def test_sequences_are_normalised(
 ) -> None:
     trigger = trigger_factory(payload={"insights": insights_input, "sources": sources_input})
 
-    dossier = asyncio.run(agent.run(trigger))["payload"]
+    dossier = (await agent.run(trigger))["payload"]
 
     assert dossier["insights"] == expected_insights
     assert dossier["sources"] == expected_sources
 
 
-def test_summary_falls_back_to_description(
+async def test_summary_falls_back_to_description(
     agent: DossierResearchAgent, trigger_factory
 ) -> None:
     trigger = trigger_factory(
@@ -126,33 +128,33 @@ def test_summary_falls_back_to_description(
         }
     )
 
-    dossier = asyncio.run(agent.run(trigger))["payload"]
+    dossier = (await agent.run(trigger))["payload"]
 
     assert dossier["summary"] == "Provided summary"
     assert dossier["company"]["description"] == " Provided summary "
 
 
-def test_missing_required_fields_raise_value_error(
+async def test_missing_required_fields_raise_value_error(
     agent: DossierResearchAgent, trigger_factory
 ) -> None:
     trigger = trigger_factory()
     trigger["payload"].pop("company_domain")  # type: ignore[index]
 
     with pytest.raises(ValueError):
-        asyncio.run(agent.run(trigger))
+        await agent.run(trigger)
 
 
-def test_artifacts_are_traceable_by_run_and_event(
+async def test_artifacts_are_traceable_by_run_and_event(
     agent: DossierResearchAgent, trigger_factory
 ) -> None:
     trigger = trigger_factory()
-    asyncio.run(agent.run(trigger))
+    await agent.run(trigger)
 
     second_trigger = trigger_factory(
         event_id="evt-789",
         payload={"company_name": "Example Subsidiary"},
     )
-    asyncio.run(agent.run(second_trigger))
+    await agent.run(second_trigger)
 
     base_dir = Path(agent.output_dir) / trigger["run_id"]
     assert base_dir.parent == Path(agent.output_dir)
@@ -163,7 +165,7 @@ def test_artifacts_are_traceable_by_run_and_event(
     ]
 
 
-def test_company_detail_schema_snapshot(
+async def test_company_detail_schema_snapshot(
     agent: DossierResearchAgent, trigger_factory, monkeypatch
 ) -> None:
     class _FixedDatetime:
@@ -177,7 +179,7 @@ def test_company_detail_schema_snapshot(
     monkeypatch.setattr("agents.dossier_research_agent.datetime", _FixedDatetime)
 
     trigger = trigger_factory()
-    result = asyncio.run(agent.run(trigger))
+    result = await agent.run(trigger)
 
     artifact_path = Path(result["artifact_path"])
     saved_payload = json.loads(artifact_path.read_text(encoding="utf-8"))

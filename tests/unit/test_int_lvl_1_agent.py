@@ -1,4 +1,5 @@
-import asyncio
+from __future__ import annotations
+
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -7,6 +8,9 @@ from typing import Callable, Iterable, Mapping
 import pytest
 
 from agents.int_lvl_1_agent import IntLvl1SimilarCompaniesAgent
+
+
+pytestmark = pytest.mark.asyncio
 
 
 class _Config:
@@ -123,12 +127,12 @@ def tmp_agent(tmp_path: Path) -> IntLvl1SimilarCompaniesAgent:
     )
 
 
-def test_ranked_results_are_limited_and_persisted(
+async def test_ranked_results_are_limited_and_persisted(
     tmp_agent: IntLvl1SimilarCompaniesAgent, tmp_path: Path, trigger_factory
 ) -> None:
     trigger = trigger_factory()
 
-    result = asyncio.run(tmp_agent.run(trigger))
+    result = await tmp_agent.run(trigger)
 
     payload = result["payload"]
     assert payload["company_name"] == "Example Analytics"
@@ -149,7 +153,7 @@ def test_ranked_results_are_limited_and_persisted(
     assert saved["results"] == ranked
 
 
-def test_deterministic_ordering_when_scores_equal(tmp_path: Path) -> None:
+async def test_deterministic_ordering_when_scores_equal(tmp_path: Path) -> None:
     integration = _StubIntegration(
         [
             _candidate("a", "Beta Systems", description="Cloud services"),
@@ -170,11 +174,11 @@ def test_deterministic_ordering_when_scores_equal(tmp_path: Path) -> None:
         }
     }
 
-    results = asyncio.run(agent.run(trigger))["payload"]["results"]
+    results = (await agent.run(trigger))["payload"]["results"]
     assert [item["name"] for item in results] == ["Alpha Labs", "Beta Systems"]
 
 
-def test_missing_company_name_raises_value_error(tmp_path: Path) -> None:
+async def test_missing_company_name_raises_value_error(tmp_path: Path) -> None:
     integration = _StubIntegration([])
     agent = IntLvl1SimilarCompaniesAgent(
         config=_Config(tmp_path),
@@ -182,10 +186,10 @@ def test_missing_company_name_raises_value_error(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ValueError):
-        asyncio.run(agent.run({"payload": {}}))
+        await agent.run({"payload": {}})
 
 
-def test_candidates_without_valid_properties_are_ignored(tmp_path: Path) -> None:
+async def test_candidates_without_valid_properties_are_ignored(tmp_path: Path) -> None:
     integration = _StubIntegration(
         [
             {"id": "invalid", "properties": None},
@@ -199,12 +203,12 @@ def test_candidates_without_valid_properties_are_ignored(tmp_path: Path) -> None
     )
 
     trigger = {"payload": {"company_name": "Example Analytics", "description": "Analytics"}}
-    results = asyncio.run(agent.run(trigger))["payload"]["results"]
+    results = (await agent.run(trigger))["payload"]["results"]
 
     assert [item["id"] for item in results] == ["valid"]
 
 
-def test_similar_companies_schema_snapshot(
+async def test_similar_companies_schema_snapshot(
     tmp_agent: IntLvl1SimilarCompaniesAgent, trigger_factory, monkeypatch
 ) -> None:
     class _FixedDatetime:
@@ -218,7 +222,7 @@ def test_similar_companies_schema_snapshot(
     monkeypatch.setattr("agents.int_lvl_1_agent.datetime", _FixedDatetime)
 
     trigger = trigger_factory()
-    result = asyncio.run(tmp_agent.run(trigger))
+    result = await tmp_agent.run(trigger)
 
     artifact_path = Path(result["payload"]["artifact_path"])
     saved_payload = json.loads(artifact_path.read_text(encoding="utf-8"))

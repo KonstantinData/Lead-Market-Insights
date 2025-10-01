@@ -1,9 +1,16 @@
-import asyncio
+from __future__ import annotations
+from __future__ import annotations
+
 from typing import Any, Dict, Iterable
+
+import pytest
 
 from agents.master_workflow_agent import MasterWorkflowAgent
 from config.config import settings
 from utils.pii import mask_pii
+
+
+pytestmark = pytest.mark.asyncio
 
 
 class DummyEventAgent:
@@ -71,7 +78,7 @@ def test_mask_pii_respects_whitelist():
     assert masked["info"]["contact_name"] == "<redacted-name>"
 
 
-def test_master_agent_masks_logged_events(tmp_path):
+async def test_master_agent_masks_logged_events(orchestrator_environment):
     original_run_dir = settings.run_log_dir
     original_mask_logs = settings.mask_pii_in_logs
     original_whitelist = set(settings.pii_field_whitelist)
@@ -82,8 +89,8 @@ def test_master_agent_masks_logged_events(tmp_path):
         settings.mask_pii_in_logs = True
         settings.pii_field_whitelist = original_whitelist
         settings.compliance_mode = "strict"
-        run_dir = tmp_path / "runs"
-        run_dir.mkdir()
+        run_dir = orchestrator_environment["run_dir"]
+        run_dir.mkdir(exist_ok=True)
         settings.run_log_dir = run_dir
 
         event = {
@@ -99,7 +106,7 @@ def test_master_agent_masks_logged_events(tmp_path):
             extraction_agent=DummyExtractionAgent(),
         )
 
-        asyncio.run(agent.process_all_events())
+        await agent.process_all_events()
 
         log_text = agent.log_file_path.read_text(encoding="utf-8")
         assert "organizer@example.com" not in log_text
@@ -113,7 +120,7 @@ def test_master_agent_masks_logged_events(tmp_path):
         settings.compliance_mode = original_compliance
 
 
-def test_human_agent_masks_messages(tmp_path):
+async def test_human_agent_masks_messages(orchestrator_environment):
     backend = DummyHumanBackend()
     original_mask_messages = settings.mask_pii_in_messages
     original_run_dir = settings.run_log_dir
@@ -125,8 +132,8 @@ def test_human_agent_masks_messages(tmp_path):
         settings.mask_pii_in_messages = True
         settings.pii_field_whitelist = original_whitelist
         settings.compliance_mode = "strict"
-        run_dir = tmp_path / "runs"
-        run_dir.mkdir()
+        run_dir = orchestrator_environment["run_dir"]
+        run_dir.mkdir(exist_ok=True)
         settings.run_log_dir = run_dir
 
         agent = MasterWorkflowAgent(
@@ -147,7 +154,7 @@ def test_human_agent_masks_messages(tmp_path):
             extraction_agent=DummyExtractionAgent(),
         )
 
-        asyncio.run(agent.process_all_events())
+        await agent.process_all_events()
 
         assert backend.requests, "Backend should receive a request"
         message = backend.requests[0]["message"]

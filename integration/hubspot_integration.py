@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence
 
 from config.config import Settings
 import warnings
 
+from utils import concurrency
 from utils.async_http import AsyncHTTP
 from utils.text_normalization import normalize_text
 
@@ -171,7 +173,17 @@ class HubSpotIntegration:
     # Internal helpers
     # ------------------------------------------------------------------
     async def _post(self, path: str, payload: Dict[str, object]) -> Dict[str, object]:
-        response = await self._http.post(path, json=payload)
+        timeout = float(self._config.request_timeout)
+        async with concurrency.HUBSPOT_SEMAPHORE:
+            try:
+                response = await asyncio.wait_for(
+                    self._http.post(path, json=payload, timeout=timeout),
+                    timeout=timeout,
+                )
+            except asyncio.TimeoutError as exc:
+                raise TimeoutError(
+                    f"HubSpot request to {path} timed out after {timeout:.2f} seconds"
+                ) from exc
         response.raise_for_status()
         return response.json()
 

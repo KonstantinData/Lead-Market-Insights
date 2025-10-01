@@ -6,11 +6,9 @@ services:
     ports:
       - "4318:4318"
       - "4317:4317"
-    environment:
-      APP_ENV: dev
-      LOG_LEVEL: info
     volumes:
       - ./observability/otel/collector-config.yml:/etc/otelcol/config.yml:ro
+    restart: unless-stopped
 
   leadmi:
     build: .
@@ -18,19 +16,57 @@ services:
     depends_on:
       - otel-collector
     environment:
-      SETTINGS_SKIP_DOTENV: "1"
-      APP_ENV: dev
-      ENABLE_OTEL: "true"
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # --------------------------------------------------
+      # Core runtime
+      # --------------------------------------------------
+      SETTINGS_SKIP_DOTENV: "1"            # inside container we don't re-load .env via python-dotenv
+      APP_ENV: ${APP_ENV:-dev}
+      SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
+
+      # --------------------------------------------------
+      # OpenAI key mapping (legacy variable OPEN_AI_KEY in .env)
+      # DO NOT change this line: it maps your legacy OPEN_AI_KEY to the canonical OPENAI_API_KEY
+      # --------------------------------------------------
+      OPENAI_API_KEY: ${OPEN_AI_KEY}
       OPENAI_API_BASE: ${OPENAI_API_BASE:-https://api.openai.com}
+
+      # --------------------------------------------------
+      # Telemetry (traces enabled, metrics disabled to avoid UNAVAILABLE warnings)
+      # --------------------------------------------------
+      ENABLE_OTEL: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+      OTEL_METRICS_EXPORTER: "none"
+      # Uncomment only if some library keeps emitting metrics:
+      # OTEL_PYTHON_DISABLE_METRICS: "true"
+      # Optional future sampling (leave commented until needed):
+      # OTEL_TRACES_SAMPLER: parentbased_traceidratio
+      # OTEL_TRACES_SAMPLER_ARG: "1.0"
+
+      # --------------------------------------------------
+      # Google Credentials
+      # (These reference your .env—do not put secrets directly here)
+      # --------------------------------------------------
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
       GOOGLE_REFRESH_TOKEN: ${GOOGLE_REFRESH_TOKEN}
       GOOGLE_TOKEN_URI: ${GOOGLE_TOKEN_URI:-https://oauth2.googleapis.com/token}
       GOOGLE_CALENDAR_ID: ${GOOGLE_CALENDAR_ID}
+
+      # --------------------------------------------------
+      # HubSpot
+      # --------------------------------------------------
       HUBSPOT_ACCESS_TOKEN: ${HUBSPOT_ACCESS_TOKEN}
       HUBSPOT_API_BASE_URL: ${HUBSPOT_API_BASE_URL:-https://api.hubapi.com}
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+
+      # --------------------------------------------------
+      # Daemon behavior
+      # daemon = continuous cycles; oneshot = single run then exit
+      # LEADMI_DAEMON_INTERVAL seconds between cycles (only if in daemon mode)
+      # --------------------------------------------------
+      LEADMI_RUN_MODE: ${LEADMI_RUN_MODE:-daemon}
+      LEADMI_DAEMON_INTERVAL: ${LEADMI_DAEMON_INTERVAL:-300}
+
     volumes:
       - ./log_storage:/app/log_storage
     command: ["python", "main.py"]
+    restart: unless-stopped

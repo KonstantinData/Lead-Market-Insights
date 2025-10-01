@@ -678,9 +678,7 @@ class MasterWorkflowAgent:
             await runners[0]()
             return
 
-        async with asyncio.TaskGroup() as group:
-            for runner in runners:
-                group.create_task(runner())
+        await concurrency.run_in_task_group(runners)
 
     def _can_run_dossier(self, info: Dict[str, Any]) -> bool:
         return bool(info.get("company_name")) and bool(info.get("company_domain"))

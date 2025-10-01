@@ -5,9 +5,22 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from typing import Optional
+from typing import Awaitable, Callable, Iterable, List, Optional
 
 logger = logging.getLogger(__name__)
+
+try:  # Python 3.11+
+    from builtins import ExceptionGroup  # type: ignore[attr-defined]
+except ImportError:  # pragma: no cover - Python 3.10 fallback
+    try:
+        from types import ExceptionGroup  # type: ignore[attr-defined]
+    except ImportError:  # pragma: no cover - minimal shim
+        class ExceptionGroup(Exception):  # type: ignore[override]
+            """Lightweight ExceptionGroup for Python 3.10 environments."""
+
+            def __init__(self, message: str, exceptions: Iterable[BaseException]) -> None:
+                super().__init__(message)
+                self.exceptions = list(exceptions)
 
 _DEFAULT_HUBSPOT_LIMIT = 5
 _DEFAULT_RESEARCH_LIMIT = 3
@@ -118,6 +131,61 @@ HUBSPOT_SEMAPHORE = LoggingSemaphore("hubspot", _HUBSPOT_LIMIT)
 RESEARCH_TASK_SEMAPHORE = LoggingSemaphore("research", _RESEARCH_LIMIT)
 
 
+async def run_in_task_group(
+    runners: Iterable[Callable[[], Awaitable[None]]],
+) -> None:
+    """Execute runner callables concurrently with TaskGroup-like semantics."""
+
+    runners_list = list(runners)
+    if not runners_list:
+        return
+
+    if hasattr(asyncio, "TaskGroup"):
+        async with asyncio.TaskGroup() as group:  # type: ignore[attr-defined]
+            for runner in runners_list:
+                group.create_task(runner())
+        return
+
+    tasks: List[asyncio.Task[None]] = [asyncio.create_task(runner()) for runner in runners_list]
+    pending: List[asyncio.Task[None]] = tasks.copy()
+    exceptions: List[BaseException] = []
+
+    try:
+        while pending:
+            done, pending_set = await asyncio.wait(
+                pending, return_when=asyncio.FIRST_EXCEPTION
+            )
+
+            for task in done:
+                try:
+                    task.result()
+                except BaseException as exc:  # pragma: no cover - exercised in tests
+                    exceptions.append(exc)
+
+            pending = list(pending_set)
+
+            if exceptions:
+                for task in pending:
+                    task.cancel()
+                cancel_results = await asyncio.gather(
+                    *pending, return_exceptions=True
+                )
+                for result in cancel_results:
+                    if isinstance(result, BaseException):
+                        exceptions.append(result)
+                pending = []
+                break
+
+        if exceptions:
+            raise ExceptionGroup("Task group failure", exceptions)
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+
 def reload_limits(
     *, hubspot: Optional[int] = None, research: Optional[int] = None
 ) -> None:
@@ -164,5 +232,6 @@ __all__ = [
     "HUBSPOT_SEMAPHORE",
     "LoggingSemaphore",
     "RESEARCH_TASK_SEMAPHORE",
+    "run_in_task_group",
     "reload_limits",
 ]

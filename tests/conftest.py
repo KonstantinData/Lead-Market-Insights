@@ -95,7 +95,7 @@ def stub_agent_registry(isolated_agent_registry):
             }
 
     class StubExtractionAgent(BaseExtractionAgent):
-        def extract(self, event: Dict[str, object]) -> Dict[str, object]:
+        async def extract(self, event: Dict[str, object]) -> Dict[str, object]:
             return {
                 "info": {
                     "company_name": "Example Co",

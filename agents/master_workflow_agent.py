@@ -233,7 +233,7 @@ class MasterWorkflowAgent:
                     for field in ("summary", "description"):
                         if field not in extraction_input and context.get(field) is not None:
                             extraction_input[field] = context.get(field)
-                extracted = self.extraction_agent.extract(extraction_input)
+                extracted = await self.extraction_agent.extract(extraction_input)
             event_result["extraction"] = extracted
 
             info = extracted.get("info", {}) or {}

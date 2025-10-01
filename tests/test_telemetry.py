@@ -3,10 +3,18 @@ import pytest
 import logging
 
 # Skip, wenn Exporter-Modul fehlt (robust gegen fehlende Dev-Abhängigkeiten)
-if (
-    importlib.util.find_spec("opentelemetry.exporter.otlp.proto.http.trace_exporter")
-    is None
-):
+try:
+    has_exporter = (
+        importlib.util.find_spec(
+            "opentelemetry.exporter.otlp.proto.http.trace_exporter"
+        )
+        is not None
+    )
+except ModuleNotFoundError:
+    # Einige opentelemetry-Versionen stellen das http-Modul nicht bereit.
+    has_exporter = False
+
+if not has_exporter:
     pytest.skip(
         "OTLP exporter not installed; skipping telemetry tests.",
         allow_module_level=True,

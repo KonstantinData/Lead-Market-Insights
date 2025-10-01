@@ -6,6 +6,7 @@ import asyncio
 import random
 import time
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any, Callable, Optional, Tuple, Type, Union
 
 
@@ -89,6 +90,16 @@ def retry(
                         if delay > 0:
                             await asyncio.sleep(delay)
 
+            async_wrapper.retry = SimpleNamespace(wait=wait, stop=stop, retry=retry)
+            async_wrapper.retry_with = lambda **overrides: retry(
+                reraise=overrides.get("reraise", reraise),
+                stop=overrides.get("stop", stop),
+                wait=overrides.get("wait", wait),
+                retry=overrides.get("retry", retry),
+                before=overrides.get("before", before),
+            )
+            async_wrapper.statistics = {}
+
             return async_wrapper
 
         def sync_wrapper(*args: Any, **kwargs: Any):
@@ -108,6 +119,16 @@ def retry(
                     attempt += 1
                     if delay > 0:
                         time.sleep(delay)
+
+        sync_wrapper.retry = SimpleNamespace(wait=wait, stop=stop, retry=retry)
+        sync_wrapper.retry_with = lambda **overrides: retry(
+            reraise=overrides.get("reraise", reraise),
+            stop=overrides.get("stop", stop),
+            wait=overrides.get("wait", wait),
+            retry=overrides.get("retry", retry),
+            before=overrides.get("before", before),
+        )
+        sync_wrapper.statistics = {}
 
         return sync_wrapper
 

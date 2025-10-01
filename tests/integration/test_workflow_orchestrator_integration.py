@@ -16,6 +16,7 @@ from agents.workflow_orchestrator import WorkflowOrchestrator
 
 pytestmark = pytest.mark.asyncio
 
+
 class DummyAlertAgent:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
@@ -174,7 +175,6 @@ async def test_orchestrator_records_research_artifacts_and_email_details(
     monkeypatch, tmp_path: Path, orchestrator_environment
 ) -> None:
     summary_root = orchestrator_environment["artifact_dir"]
-    pdf_root = orchestrator_environment["pdf_dir"]
 
     generated_calls = []
 

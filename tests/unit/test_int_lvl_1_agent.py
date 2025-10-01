@@ -11,6 +11,8 @@ from agents.int_lvl_1_agent import IntLvl1SimilarCompaniesAgent
 
 
 pytestmark = pytest.mark.asyncio
+
+
 class _Config:
     def __init__(self, base: Path) -> None:
         self.research_artifact_dir = base

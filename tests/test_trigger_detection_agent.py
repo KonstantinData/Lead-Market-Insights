@@ -2,10 +2,6 @@ from __future__ import annotations
 
 from typing import Iterable, Mapping, Sequence
 
-import asyncio
-
-from typing import Iterable, Mapping, Sequence
-
 import pytest
 
 from agents.trigger_detection_agent import TriggerDetectionAgent
@@ -25,6 +21,8 @@ async def test_agent_normalises_hard_triggers_and_detects_summary_match() -> Non
     assert result["matched_word"] == normalize_text("Küche")
     assert result["matched_field"] == "summary"
     assert result["soft_trigger_matches"] == []
+
+
 async def test_agent_detects_hard_trigger_in_description() -> None:
     agent = TriggerDetectionAgent(trigger_words=["briefing"])
 
@@ -33,6 +31,8 @@ async def test_agent_detects_hard_trigger_in_description() -> None:
     assert result["type"] == "hard"
     assert result["matched_word"] == "briefing"
     assert result["matched_field"] == "description"
+
+
 async def test_agent_detects_soft_triggers_via_llm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -62,6 +62,8 @@ async def test_agent_detects_soft_triggers_via_llm(
     assert result["matched_field"] == soft_match["source_field"]
     assert result["soft_trigger_matches"] == [soft_match]
     assert result["extraction_context"]["soft_trigger_matches"] == [soft_match]
+
+
 async def test_agent_ignores_invalid_llm_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -84,6 +86,8 @@ async def test_agent_ignores_invalid_llm_response(
         "soft_trigger_matches": [],
         "hard_triggers": ["meeting"],
     }
+
+
 async def test_agent_handles_missing_fields() -> None:
     agent = TriggerDetectionAgent(trigger_words=["alert"])
 

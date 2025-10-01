@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pytest
 
 from agents.alert_agent import AlertSeverity
@@ -5,6 +7,7 @@ from agents.workflow_orchestrator import WorkflowOrchestrator
 
 
 pytestmark = pytest.mark.asyncio
+
 
 class DummyAlertAgent:
     def __init__(self):

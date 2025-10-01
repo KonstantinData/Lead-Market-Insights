@@ -11,6 +11,7 @@ from utils.concurrency import ExceptionGroup
 
 pytestmark = pytest.mark.asyncio
 
+
 def _build_synthetic_agent() -> MasterWorkflowAgent:
     agent = MasterWorkflowAgent.__new__(MasterWorkflowAgent)
     agent.dossier_research_agent = object()

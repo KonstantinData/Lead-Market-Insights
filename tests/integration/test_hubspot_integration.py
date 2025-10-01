@@ -6,11 +6,6 @@ import asyncio
 import math
 import time
 
-import asyncio
-import math
-import time
-from typing import Dict, List
-
 import pytest
 
 from config.config import Settings

@@ -4,7 +4,15 @@ from typing import Any, Dict, Optional
 try:  # Python 3.11+
     from builtins import ExceptionGroup  # type: ignore[attr-defined]
 except ImportError:  # pragma: no cover - Python 3.10 fallback
-    from types import ExceptionGroup  # type: ignore[attr-defined]
+    try:
+        from types import ExceptionGroup  # type: ignore[attr-defined]
+    except ImportError:  # pragma: no cover - minimal backport fallback
+        class ExceptionGroup(Exception):  # type: ignore[override]
+            """Simplified ExceptionGroup shim for Python 3.10 tests."""
+
+            def __init__(self, message: str, exceptions: Any) -> None:
+                super().__init__(message)
+                self.exceptions = list(exceptions)
 
 import pytest
 

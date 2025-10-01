@@ -29,3 +29,27 @@ def test_local_storage_agent_records_run(tmp_path):
     assert data[0]["run_id"] == "run-1"
     assert "log_path" in data[0]
     assert data[0]["log_path"].endswith("log.txt")
+
+
+def test_local_storage_agent_loads_audit_entries(tmp_path):
+    base_dir = tmp_path / "runs"
+    agent = LocalStorageAgent(base_dir)
+    run_dir = agent.create_run_directory("run-2")
+    audit_path = run_dir / "audit_log.jsonl"
+    audit_path.write_text("{}\ninvalid\n{\"foo\": 1}\n", encoding="utf-8")
+
+    entries = agent.load_audit_entries("run-2")
+
+    assert entries == [{}, {"foo": 1}]
+
+
+def test_local_storage_agent_failure_counters(tmp_path):
+    base_dir = tmp_path / "runs"
+    agent = LocalStorageAgent(base_dir)
+
+    assert agent.increment_failure_count("polling") == 1
+    assert agent.increment_failure_count("polling") == 2
+
+    agent.reset_failure_count("polling")
+
+    assert agent.increment_failure_count("polling") == 1

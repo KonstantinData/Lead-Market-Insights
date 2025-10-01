@@ -16,7 +16,7 @@ async def test_async_http_retries_on_http_error(monkeypatch, caplog):
     client = AsyncHTTP()
     request = httpx.Request("GET", "https://example.com")
     failures = [
-        httpx.HTTPError("boom", request=request),
+        httpx.RequestError("boom", request=request),
         httpx.Response(200, request=request),
     ]
     call_count = 0

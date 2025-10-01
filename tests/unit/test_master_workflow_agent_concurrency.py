@@ -1,6 +1,11 @@
 import asyncio
 from typing import Any, Dict, Optional
 
+try:  # Python 3.11+
+    ExceptionGroup
+except NameError:  # pragma: no cover - Python 3.10 fallback
+    from types import ExceptionGroup  # type: ignore[attr-defined]
+
 import pytest
 
 from agents.master_workflow_agent import MasterWorkflowAgent

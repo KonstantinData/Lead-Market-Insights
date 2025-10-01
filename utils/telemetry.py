@@ -8,24 +8,23 @@ from opentelemetry import trace, metrics
 
 logger = logging.getLogger(__name__)
 
+TELEMETRY_AVAILABLE = True
+
 try:
     from opentelemetry.sdk.resources import Resource
-    from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
+    from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
     from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-    from opentelemetry.sdk.metrics import MeterProvider as SdkMeterProvider
+    from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
         OTLPMetricExporter,
     )
     from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 except ImportError:
     # Telemetrie-Pakete fehlen – stiller Rückzug
-    SdkTracerProvider = object  # type: ignore
-    SdkMeterProvider = object  # type: ignore
-
-    def setup_telemetry(*_, **__):  # type: ignore
-        logger.info("Telemetry dependencies not installed; skipping.")
-        return
+    TELEMETRY_AVAILABLE = False
+    TracerProvider = object  # type: ignore[assignment]
+    MeterProvider = object  # type: ignore[assignment]
 
 
 DISABLE_VALUES = {"none", "0", "false", "off"}
@@ -55,6 +54,26 @@ def _is_disabled() -> bool:
     return False
 
 
+def _current_tracer_provider() -> object | None:
+    getter = getattr(trace, "get_tracer_provider", None)
+    if callable(getter):
+        try:
+            return getter()
+        except Exception:  # pragma: no cover - defensive fallback
+            return None
+    return None
+
+
+def _current_meter_provider() -> object | None:
+    getter = getattr(metrics, "get_meter_provider", None)
+    if callable(getter):
+        try:
+            return getter()
+        except Exception:  # pragma: no cover - defensive fallback
+            return None
+    return None
+
+
 def setup_telemetry(service_name: str = "leadmi") -> None:
     """
     Initialisiert OTLP Tracing + Metrics mit kurzer Timeout-Konfiguration.
@@ -63,6 +82,10 @@ def setup_telemetry(service_name: str = "leadmi") -> None:
     - Erkennt bereits gesetzte Provider.
     - Bei Fehler: einmalige WARN, keine Exception nach oben.
     """
+    if not TELEMETRY_AVAILABLE:
+        logger.info("Telemetry dependencies not installed; skipping.")
+        return
+
     if _is_disabled():
         logger.info("Telemetry disabled via environment flags.")
         return
@@ -71,10 +94,13 @@ def setup_telemetry(service_name: str = "leadmi") -> None:
         logger.debug("Telemetry already initialized (env flag).")
         return
 
-    existing_tp = trace.get_tracer_provider()
-    existing_mp = metrics.get_meter_provider()
-    if isinstance(existing_tp, SdkTracerProvider) or isinstance(
-        existing_mp, SdkMeterProvider
+    existing_tp = _current_tracer_provider()
+    existing_mp = _current_meter_provider()
+    tracer_type = TracerProvider if isinstance(TracerProvider, type) else None
+    meter_type = MeterProvider if isinstance(MeterProvider, type) else None
+
+    if (tracer_type and isinstance(existing_tp, tracer_type)) or (
+        meter_type and isinstance(existing_mp, meter_type)
     ):
         logger.debug("Telemetry providers already present; skipping re-init.")
         os.environ["LEADMI_TELEMETRY_INITIALIZED"] = "1"
@@ -87,7 +113,7 @@ def setup_telemetry(service_name: str = "leadmi") -> None:
     try:
         resource = Resource.create({"service.name": service_name})
 
-        tp = SdkTracerProvider(resource=resource)
+        tp = TracerProvider(resource=resource)
         tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(timeout=2)))
         trace.set_tracer_provider(tp)
 
@@ -95,7 +121,7 @@ def setup_telemetry(service_name: str = "leadmi") -> None:
             OTLPMetricExporter(timeout=2),
             export_interval_millis=60000,
         )
-        mp = SdkMeterProvider(resource=resource, metric_readers=[metric_reader])
+        mp = MeterProvider(resource=resource, metric_readers=[metric_reader])
         metrics.set_meter_provider(mp)
 
         # Unterdrücke OTLP-Exporter-Rauschen, wenn Collector nicht da

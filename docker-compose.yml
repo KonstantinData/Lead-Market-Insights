@@ -20,7 +20,7 @@ services:
       - otel-collector
     environment:
       SETTINGS_SKIP_DOTENV: "1"
-      # Application-specific keys (still passed through from host if defined):
+      APP_ENV: "dev"                       # <— added so collector resource processor can inject deployment.environment
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_API_BASE: ${OPENAI_API_BASE:-https://api.openai.com}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
@@ -31,11 +31,8 @@ services:
       HUBSPOT_ACCESS_TOKEN: ${HUBSPOT_ACCESS_TOKEN}
       HUBSPOT_API_BASE_URL: ${HUBSPOT_API_BASE_URL:-https://api.hubapi.com}
 
-      # Telemetry activation flags:
       ENABLE_OTEL: "true"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
-
-      # Optional future: APP_ENV: "dev"
 
     volumes:
       - ./log_storage:/app/log_storage

@@ -19,7 +19,7 @@ processors:
         value: ${APP_ENV}
 
 exporters:
-  # Replace this with your real backend exporter later (e.g. otlp -> SaaS / Tempo / Jaeger)
+  # Replace this with your real backend exporter later (e.g., otlp -> SaaS / Tempo / Jaeger)
   logging:
     loglevel: info
 

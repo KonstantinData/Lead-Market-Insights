@@ -34,7 +34,11 @@ from config.watcher import LlmConfigurationWatcher
 from logs.workflow_log_manager import WorkflowLogManager
 from utils import concurrency
 from utils.audit_log import AuditLog
-from utils.observability import observe_operation, record_hitl_outcome, record_trigger_match
+from utils.observability import (
+    observe_operation,
+    record_hitl_outcome,
+    record_trigger_match,
+)
 from utils.pii import mask_pii
 from utils.trigger_loader import load_trigger_words
 
@@ -130,7 +134,9 @@ class MasterWorkflowAgent:
     def initialize_run(self, run_id: Optional[str] = None) -> None:
         """Set up run-specific artefacts such as log files and audit logs."""
 
-        self.run_id = run_id or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+        self.run_id = run_id or datetime.now(timezone.utc).strftime(
+            "%Y-%m-%dT%H-%M-%SZ"
+        )
         self.run_directory = self.storage_agent.create_run_directory(self.run_id)
         self.log_file_path = self.run_directory / "polling_trigger.log"
         self.log_filename = str(self.log_file_path)
@@ -141,9 +147,7 @@ class MasterWorkflowAgent:
             self.human_agent.set_audit_log(self.audit_log)
         if hasattr(self.human_agent, "set_run_context"):
             try:
-                self.human_agent.set_run_context(
-                    self.run_id, self.workflow_log_manager
-                )
+                self.human_agent.set_run_context(self.run_id, self.workflow_log_manager)
             except Exception:  # pragma: no cover - defensive guard
                 logger.exception("Failed to set run context on human agent")
 
@@ -231,7 +235,10 @@ class MasterWorkflowAgent:
                     if hard_triggers:
                         extraction_input["hard_triggers"] = hard_triggers
                     for field in ("summary", "description"):
-                        if field not in extraction_input and context.get(field) is not None:
+                        if (
+                            field not in extraction_input
+                            and context.get(field) is not None
+                        ):
                             extraction_input[field] = context.get(field)
                 extracted = await self.extraction_agent.extract(extraction_input)
             event_result["extraction"] = extracted
@@ -425,7 +432,9 @@ class MasterWorkflowAgent:
         # Delegates to trigger agent, checks both summary and description
         return await self.trigger_agent.check(event)
 
-    async def _send_to_crm_agent(self, event: Dict[str, Any], info: Dict[str, Any]) -> None:
+    async def _send_to_crm_agent(
+        self, event: Dict[str, Any], info: Dict[str, Any]
+    ) -> None:
         await self.crm_agent.send(event, info)
 
     def _create_research_agent(
@@ -750,7 +759,9 @@ class MasterWorkflowAgent:
             try:
                 audit_entries = self.audit_log.load_entries()
             except Exception:  # pragma: no cover - defensive guard for corrupted log
-                logger.warning("Unable to read audit log at %s during finalization", audit_path)
+                logger.warning(
+                    "Unable to read audit log at %s during finalization", audit_path
+                )
 
         metadata = {
             "log_size_bytes": log_size,
@@ -843,7 +854,9 @@ class MasterWorkflowAgent:
                 error=error,
             )
         except Exception:  # pragma: no cover - defensive guard
-            logger.exception("Failed to append research workflow log for %s", agent_name)
+            logger.exception(
+                "Failed to append research workflow log for %s", agent_name
+            )
 
     def _resolve_dossier_status(self, response: Dict[str, Any]) -> str:
         status = response.get("status")
@@ -918,7 +931,9 @@ class MasterWorkflowAgent:
     def _apply_llm_settings(self, current_settings) -> None:
         """Copy the latest LLM settings from the shared settings object."""
 
-        self.llm_confidence_thresholds = dict(current_settings.llm_confidence_thresholds)
+        self.llm_confidence_thresholds = dict(
+            current_settings.llm_confidence_thresholds
+        )
         self.llm_cost_caps = dict(current_settings.llm_cost_caps)
         self.llm_retry_budgets = dict(current_settings.llm_retry_budgets)
         logger.debug(

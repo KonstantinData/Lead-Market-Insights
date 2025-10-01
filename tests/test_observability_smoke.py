@@ -178,7 +178,10 @@ async def test_observability_records_metrics_and_traces(
             str(tmp_path / "similar_results.json")
         )
 
-        await orchestrator.run()
+        try:
+            await orchestrator.run()
+        finally:
+            await orchestrator.shutdown()
 
         assert crm_agent.sent, "CRM agent should have been invoked"
 

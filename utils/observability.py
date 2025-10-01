@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import contextvars
 import logging
@@ -351,6 +352,63 @@ def record_cost_limit_event(
 
 def get_current_run_id() -> Optional[str]:
     return _run_id_var.get()
+
+
+async def flush_telemetry(timeout: float = 5.0) -> None:
+    """Flush pending telemetry exports and shut down providers."""
+
+    if not _configured:
+        return
+
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _flush_providers, float(timeout))
+
+
+def _flush_providers(timeout: float) -> None:
+    global _configured, _tracer_provider, _meter_provider  # noqa: PLW0603
+
+    if timeout <= 0:
+        timeout = 5.0
+
+    timeout_millis = int(timeout * 1000)
+
+    if _tracer_provider is not None:
+        closer = getattr(_tracer_provider, "force_flush", None)
+        if callable(closer):
+            try:
+                closer(timeout_millis=timeout_millis)
+            except TypeError:
+                closer()
+            except Exception:  # pragma: no cover - defensive guard
+                _logger.exception("Failed to flush tracer provider")
+
+        shutdown = getattr(_tracer_provider, "shutdown", None)
+        if callable(shutdown):
+            try:
+                shutdown()
+            except Exception:  # pragma: no cover - defensive guard
+                _logger.exception("Failed to shutdown tracer provider")
+
+    if _meter_provider is not None:
+        force_flush = getattr(_meter_provider, "force_flush", None)
+        if callable(force_flush):
+            try:
+                force_flush(timeout_millis=timeout_millis)
+            except TypeError:
+                force_flush()
+            except Exception:  # pragma: no cover - defensive guard
+                _logger.exception("Failed to flush meter provider")
+
+        shutdown = getattr(_meter_provider, "shutdown", None)
+        if callable(shutdown):
+            try:
+                shutdown()
+            except Exception:  # pragma: no cover - defensive guard
+                _logger.exception("Failed to shutdown meter provider")
+
+    _configured = False
+    _tracer_provider = None
+    _meter_provider = None
 
 
 def _record_run_completion(status: str, duration_ms: float) -> None:

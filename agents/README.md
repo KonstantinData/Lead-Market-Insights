@@ -32,14 +32,16 @@ surface area that each workflow stage must expose:
 |-----------|-----------------|------------------------|
 | `BasePollingAgent` | `poll()` *(async)*, `poll_contacts()` *(async)* | [`EventPollingAgent`](event_polling_agent.py) |
 | `BaseTriggerAgent` | `check(event)` *(async)* | [`TriggerDetectionAgent`](trigger_detection_agent.py) |
-| `BaseExtractionAgent` | `extract(event)` | [`ExtractionAgent`](extraction_agent.py) |
-| `BaseHumanAgent` | `request_info(event, extracted)`, `request_dossier_confirmation(event, info)` | [`HumanInLoopAgent`](human_in_loop_agent.py) |
-| `BaseCrmAgent` | `send(event, info)` | [`LoggingCrmAgent`](crm_agent.py) |
-| `BaseResearchAgent` | `run(trigger)` | [`InternalResearchAgent`](internal_research_agent.py), [`DossierResearchAgent`](dossier_research_agent.py), [`IntLvl1SimilarCompaniesAgent`](int_lvl_1_agent.py) |
+| `BaseExtractionAgent` | `extract(event)` *(async)* | [`ExtractionAgent`](extraction_agent.py) |
+| `BaseHumanAgent` | `request_info(event, extracted)` *(async)*, `request_dossier_confirmation(event, info)` *(async)* | [`HumanInLoopAgent`](human_in_loop_agent.py) |
+| `BaseCrmAgent` | `send(event, info)` *(async)* | [`LoggingCrmAgent`](crm_agent.py) |
+| `BaseResearchAgent` | `run(trigger)` *(async)* | [`InternalResearchAgent`](internal_research_agent.py), [`DossierResearchAgent`](dossier_research_agent.py), [`IntLvl1SimilarCompaniesAgent`](int_lvl_1_agent.py) |
 
 Concrete implementations register themselves with the registry defined in
 [`factory.py`](factory.py) using the `@register_agent` decorator. The factory supports naming
 multiple variants per interface and exposes `create_agent()` to instantiate them on demand.
+
+> **Async-first contract:** Alle Agents implementieren async Interfaces. Keine sync Brücken.
 
 ## Selecting agents via configuration
 

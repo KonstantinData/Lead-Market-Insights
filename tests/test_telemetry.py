@@ -1,17 +1,62 @@
 import importlib.util
-import pytest
 import logging
-import os
+import sys
+import types
 
-# Skip, wenn Exporter-Modul fehlt (robust gegen fehlende Dev-Abhängigkeiten)
-if (
-    importlib.util.find_spec("opentelemetry.exporter.otlp.proto.http.trace_exporter")
-    is None
-):
-    pytest.skip(
-        "OTLP exporter not installed; skipping telemetry tests.",
-        allow_module_level=True,
+
+def _ensure_module(module_name: str) -> types.ModuleType:
+    """Return an existing module or create a lightweight placeholder."""
+
+    module = sys.modules.get(module_name)
+    if module is not None:
+        return module
+
+    module = types.ModuleType(module_name)
+    sys.modules[module_name] = module
+    return module
+
+
+def _install_http_exporter_stub() -> None:
+    """Provide a minimal OTLP HTTP exporter so tests can run without the extra package."""
+
+    full_name = "opentelemetry.exporter.otlp.proto.http.trace_exporter"
+
+    # create the full module hierarchy if required
+    parts = full_name.split(".")
+    for idx in range(1, len(parts)):
+        parent_name = ".".join(parts[:idx])
+        child_name = parts[idx]
+        parent = _ensure_module(parent_name)
+        child_module = _ensure_module(".".join(parts[: idx + 1]))
+        if not hasattr(parent, child_name):
+            setattr(parent, child_name, child_module)
+
+    trace_exporter_module = _ensure_module(full_name)
+
+    if hasattr(trace_exporter_module, "OTLPSpanExporter"):
+        return
+
+    class _DummyExporter:  # pragma: no cover - trivial class
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+
+        def export(self, *args, **kwargs):
+            return None
+
+    trace_exporter_module.OTLPSpanExporter = _DummyExporter  # type: ignore[attr-defined]
+
+
+# Skip-Logik ersetzen: falls der HTTP-Exporter fehlt, stellen wir einen Stub bereit.
+try:
+    spec = importlib.util.find_spec(
+        "opentelemetry.exporter.otlp.proto.http.trace_exporter"
     )
+except ModuleNotFoundError:
+    spec = None
+
+if spec is None:
+    _install_http_exporter_stub()
 
 from utils.telemetry import setup_telemetry
 

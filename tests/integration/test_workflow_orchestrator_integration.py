@@ -88,7 +88,10 @@ async def test_backend_failure_triggers_alert(
         alert_agent=alert_agent, master_agent=master_agent, failure_threshold=3
     )
 
-    await orchestrator.run()
+    try:
+        await orchestrator.run()
+    finally:
+        await orchestrator.shutdown()
 
     assert alert_agent.calls
     call = alert_agent.calls[-1]
@@ -115,8 +118,11 @@ async def test_repeated_failures_escalate_to_critical(
         alert_agent=alert_agent, master_agent=master_agent, failure_threshold=2
     )
 
-    await orchestrator.run()
-    await orchestrator.run()
+    try:
+        await orchestrator.run()
+        await orchestrator.run()
+    finally:
+        await orchestrator.shutdown()
 
     assert len(alert_agent.calls) == 2
     first, second = alert_agent.calls
@@ -263,7 +269,10 @@ async def test_orchestrator_records_research_artifacts_and_email_details(
     master_agent = RecordingMasterAgent(log_dir=log_dir, results=research_results)
 
     orchestrator = WorkflowOrchestrator(master_agent=master_agent)
-    await orchestrator.run()
+    try:
+        await orchestrator.run()
+    finally:
+        await orchestrator.shutdown()
 
     run_id = orchestrator._last_run_id
     assert run_id is not None

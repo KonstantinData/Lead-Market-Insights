@@ -23,7 +23,11 @@ async def _async_main() -> None:
     )
 
     orchestrator = WorkflowOrchestrator()
-    await orchestrator.run()
+    orchestrator.install_signal_handlers(asyncio.get_running_loop())
+    try:
+        await orchestrator.run()
+    finally:
+        await orchestrator.shutdown()
 
 
 def main() -> None:

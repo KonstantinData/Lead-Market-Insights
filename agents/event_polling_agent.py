@@ -111,3 +111,15 @@ class EventPollingAgent(BasePollingAgent):
         except Exception as e:
             logger.error(f"Google Contacts polling failed: {e}")
             raise
+
+    async def aclose(self) -> None:
+        """Release underlying integration clients."""
+
+        calendar_close = getattr(self.calendar, "aclose", None)
+        if callable(calendar_close):
+            await calendar_close()
+
+        if self.contacts is not None:
+            contacts_close = getattr(self.contacts, "aclose", None)
+            if callable(contacts_close):
+                await contacts_close()

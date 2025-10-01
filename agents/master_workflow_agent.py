@@ -1,5 +1,6 @@
 """MasterWorkflowAgent: Pure logic agent for polling and event-processing."""
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -873,6 +874,46 @@ class MasterWorkflowAgent:
                 event_id,
                 details,
             )
+
+    async def aclose(self) -> None:
+        """Release child agents and background watchers."""
+
+        async def _close_agent(name: str, agent: Optional[Any]) -> None:
+            if agent is None:
+                return
+            closer = getattr(agent, "aclose", None)
+            if callable(closer):
+                try:
+                    await closer()
+                except Exception:  # pragma: no cover - defensive guard
+                    logger.exception("Failed to close %s agent", name)
+
+        agents_to_close = {
+            "polling": getattr(self, "event_agent", None),
+            "trigger": getattr(self, "trigger_agent", None),
+            "extraction": getattr(self, "extraction_agent", None),
+            "human": getattr(self, "human_agent", None),
+            "crm": getattr(self, "crm_agent", None),
+            "internal_research": getattr(self, "internal_research_agent", None),
+            "dossier_research": getattr(self, "dossier_research_agent", None),
+            "similar_companies": getattr(self, "similar_companies_agent", None),
+        }
+
+        await asyncio.gather(
+            *(
+                _close_agent(name, agent)
+                for name, agent in agents_to_close.items()
+                if agent is not None
+            ),
+            return_exceptions=True,
+        )
+
+        watcher = getattr(self, "_config_watcher", None)
+        if watcher is not None:
+            try:
+                watcher.stop()
+            except Exception:  # pragma: no cover - defensive guard
+                logger.exception("Failed to stop configuration watcher")
 
     def _apply_llm_settings(self, current_settings) -> None:
         """Copy the latest LLM settings from the shared settings object."""

@@ -48,7 +48,10 @@ async def test_orchestrator_emits_alert_on_handled_exception():
         master_agent=master_agent,
     )
 
-    await orchestrator.run()
+    try:
+        await orchestrator.run()
+    finally:
+        await orchestrator.shutdown()
 
     assert len(alert_agent.calls) == 1
     call = alert_agent.calls[0]
@@ -66,8 +69,11 @@ async def test_orchestrator_escalates_alert_on_repeated_failures():
         failure_threshold=2,
     )
 
-    await orchestrator.run()
-    await orchestrator.run()
+    try:
+        await orchestrator.run()
+        await orchestrator.run()
+    finally:
+        await orchestrator.shutdown()
 
     assert len(alert_agent.calls) == 2
     first, second = alert_agent.calls

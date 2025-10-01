@@ -250,7 +250,7 @@ async def test_send_existing_report_email_success(tmp_path, monkeypatch):
     agent = _make_agent(tmp_path, email_agent=email_agent)
 
     monkeypatch.setattr(agent, "_render_email_template", lambda name, ctx, optional=False: f"body-{name}")
-    monkeypatch.setattr(agent, "_build_crm_portal_link", lambda *sources: "https://crm" )
+    monkeypatch.setattr(agent, "_build_crm_portal_link", lambda *sources: "https://crm")
 
     result = await agent._send_existing_report_email(
         {"creator_email": "user@example.com", "company_name": "Acme"},

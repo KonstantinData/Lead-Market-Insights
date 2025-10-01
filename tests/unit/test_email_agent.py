@@ -15,7 +15,10 @@ def _install_dummy_async_smtp(monkeypatch: pytest.MonkeyPatch, sent_messages: Li
     monkeypatch.setattr("agents.email_agent.send_email_ssl", fake_send_email_ssl)
 
 
-def test_email_agent_attaches_pdfs_and_links(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_email_agent_attaches_pdfs_and_links(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     attachment = tmp_path / "report.pdf"
     attachment.write_bytes(b"%PDF-1.4 test")
 
@@ -25,7 +28,7 @@ def test_email_agent_attaches_pdfs_and_links(tmp_path: Path, monkeypatch: pytest
     agent = EmailAgent("smtp.example.com", 465, "user", "pass", "sender@example.com")
     portal_link = "https://crm.example.com/attachments/run-123/report"
 
-    result = agent.send_email(
+    result = await agent.send_email_async(
         "recipient@example.com",
         "Subject",
         "Body text",
@@ -52,13 +55,16 @@ def test_email_agent_attaches_pdfs_and_links(tmp_path: Path, monkeypatch: pytest
     assert portal_link in html_part.get_content()
 
 
-def test_email_agent_handles_missing_attachments_gracefully(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_email_agent_handles_missing_attachments_gracefully(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     sent_messages: List[str] = []
     _install_dummy_async_smtp(monkeypatch, sent_messages)
 
     agent = EmailAgent("smtp.example.com", 465, "user", "pass", "sender@example.com")
 
-    result = agent.send_email(
+    result = await agent.send_email_async(
         "recipient@example.com",
         "Subject",
         "Simple body",

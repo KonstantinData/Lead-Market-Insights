@@ -106,7 +106,7 @@ class InternalResearchAgent(BaseResearchAgent):
         )
 
         if missing_required:
-            return self._handle_missing_fields(
+            return await self._handle_missing_fields(
                 trigger, payload, run_id, event_id, missing_required, missing_optional
             )
 
@@ -153,7 +153,7 @@ class InternalResearchAgent(BaseResearchAgent):
                 event_id,
             )
 
-        action, email_status = self._determine_next_action(
+        action, email_status = await self._determine_next_action(
             trigger, payload, payload_result, run_id, event_id
         )
 
@@ -278,7 +278,7 @@ class InternalResearchAgent(BaseResearchAgent):
         )
         return missing_required, missing_optional
 
-    def _handle_missing_fields(
+    async def _handle_missing_fields(
         self,
         trigger: Mapping[str, Any],
         payload: Mapping[str, Any],
@@ -298,7 +298,7 @@ class InternalResearchAgent(BaseResearchAgent):
         self._log_workflow(run_id, "missing_required_fields", message, event_id)
         self.logger.info(message)
 
-        reminder_sent = self._dispatch_missing_field_reminder(
+        reminder_sent = await self._dispatch_missing_field_reminder(
             payload, run_id, event_id, missing_required, missing_optional
         )
 
@@ -331,7 +331,7 @@ class InternalResearchAgent(BaseResearchAgent):
             },
         }
 
-    def _dispatch_missing_field_reminder(
+    async def _dispatch_missing_field_reminder(
         self,
         payload: Mapping[str, Any],
         run_id: str,
@@ -362,7 +362,7 @@ class InternalResearchAgent(BaseResearchAgent):
             run_id=run_id,
         )
         try:
-            return bool(reminder.send_reminder(recipient, subject, body))
+            return bool(await reminder.send_reminder(recipient, subject, body))
         except Exception as exc:  # pragma: no cover - defensive logging
             self._log_workflow(
                 run_id,
@@ -445,7 +445,7 @@ class InternalResearchAgent(BaseResearchAgent):
             }
         ]
 
-    def _determine_next_action(
+    async def _determine_next_action(
         self,
         trigger: Mapping[str, Any],
         payload: Mapping[str, Any],
@@ -457,7 +457,7 @@ class InternalResearchAgent(BaseResearchAgent):
         last_report_date = payload_result.get("last_report_date")
 
         if exists and last_report_date:
-            email_status = self._send_existing_report_email(
+            email_status = await self._send_existing_report_email(
                 payload,
                 payload_result,
                 run_id,
@@ -476,7 +476,7 @@ class InternalResearchAgent(BaseResearchAgent):
         )
         return action, None
 
-    def _send_existing_report_email(
+    async def _send_existing_report_email(
         self,
         payload: Mapping[str, Any],
         payload_result: Mapping[str, Any],
@@ -524,7 +524,10 @@ class InternalResearchAgent(BaseResearchAgent):
             attachment_links = [portal_link]
 
         try:
-            sent = self.email_agent.send_email(
+            send_email = getattr(self.email_agent, "send_email_async", None)
+            if not callable(send_email):
+                raise AttributeError("email_agent must expose 'send_email_async'")
+            sent = await send_email(
                 recipient,
                 subject,
                 body,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -13,7 +14,7 @@ class DummyEmailClient:
     def __init__(self) -> None:
         self.sent = []
 
-    def send_email(self, recipient: str, subject: str, body: str) -> None:
+    async def send_email_async(self, recipient: str, subject: str, body: str) -> None:
         self.sent.append((recipient, subject, body))
 
 
@@ -37,7 +38,8 @@ def test_add_channel_validates_type():
         agent.add_channel({"type": "pagerduty"})
 
 
-def test_send_alert_dispatches_to_all_channels(monkeypatch, email_channel):
+@pytest.mark.asyncio
+async def test_send_alert_dispatches_to_all_channels(monkeypatch, email_channel):
     client, channel = email_channel
     slack_payloads = []
     webhook_payloads = []
@@ -61,6 +63,7 @@ def test_send_alert_dispatches_to_all_channels(monkeypatch, email_channel):
     )
 
     agent.send_alert("Backend down", AlertSeverity.ERROR, context={"service": "crm"})
+    await asyncio.sleep(0)
 
     assert client.sent == [
         (
@@ -77,7 +80,8 @@ def test_send_alert_dispatches_to_all_channels(monkeypatch, email_channel):
     }
 
 
-def test_send_alert_uses_custom_dispatcher(email_channel):
+@pytest.mark.asyncio
+async def test_send_alert_uses_custom_dispatcher(email_channel):
     client, channel = email_channel
     dispatched = []
 
@@ -89,6 +93,7 @@ def test_send_alert_uses_custom_dispatcher(email_channel):
 
     agent = AlertAgent([channel])
     agent.send_alert("Check systems", AlertSeverity.WARNING)
+    await asyncio.sleep(0)
 
     assert client.sent == []
     assert dispatched == [("Check systems", AlertSeverity.WARNING, {"severity": "warning"})]

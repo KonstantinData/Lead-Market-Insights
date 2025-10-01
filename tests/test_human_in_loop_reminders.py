@@ -1,6 +1,8 @@
-import time
+import asyncio
 from datetime import timedelta
 from typing import Any, Dict
+
+import pytest
 
 from agents.human_in_loop_agent import HumanInLoopAgent
 from logs.workflow_log_manager import WorkflowLogManager
@@ -32,12 +34,15 @@ class FakeBackend:
         )
         return {"status": "pending", "details": {"note": "Awaiting organizer"}}
 
-    def send_email(self, recipient: str, subject: str, body: str, **_: Any) -> bool:
+    async def send_email_async(
+        self, recipient: str, subject: str, body: str, **_: Any
+    ) -> bool:
         self.sent_emails.append({"recipient": recipient, "subject": subject, "body": body})
         return True
 
 
-def test_pending_confirmation_triggers_reminders(tmp_path) -> None:
+@pytest.mark.asyncio
+async def test_pending_confirmation_triggers_reminders(tmp_path) -> None:
     backend = FakeBackend()
     policy = HumanInLoopAgent.DossierReminderPolicy(
         initial_delay=timedelta(seconds=0),
@@ -61,7 +66,7 @@ def test_pending_confirmation_triggers_reminders(tmp_path) -> None:
     response = agent.request_dossier_confirmation(event, info)
     assert response["status"] == "pending"
 
-    time.sleep(0.4)
+    await asyncio.sleep(0.4)
 
     assert backend.sent_emails, "Reminders should trigger email sends"
     assert backend.sent_emails[0]["subject"].startswith("Reminder:")

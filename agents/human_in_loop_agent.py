@@ -449,10 +449,10 @@ class HumanInLoopAgent(BaseHumanAgent):
         backend = self.communication_backend
         if backend is None:
             return None
-        if hasattr(backend, "send_email"):
+        if hasattr(backend, "send_email_async"):
             return backend
         candidate = getattr(backend, "email_agent", None)
-        if candidate is not None and hasattr(candidate, "send_email"):
+        if candidate is not None and hasattr(candidate, "send_email_async"):
             return candidate
         return None
 

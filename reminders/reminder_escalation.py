@@ -1,23 +1,37 @@
+import asyncio
 import logging
-import threading
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, Optional, Set
 
 
 class ReminderEscalation:
     """Module for sending reminders and escalation notifications."""
 
-    def __init__(self, email_agent, workflow_log_manager=None, run_id=None):
+    def __init__(
+        self,
+        email_agent,
+        workflow_log_manager=None,
+        run_id=None,
+        *,
+        task_scheduler: Optional[Callable[[asyncio.Task[Any]], asyncio.Task[Any]]] = None,
+    ):
         self.email_agent = email_agent
         self.workflow_log_manager = workflow_log_manager
         self.run_id = run_id
-        self._timers: List[threading.Timer] = []
-        self._lock = threading.Lock()
+        self._task_scheduler = task_scheduler
+        self._tasks: Set[asyncio.Task[Any]] = set()
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-    def send_reminder(self, recipient, subject, body, *, metadata: Optional[Dict[str, Any]] = None):
+    async def send_reminder(
+        self,
+        recipient,
+        subject,
+        body,
+        *,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         if not self.email_agent:
             self._append_log(
                 "reminder_skipped",
@@ -28,7 +42,10 @@ class ReminderEscalation:
             return False
 
         try:
-            sent = self.email_agent.send_email(recipient, subject, body)
+            send_email = getattr(self.email_agent, "send_email_async", None)
+            if not callable(send_email):
+                raise AttributeError("email_agent must expose 'send_email_async'")
+            sent = await send_email(recipient, subject, body)
             step = "reminder_sent" if sent else "reminder_failed"
             error = None if sent else "send_failed"
             self._append_log(
@@ -37,7 +54,7 @@ class ReminderEscalation:
                 metadata=metadata,
                 error=error,
             )
-            return sent
+            return bool(sent)
         except Exception as exc:  # pragma: no cover - defensive logging
             logging.error("Error sending reminder: %s", exc)
             self._append_log(
@@ -48,14 +65,14 @@ class ReminderEscalation:
             )
             raise
 
-    def escalate(
+    async def escalate(
         self,
         admin_email,
         subject,
         body,
         *,
         metadata: Optional[Dict[str, Any]] = None,
-    ):
+    ) -> bool:
         if not self.email_agent:
             self._append_log(
                 "escalation_skipped",
@@ -66,7 +83,10 @@ class ReminderEscalation:
             return False
 
         try:
-            sent = self.email_agent.send_email(admin_email, subject, body)
+            send_email = getattr(self.email_agent, "send_email_async", None)
+            if not callable(send_email):
+                raise AttributeError("email_agent must expose 'send_email_async'")
+            sent = await send_email(admin_email, subject, body)
             step = "escalation_sent" if sent else "escalation_failed"
             error = None if sent else "send_failed"
             self._append_log(
@@ -75,7 +95,7 @@ class ReminderEscalation:
                 metadata=metadata,
                 error=error,
             )
-            return sent
+            return bool(sent)
         except Exception as exc:  # pragma: no cover - defensive logging
             logging.error("Error sending escalation: %s", exc)
             self._append_log(
@@ -94,7 +114,7 @@ class ReminderEscalation:
         delay_seconds: float,
         *,
         metadata: Optional[Dict[str, Any]] = None,
-    ) -> threading.Timer:
+    ) -> asyncio.Task[bool]:
         return self._schedule_action(
             "reminder",
             lambda: self.send_reminder(recipient, subject, body, metadata=metadata),
@@ -112,7 +132,7 @@ class ReminderEscalation:
         delay_seconds: float,
         *,
         metadata: Optional[Dict[str, Any]] = None,
-    ) -> threading.Timer:
+    ) -> asyncio.Task[bool]:
         return self._schedule_action(
             "escalation",
             lambda: self.escalate(admin_email, subject, body, metadata=metadata),
@@ -123,11 +143,10 @@ class ReminderEscalation:
         )
 
     def cancel_pending(self) -> None:
-        with self._lock:
-            timers = list(self._timers)
-            self._timers.clear()
-        for timer in timers:
-            timer.cancel()
+        tasks = list(self._tasks)
+        self._tasks.clear()
+        for task in tasks:
+            task.cancel()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -135,12 +154,12 @@ class ReminderEscalation:
     def _schedule_action(
         self,
         action: str,
-        sender: Callable[[], Any],
+        sender: Callable[[], Awaitable[bool]],
         delay_seconds: float,
         recipient: str,
         subject: str,
         metadata: Optional[Dict[str, Any]],
-    ) -> threading.Timer:
+    ) -> asyncio.Task[bool]:
         metadata = dict(metadata or {})
         due_time = datetime.now(timezone.utc) + timedelta(seconds=max(delay_seconds, 0))
         self._append_log(
@@ -149,26 +168,39 @@ class ReminderEscalation:
             metadata=metadata,
         )
 
-        def _execute() -> None:
+        async def _execute() -> bool:
             try:
-                sender()
-            finally:
-                self._unregister_timer(timer)
+                await asyncio.sleep(max(delay_seconds, 0))
+                return await sender()
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logging.error("Scheduled %s failed for %s: %s", action, recipient, exc)
+                raise
 
-        timer = threading.Timer(max(delay_seconds, 0), _execute)
-        timer.daemon = True
-        self._register_timer(timer)
-        timer.start()
-        return timer
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError as exc:  # pragma: no cover - defensive guard
+            raise RuntimeError(
+                "ReminderEscalation scheduling requires an active asyncio event loop"
+            ) from exc
 
-    def _register_timer(self, timer: threading.Timer) -> None:
-        with self._lock:
-            self._timers.append(timer)
+        task = loop.create_task(_execute())
+        tracked = self._register_task(task)
+        return tracked
 
-    def _unregister_timer(self, timer: threading.Timer) -> None:
-        with self._lock:
-            if timer in self._timers:
-                self._timers.remove(timer)
+    def _register_task(self, task: asyncio.Task[Any]) -> asyncio.Task[Any]:
+        tracked = task
+        if self._task_scheduler:
+            try:
+                scheduled = self._task_scheduler(task)
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logging.error("Task scheduler failed: %s", exc)
+            else:
+                if scheduled is not None:
+                    tracked = scheduled
+
+        self._tasks.add(tracked)
+        tracked.add_done_callback(self._tasks.discard)
+        return tracked
 
     def _append_log(
         self,

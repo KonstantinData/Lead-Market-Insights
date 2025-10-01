@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
 import logging
 from enum import Enum
-from typing import Any, Callable, Iterable, List, Mapping, MutableMapping, Optional
+from typing import Any, Callable, Coroutine, Iterable, List, Mapping, MutableMapping, Optional, Set
 
 import requests
 
@@ -52,9 +53,12 @@ class AlertAgent:
         channels: Optional[Iterable[MutableMapping[str, Any]]] = None,
         *,
         logger: Optional[logging.Logger] = None,
+        task_scheduler: Optional[Callable[[asyncio.Task[Any]], asyncio.Task[Any]]] = None,
     ) -> None:
         self.logger = logger or logging.getLogger(self.__class__.__name__)
         self._channels: List[MutableMapping[str, Any]] = []
+        self._task_scheduler = task_scheduler
+        self._pending_tasks: Set[asyncio.Task[Any]] = set()
 
         if channels:
             for channel in channels:
@@ -146,7 +150,16 @@ class AlertAgent:
         body = body_template.format(**format_kwargs)
 
         for recipient in recipients:
-            client.send_email(recipient, subject, body)
+            send_async = getattr(client, "send_email_async", None)
+            if not callable(send_async):
+                raise AttributeError(
+                    "Email alert channel client must provide 'send_email_async'"
+                )
+            task = self._schedule_coroutine(send_async(recipient, subject, body))
+            if task is None:
+                self.logger.warning(
+                    "Failed to schedule email alert delivery for %s", recipient
+                )
 
     def _dispatch_slack(
         self,
@@ -198,3 +211,32 @@ class AlertAgent:
             **extra_headers,
         }
         requests.post(url, json=payload, headers=headers, timeout=5)
+
+    # ------------------------------------------------------------------
+    # Async helpers
+    # ------------------------------------------------------------------
+    def _schedule_coroutine(
+        self, coro: Coroutine[Any, Any, Any]
+    ) -> Optional[asyncio.Task[Any]]:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self.logger.error(
+                "Cannot dispatch email alert; no running asyncio event loop available"
+            )
+            return None
+
+        task = loop.create_task(coro)
+        tracked = task
+        if self._task_scheduler:
+            try:
+                scheduled = self._task_scheduler(task)
+            except Exception as exc:  # pragma: no cover - defensive logging
+                self.logger.error("Alert task scheduler failed: %s", exc)
+            else:
+                if scheduled is not None:
+                    tracked = scheduled
+
+        self._pending_tasks.add(tracked)
+        tracked.add_done_callback(self._pending_tasks.discard)
+        return tracked

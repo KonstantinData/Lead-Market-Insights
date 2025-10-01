@@ -1,6 +1,4 @@
-import asyncio
 import logging
-import warnings
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -69,43 +67,6 @@ class EmailAgent:
             logging.error(f"Failed to send email to {recipient}: {e}")
             return False
 
-    def send_email(
-        self,
-        recipient,
-        subject,
-        body,
-        html_body=None,
-        *,
-        attachments: Optional[Sequence[Union[str, Path]]] = None,
-        attachment_links: Optional[Iterable[str]] = None,
-    ):
-        """Synchronous facade kept for backwards compatibility."""
-
-        warnings.warn(
-            "EmailAgent.send_email is deprecated; use send_email_async instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-
-        try:
-            return asyncio.run(
-                self.send_email_async(
-                    recipient,
-                    subject,
-                    body,
-                    html_body=html_body,
-                    attachments=attachments,
-                    attachment_links=attachment_links,
-                )
-            )
-        except RuntimeError as exc:
-            if "asyncio.run() cannot be called" in str(exc):
-                raise RuntimeError(
-                    "EmailAgent.send_email cannot be invoked while an event loop is running. "
-                    "Call send_email_async instead."
-                ) from exc
-            raise
-
     def _normalize_links(self, links: Optional[Iterable[str]]) -> Sequence[str]:
         if not links:
             return []
@@ -168,4 +129,4 @@ class EmailAgent:
 # Example usage:
 # agent = EmailAgent("smtp.example.com", 465, "user", "pass",
 # "noreply@example.com")
-# agent.send_email("recipient@example.com", "Subject", "Body")
+# await agent.send_email_async("recipient@example.com", "Subject", "Body")

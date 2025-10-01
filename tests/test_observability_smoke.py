@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Dict, Iterable
 
 import json
@@ -9,6 +8,9 @@ import pytest
 pytest.importorskip("opentelemetry")
 pytest.importorskip("opentelemetry.sdk.metrics.export")
 pytest.importorskip("opentelemetry.sdk.trace.export")
+
+
+pytestmark = pytest.mark.asyncio
 
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from opentelemetry.sdk.trace.export import InMemorySpanExporter, SimpleSpanProcessor
@@ -97,7 +99,9 @@ def _collect_histogram_operations(metric) -> set[str]:
     return operations
 
 
-def test_observability_records_metrics_and_traces(monkeypatch, tmp_path):
+async def test_observability_records_metrics_and_traces(
+    monkeypatch, tmp_path, orchestrator_environment
+):
     monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
     metric_reader = InMemoryMetricReader()
     span_exporter = InMemorySpanExporter()
@@ -115,9 +119,9 @@ def test_observability_records_metrics_and_traces(monkeypatch, tmp_path):
     original_run_dir = settings.run_log_dir
     original_workflow_dir = settings.workflow_log_dir
     try:
-        settings.run_log_dir = tmp_path / "runs"
+        settings.run_log_dir = orchestrator_environment["run_dir"]
         settings.run_log_dir.mkdir(parents=True, exist_ok=True)
-        settings.workflow_log_dir = tmp_path / "workflows"
+        settings.workflow_log_dir = orchestrator_environment["workflow_dir"]
         settings.workflow_log_dir.mkdir(parents=True, exist_ok=True)
 
         event = {
@@ -174,7 +178,7 @@ def test_observability_records_metrics_and_traces(monkeypatch, tmp_path):
             str(tmp_path / "similar_results.json")
         )
 
-        asyncio.run(orchestrator.run())
+        await orchestrator.run()
 
         assert crm_agent.sent, "CRM agent should have been invoked"
 

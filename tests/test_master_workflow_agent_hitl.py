@@ -1,8 +1,14 @@
-import asyncio
+from __future__ import annotations
+
 from typing import Any, Dict, Iterable, List, Optional
+
+import pytest
 
 from agents.master_workflow_agent import MasterWorkflowAgent
 from config.config import settings
+
+
+pytestmark = pytest.mark.asyncio
 
 
 class DummyBackend:
@@ -86,13 +92,13 @@ def _prepare_agent(backend: DummyBackend) -> MasterWorkflowAgent:
     return agent
 
 
-def test_soft_trigger_dossier_request_accepted() -> None:
+async def test_soft_trigger_dossier_request_accepted() -> None:
     backend = DummyBackend(
         {"dossier_required": True, "details": {"note": "Yes, please prepare it."}}
     )
     agent = _prepare_agent(backend)
 
-    asyncio.run(agent.process_all_events())
+    await agent.process_all_events()
 
     assert len(agent._send_calls) == 1
     assert agent._send_calls[0]["info"]["company_name"] == "Example Corp"
@@ -103,20 +109,20 @@ def test_soft_trigger_dossier_request_accepted() -> None:
     assert "Soft trigger meeting" in first_request["subject"]
 
 
-def test_soft_trigger_dossier_request_declined() -> None:
+async def test_soft_trigger_dossier_request_declined() -> None:
     backend = DummyBackend(
         {"dossier_required": False, "details": {"note": "No dossier required."}}
     )
     agent = _prepare_agent(backend)
 
-    asyncio.run(agent.process_all_events())
+    await agent.process_all_events()
 
     assert agent._send_calls == []
     assert len(backend.requests) == 1
     assert backend.requests[0]["info"]["company_name"] == "Example Corp"
 
 
-def test_audit_log_records_dossier_acceptance(tmp_path) -> None:
+async def test_audit_log_records_dossier_acceptance(tmp_path) -> None:
     backend = DummyBackend(
         {"dossier_required": True, "details": {"note": "Yes, please prepare it."}}
     )
@@ -128,7 +134,7 @@ def test_audit_log_records_dossier_acceptance(tmp_path) -> None:
         settings.run_log_dir = temp_run_dir
         agent = _prepare_agent(backend)
 
-        asyncio.run(agent.process_all_events())
+        await agent.process_all_events()
 
         entries = agent.audit_log.load_entries()
         assert len(entries) == 2
@@ -148,7 +154,7 @@ def test_audit_log_records_dossier_acceptance(tmp_path) -> None:
         settings.run_log_dir = original_run_dir
 
 
-def test_audit_log_records_dossier_decline(tmp_path) -> None:
+async def test_audit_log_records_dossier_decline(tmp_path) -> None:
     backend = DummyBackend(
         {"dossier_required": False, "details": {"note": "No dossier required."}}
     )
@@ -160,7 +166,7 @@ def test_audit_log_records_dossier_decline(tmp_path) -> None:
         settings.run_log_dir = temp_run_dir
         agent = _prepare_agent(backend)
 
-        asyncio.run(agent.process_all_events())
+        await agent.process_all_events()
 
         entries = agent.audit_log.load_entries()
         assert len(entries) == 2
@@ -177,7 +183,7 @@ def test_audit_log_records_dossier_decline(tmp_path) -> None:
         settings.run_log_dir = original_run_dir
 
 
-def test_soft_trigger_dossier_request_pending(tmp_path) -> None:
+async def test_soft_trigger_dossier_request_pending(tmp_path) -> None:
     backend = DummyBackend({"status": "pending", "details": {"note": "Awaiting team"}})
     original_run_dir = settings.run_log_dir
     original_workflow_dir = settings.workflow_log_dir
@@ -191,7 +197,7 @@ def test_soft_trigger_dossier_request_pending(tmp_path) -> None:
         settings.workflow_log_dir = temp_workflow_dir
         agent = _prepare_agent(backend)
 
-        asyncio.run(agent.process_all_events())
+        await agent.process_all_events()
 
         assert agent._send_calls == []
         assert backend.requests, "Pending backend should receive request"
@@ -210,7 +216,7 @@ def test_soft_trigger_dossier_request_pending(tmp_path) -> None:
         settings.workflow_log_dir = original_workflow_dir
 
 
-def test_audit_log_records_missing_info_flow(tmp_path) -> None:
+async def test_audit_log_records_missing_info_flow(tmp_path) -> None:
     original_run_dir = settings.run_log_dir
     temp_run_dir = tmp_path / "runs"
     temp_run_dir.mkdir()
@@ -249,7 +255,7 @@ def test_audit_log_records_missing_info_flow(tmp_path) -> None:
 
         agent._send_to_crm_agent = _capture_send  # type: ignore[assignment]
 
-        asyncio.run(agent.process_all_events())
+        await agent.process_all_events()
 
         entries = agent.audit_log.load_entries()
         assert len(entries) == 2

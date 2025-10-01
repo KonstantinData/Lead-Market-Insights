@@ -1,10 +1,13 @@
-import asyncio
 import logging
 from typing import List
 
 import pytest
+from unittest.mock import AsyncMock
 
 from agents.event_polling_agent import EventPollingAgent
+
+
+pytestmark = pytest.mark.asyncio
 
 
 class DummyCalendar:
@@ -42,12 +45,12 @@ def dummy_calendar_events():
     ]
 
 
-def test_poll_skips_birthday_events(dummy_calendar_events, caplog):
+async def test_poll_skips_birthday_events(dummy_calendar_events, caplog):
     caplog.set_level(logging.DEBUG)
     calendar = DummyCalendar(dummy_calendar_events)
     agent = EventPollingAgent(calendar_integration=calendar)
 
-    polled_events = asyncio.run(agent.poll())
+    polled_events = await agent.poll()
 
     assert [event["id"] for event in polled_events] == ["1", "5"]
     skipped_logs = [
@@ -59,17 +62,15 @@ def test_poll_skips_birthday_events(dummy_calendar_events, caplog):
     assert len(skipped_logs) == 3
 
 
-def test_agent_uses_public_fetch_events(mocker):
+async def test_agent_uses_public_fetch_events(mocker):
     integration = mocker.Mock()
-    integration.fetch_events_async = mocker.AsyncMock(return_value=[{"id": "e1"}])
+    integration.fetch_events_async = AsyncMock(return_value=[{"id": "e1"}])
 
     agent = EventPollingAgent(calendar_integration=integration)
 
-    events = asyncio.run(
-        agent.poll_events_async(
-            "2025-01-01T00:00:00Z",
-            "2025-01-02T00:00:00Z",
-        )
+    events = await agent.poll_events_async(
+        "2025-01-01T00:00:00Z",
+        "2025-01-02T00:00:00Z",
     )
 
     integration.fetch_events_async.assert_awaited_once_with(
@@ -81,7 +82,7 @@ def test_agent_uses_public_fetch_events(mocker):
     assert events == [{"id": "e1"}]
 
 
-def test_poll_contacts_uses_async_flow(dummy_calendar_events, mocker):
+async def test_poll_contacts_uses_async_flow(dummy_calendar_events, mocker):
     calendar = DummyCalendar(dummy_calendar_events)
     contacts = DummyContacts([{"resourceName": "people/1"}])
 
@@ -90,5 +91,5 @@ def test_poll_contacts_uses_async_flow(dummy_calendar_events, mocker):
         contacts_integration=contacts,
     )
 
-    contacts_result = asyncio.run(agent.poll_contacts())
+    contacts_result = await agent.poll_contacts()
     assert contacts_result == [{"resourceName": "people/1"}]

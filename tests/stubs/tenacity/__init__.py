@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Tuple, Type, Union
 
@@ -42,6 +43,14 @@ class wait_exponential_jitter:
         base = min(self.initial * (2 ** (attempt - 1)), self.max)
         jitter = random.random() * self.initial
         return min(base + jitter, self.max)
+
+
+@dataclass
+class wait_fixed:
+    value: float
+
+    def compute(self, attempt: int) -> float:  # noqa: ARG002 - signature parity
+        return self.value
 
 
 @dataclass
@@ -98,7 +107,7 @@ def retry(
                     delay = wait.compute(attempt)
                     attempt += 1
                     if delay > 0:
-                        asyncio.run(asyncio.sleep(delay))
+                        time.sleep(delay)
 
         return sync_wrapper
 
@@ -111,4 +120,5 @@ __all__ = [
     "retry_if_exception_type",
     "stop_after_attempt",
     "wait_exponential_jitter",
+    "wait_fixed",
 ]

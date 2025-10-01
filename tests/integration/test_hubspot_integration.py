@@ -6,10 +6,18 @@ import asyncio
 import math
 import time
 
+import asyncio
+import math
+import time
+from typing import Dict, List
+
 import pytest
 
 from config.config import Settings
 from integration.hubspot_integration import HubSpotIntegration
+
+
+pytestmark = pytest.mark.asyncio
 
 
 class DummyResponse:
@@ -46,7 +54,9 @@ def configured_settings(monkeypatch) -> Settings:
     return Settings()
 
 
-def test_find_company_by_domain_normalizes_and_matches(monkeypatch, configured_settings):
+async def test_find_company_by_domain_normalizes_and_matches(
+    monkeypatch, configured_settings
+):
     integration = HubSpotIntegration(settings=configured_settings)
 
     captured_payloads: List[dict] = []
@@ -68,15 +78,17 @@ def test_find_company_by_domain_normalizes_and_matches(monkeypatch, configured_s
 
     monkeypatch.setattr(integration._http, "post", fake_post)
 
-    result = asyncio.run(
-        integration.find_company_by_domain_async("HTTPS://Example.com/")
+    result = await integration.find_company_by_domain_async(
+        "HTTPS://Example.com/"
     )
 
     assert result == response_payload["results"][0]
     assert captured_payloads, "Expected HubSpot request payload to be captured"
 
 
-def test_list_similar_companies_uses_normalized_name(monkeypatch, configured_settings):
+async def test_list_similar_companies_uses_normalized_name(
+    monkeypatch, configured_settings
+):
     integration = HubSpotIntegration(settings=configured_settings)
 
     response_payload = {
@@ -93,9 +105,7 @@ def test_list_similar_companies_uses_normalized_name(monkeypatch, configured_set
 
     monkeypatch.setattr(integration._http, "post", fake_post)
 
-    companies = asyncio.run(
-        integration.list_similar_companies(" Acme Corporation ")
-    )
+    companies = await integration.list_similar_companies(" Acme Corporation ")
 
     assert len(companies) == 2
     assert companies[0]["id"] == "1"
@@ -108,7 +118,7 @@ def test_missing_access_token_raises_error(monkeypatch):
         HubSpotIntegration(settings=Settings())
 
 
-def test_hubspot_requests_respect_concurrency_limit(
+async def test_hubspot_requests_respect_concurrency_limit(
     monkeypatch, configured_settings
 ):
     import utils.concurrency as concurrency
@@ -146,7 +156,7 @@ def test_hubspot_requests_respect_concurrency_limit(
             )
             return time.perf_counter() - start
 
-        elapsed = asyncio.run(run_requests())
+        elapsed = await run_requests()
         expected_batches = math.ceil(
             total_requests / concurrency.HUBSPOT_SEMAPHORE.limit
         )

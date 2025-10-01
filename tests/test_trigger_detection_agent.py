@@ -4,37 +4,38 @@ from typing import Iterable, Mapping, Sequence
 
 import asyncio
 
+from typing import Iterable, Mapping, Sequence
+
 import pytest
 
 from agents.trigger_detection_agent import TriggerDetectionAgent
 from utils.text_normalization import normalize_text
 
 
-def test_agent_normalises_hard_triggers_and_detects_summary_match() -> None:
+pytestmark = pytest.mark.asyncio
+
+
+async def test_agent_normalises_hard_triggers_and_detects_summary_match() -> None:
     agent = TriggerDetectionAgent(trigger_words=["  KücHe  ", "KÜCHE"])
     assert agent.hard_trigger_words == (normalize_text("Küche"),)
 
-    result = asyncio.run(agent.check({"summary": "Die KUCHE ist bereit"}))
+    result = await agent.check({"summary": "Die KUCHE ist bereit"})
     assert result["trigger"] is True
     assert result["type"] == "hard"
     assert result["matched_word"] == normalize_text("Küche")
     assert result["matched_field"] == "summary"
     assert result["soft_trigger_matches"] == []
-
-
-def test_agent_detects_hard_trigger_in_description() -> None:
+async def test_agent_detects_hard_trigger_in_description() -> None:
     agent = TriggerDetectionAgent(trigger_words=["briefing"])
 
-    result = asyncio.run(
-        agent.check({"description": "Bitte bereite das Briefing vor."})
-    )
+    result = await agent.check({"description": "Bitte bereite das Briefing vor."})
     assert result["trigger"] is True
     assert result["type"] == "hard"
     assert result["matched_word"] == "briefing"
     assert result["matched_field"] == "description"
-
-
-def test_agent_detects_soft_triggers_via_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_agent_detects_soft_triggers_via_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     soft_match = {
         "soft_trigger": "Kick-off Termin",
         "matched_hard_trigger": "meeting preparation",
@@ -54,16 +55,16 @@ def test_agent_detects_soft_triggers_via_llm(monkeypatch: pytest.MonkeyPatch) ->
         trigger_words=["meeting preparation"], soft_trigger_detector=_detector
     )
 
-    result = asyncio.run(agent.check({"summary": "Kick-off mit neuem Kunden"}))
+    result = await agent.check({"summary": "Kick-off mit neuem Kunden"})
     assert result["trigger"] is True
     assert result["type"] == "soft"
     assert result["matched_word"] == soft_match["soft_trigger"]
     assert result["matched_field"] == soft_match["source_field"]
     assert result["soft_trigger_matches"] == [soft_match]
     assert result["extraction_context"]["soft_trigger_matches"] == [soft_match]
-
-
-def test_agent_ignores_invalid_llm_response(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_agent_ignores_invalid_llm_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     def _detector(
         summary: str, description: str, hard_triggers: Sequence[str]
     ) -> Iterable[Mapping[str, str]]:
@@ -74,7 +75,7 @@ def test_agent_ignores_invalid_llm_response(monkeypatch: pytest.MonkeyPatch) -> 
 
     agent = TriggerDetectionAgent(trigger_words=["meeting"], soft_trigger_detector=_detector)
 
-    result = asyncio.run(agent.check({"summary": "Quarterly planning"}))
+    result = await agent.check({"summary": "Quarterly planning"})
     assert result == {
         "trigger": False,
         "type": None,
@@ -83,12 +84,10 @@ def test_agent_ignores_invalid_llm_response(monkeypatch: pytest.MonkeyPatch) -> 
         "soft_trigger_matches": [],
         "hard_triggers": ["meeting"],
     }
-
-
-def test_agent_handles_missing_fields() -> None:
+async def test_agent_handles_missing_fields() -> None:
     agent = TriggerDetectionAgent(trigger_words=["alert"])
 
-    result = asyncio.run(agent.check({}))
+    result = await agent.check({})
     assert result == {
         "trigger": False,
         "type": None,

@@ -1,7 +1,13 @@
-import asyncio
+from __future__ import annotations
+
 from typing import Any, Dict, Iterable
 
+import pytest
+
 from agents.master_workflow_agent import MasterWorkflowAgent
+
+
+pytestmark = pytest.mark.asyncio
 
 
 class DummyEventAgent:
@@ -28,7 +34,7 @@ class DummyExtractionAgent:
         return dict(self._response)
 
 
-def test_hard_trigger_with_complete_info_dispatches_without_unhandled_state() -> None:
+async def test_hard_trigger_with_complete_info_dispatches_without_unhandled_state() -> None:
     event = {"id": "event-001", "summary": "Hard trigger meeting"}
     info = {"company_name": "Example Corp", "company_domain": "example.com"}
 
@@ -56,7 +62,7 @@ def test_hard_trigger_with_complete_info_dispatches_without_unhandled_state() ->
     agent._process_crm_dispatch = _fake_process_crm_dispatch  # type: ignore[assignment]
 
     try:
-        results = asyncio.run(agent.process_all_events())
+        results = await agent.process_all_events()
     finally:
         agent.finalize_run_logs()
 

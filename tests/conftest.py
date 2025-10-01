@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import os
 import sys
 from collections import defaultdict
@@ -9,6 +10,15 @@ from pathlib import Path
 from typing import Any, Dict, Iterable
 
 import pytest
+try:
+    import pytest_asyncio
+except ImportError:  # pragma: no cover - fallback for minimal environments
+    class _PytestAsyncioModule:
+        @staticmethod
+        def fixture(*args, **kwargs):
+            return pytest.fixture(*args, **kwargs)
+
+    pytest_asyncio = _PytestAsyncioModule()  # type: ignore[assignment]
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -182,4 +192,42 @@ def stub_agent_registry(isolated_agent_registry):
         "internal_research": StubInternalResearchAgent,
         "dossier_research": StubDossierResearchAgent,
         "similar_companies": StubSimilarCompaniesAgent,
+    }
+
+
+@pytest_asyncio.fixture
+async def orchestrator_environment(monkeypatch, tmp_path):
+    """Provide isolated settings directories for orchestrator-style tests."""
+
+    run_dir = tmp_path / "runs"
+    workflow_dir = tmp_path / "workflows"
+    artifact_dir = tmp_path / "research" / "artifacts"
+    pdf_dir = tmp_path / "research" / "pdfs"
+
+    for directory in (run_dir, workflow_dir, artifact_dir, pdf_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
+    monkeypatch.setenv("RUN_LOG_DIR", str(run_dir))
+    monkeypatch.setenv("WORKFLOW_LOG_DIR", str(workflow_dir))
+    monkeypatch.setenv("RESEARCH_ARTIFACT_DIR", str(artifact_dir))
+    monkeypatch.setenv("RESEARCH_PDF_DIR", str(pdf_dir))
+
+    import config.config as config_module
+    import agents.master_workflow_agent as master_module
+    import agents.workflow_orchestrator as orchestrator_module
+
+    reloaded_config = importlib.reload(config_module)
+
+    monkeypatch.setattr(master_module, "settings", reloaded_config.settings, raising=False)
+    monkeypatch.setattr(
+        orchestrator_module, "settings", reloaded_config.settings, raising=False
+    )
+
+    yield {
+        "settings": reloaded_config.settings,
+        "run_dir": run_dir,
+        "workflow_dir": workflow_dir,
+        "artifact_dir": artifact_dir,
+        "pdf_dir": pdf_dir,
     }

@@ -58,7 +58,7 @@ class EventPollingAgent(BasePollingAgent):
 
         return False
 
-    async def poll_async(self) -> List[Dict[str, Any]]:
+    async def poll(self) -> List[Dict[str, Any]]:
         """Polls calendar events (read-only) and logs them, skipping birthday entries."""
         try:
             events = await self.calendar.list_events_async(max_results=100)
@@ -77,10 +77,6 @@ class EventPollingAgent(BasePollingAgent):
         except Exception as e:
             logger.error(f"Google Calendar polling failed: {e}")
             raise
-
-    def poll(self) -> Iterable[Dict[str, Any]]:
-        for event in run_async(self.poll_async()):
-            yield event
 
     async def poll_events_async(
         self,

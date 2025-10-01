@@ -19,7 +19,7 @@ class _StubIntegration:
         self._responses = list(responses)
         self.calls: list[dict[str, object]] = []
 
-    def list_similar_companies(
+    async def list_similar_companies(
         self,
         company_name: str,
         *,

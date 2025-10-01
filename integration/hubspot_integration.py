@@ -123,7 +123,7 @@ class HubSpotIntegration:
     ) -> Optional[Dict[str, object]]:
         return run_async(self.find_company_by_domain_async(domain, properties=properties))
 
-    async def list_similar_companies_async(
+    async def list_similar_companies(
         self,
         company_name: str,
         *,
@@ -157,21 +157,6 @@ class HubSpotIntegration:
         response_payload = await self._post(self.SEARCH_PATH, payload)
         results: Iterable[Dict[str, object]] = response_payload.get("results", [])
         return list(results)
-
-    def list_similar_companies(
-        self,
-        company_name: str,
-        *,
-        limit: int = 5,
-        properties: Optional[Sequence[str]] = None,
-    ) -> List[Dict[str, object]]:
-        return run_async(
-            self.list_similar_companies_async(
-                company_name,
-                limit=limit,
-                properties=properties,
-            )
-        )
 
     # ------------------------------------------------------------------
     # Internal helpers

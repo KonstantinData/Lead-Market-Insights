@@ -86,7 +86,7 @@ def test_list_similar_companies_uses_normalized_name(monkeypatch, configured_set
 
     monkeypatch.setattr(integration._http, "post", fake_post)
 
-    companies = run_async(integration.list_similar_companies_async(" Acme Corporation "))
+    companies = run_async(integration.list_similar_companies(" Acme Corporation "))
 
     assert len(companies) == 2
     assert companies[0]["id"] == "1"

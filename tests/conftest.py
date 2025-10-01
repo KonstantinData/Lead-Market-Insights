@@ -59,14 +59,14 @@ def stub_agent_registry(isolated_agent_registry):
         def __init__(self, *, config=None):
             self.config = config
 
-        def poll(self) -> Iterable[Dict[str, object]]:
-            return iter([
+        async def poll(self) -> Iterable[Dict[str, object]]:
+            return [
                 {
                     "id": "evt-1",
                     "summary": "Test event",
                     "description": "Trigger phrase present",
                 }
-            ])
+            ]
 
         def poll_contacts(self) -> Iterable[Dict[str, object]]:
             return iter(())

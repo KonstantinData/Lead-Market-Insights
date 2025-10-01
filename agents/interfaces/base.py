@@ -10,7 +10,7 @@ class BasePollingAgent(ABC):
     """Contract for agents that retrieve events from external systems."""
 
     @abstractmethod
-    def poll(self) -> Iterable[Mapping[str, Any]]:
+    async def poll(self) -> Iterable[Mapping[str, Any]]:
         """Yield event payloads that should be processed by the workflow."""
 
     @abstractmethod

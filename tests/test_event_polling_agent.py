@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import List
 
@@ -46,7 +47,7 @@ def test_poll_skips_birthday_events(dummy_calendar_events, caplog):
     calendar = DummyCalendar(dummy_calendar_events)
     agent = EventPollingAgent(calendar_integration=calendar)
 
-    polled_events = list(agent.poll())
+    polled_events = asyncio.run(agent.poll())
 
     assert [event["id"] for event in polled_events] == ["1", "5"]
     skipped_logs = [

@@ -32,10 +32,11 @@ from agents.local_storage_agent import LocalStorageAgent
 from config.config import settings
 from config.watcher import LlmConfigurationWatcher
 from logs.workflow_log_manager import WorkflowLogManager
-from utils.trigger_loader import load_trigger_words
-from utils.pii import mask_pii
 from utils.audit_log import AuditLog
+from utils.async_http import run_async
 from utils.observability import observe_operation, record_hitl_outcome, record_trigger_match
+from utils.pii import mask_pii
+from utils.trigger_loader import load_trigger_words
 
 logger = logging.getLogger("MasterWorkflowAgent")
 
@@ -172,7 +173,7 @@ class MasterWorkflowAgent:
 
         processed_results: List[Dict[str, Any]] = []
 
-        for event in self.event_agent.poll():
+        for event in run_async(self.event_agent.poll()):
             masked_event = self._mask_for_logging(event)
             logger.info("Polled event: %s", masked_event)
             event_id = event.get("id")

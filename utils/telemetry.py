@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Optional
 
 from opentelemetry import trace, metrics
 from opentelemetry.sdk.resources import Resource
@@ -15,6 +16,20 @@ from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 logger = logging.getLogger(__name__)
 
 DISABLE_VALUES = {"none", "0", "false", "off"}
+
+
+def _configured_endpoint() -> Optional[str]:
+    """Return the configured OTLP endpoint, if any."""
+
+    for key in (
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+    ):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    return None
 
 
 def _is_disabled() -> bool:
@@ -37,6 +52,10 @@ def setup_telemetry(service_name: str = "leadmi") -> None:
     """
     if _is_disabled():
         logger.info("Telemetry disabled by environment flags.")
+        return
+
+    if not _configured_endpoint():
+        logger.info("Telemetry skipped (no OTLP endpoint configured).")
         return
 
     try:

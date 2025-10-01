@@ -185,7 +185,7 @@ Every workflow execution now receives a globally unique **run ID** that is injec
 
 Dedicated log managers in [`logs/`](logs/README.md) persist event and workflow logs on the local filesystem. Generated log artefacts default to [`log_storage/run_history`](log_storage/README.md), keeping them out of the repository root. The `MasterWorkflowAgent` exposes a `finalize_run_logs` helper that the orchestrator calls after each run to record log metadata.
 
-In addition to structured logs the orchestrator emits OpenTelemetry metrics and traces:
+In addition to structured logs the orchestrator emits OpenTelemetry metrics and traces when an OTLP endpoint is configured:
 
 - `workflow_runs_total` – labelled by success/failure/skipped run status.
 - `workflow_trigger_matches_total` – trigger detections grouped by trigger type.
@@ -196,7 +196,7 @@ Traces are exported with spans for the overall run (`workflow.run`) and each sub
 
 ### Deployment guidance
 
-Telemetry exporters default to the OTLP/gRPC protocol and honour the standard OpenTelemetry environment variables. To stream metrics and traces to a local collector:
+Telemetry exporters default to the OTLP/gRPC protocol and honour the standard OpenTelemetry environment variables. The lightweight bootstrap in `main.py` only enables telemetry when one of `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, or `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` is defined. To stream metrics and traces to a local collector:
 
 ```bash
 docker run --rm -p 4317:4317 -p 4318:4318 otel/opentelemetry-collector:latest

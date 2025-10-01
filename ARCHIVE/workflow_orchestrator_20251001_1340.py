@@ -6,17 +6,7 @@ import logging
 import signal
 import time
 from pathlib import Path
-from typing import (
-    Any,
-    Awaitable,
-    Callable,
-    Dict,
-    Mapping,
-    Optional,
-    Sequence,
-    Set,
-    Union,
-)
+from typing import Any, Awaitable, Callable, Dict, Mapping, Optional, Sequence, Set, Union
 
 from agents.alert_agent import AlertAgent, AlertSeverity
 from agents.master_workflow_agent import MasterWorkflowAgent
@@ -28,9 +18,9 @@ from utils.observability import (
     workflow_run,
 )
 from utils.reporting import convert_research_artifacts_to_pdfs
-from utils.workflow_steps import workflow_step_recorder  # NEU
 
 logger = logging.getLogger("WorkflowOrchestrator")
+
 
 DEFAULT_SHUTDOWN_TIMEOUT = 5.0
 
@@ -44,15 +34,14 @@ class WorkflowOrchestrator:
         master_agent: Optional[MasterWorkflowAgent] = None,
         failure_threshold: int = 3,
     ):
+        # Track init errors so run() can short-circuit gracefully.
         self._init_error: Optional[Exception] = None
         self.alert_agent = alert_agent
         self.failure_threshold = max(1, failure_threshold)
         self._failure_key = "workflow_run"
         self._failure_counts: Dict[str, int] = {}
         self._last_run_id: Optional[str] = None
-        self._research_summary_root = (
-            Path(settings.research_artifact_dir) / "workflow_runs"
-        )
+        self._research_summary_root = Path(settings.research_artifact_dir) / "workflow_runs"
 
         self._background_tasks: Set[asyncio.Task[Any]] = set()
         self._async_cleanups: list[tuple[str, Callable[[], Awaitable[None]]]] = []
@@ -61,9 +50,7 @@ class WorkflowOrchestrator:
         self._shutdown_started = False
         self._shutdown_complete = False
         self._shutdown_event: Optional[asyncio.Event] = None
-        timeout_setting = getattr(
-            settings, "shutdown_timeout_seconds", DEFAULT_SHUTDOWN_TIMEOUT
-        )
+        timeout_setting = getattr(settings, "shutdown_timeout_seconds", DEFAULT_SHUTDOWN_TIMEOUT)
         try:
             self._shutdown_timeout = max(0.1, float(timeout_setting))
         except (TypeError, ValueError):
@@ -74,6 +61,7 @@ class WorkflowOrchestrator:
         configure_observability()
 
         try:
+            # Support passing through the communication backend.
             self.master_agent = master_agent or MasterWorkflowAgent(
                 communication_backend=communication_backend
             )
@@ -83,14 +71,13 @@ class WorkflowOrchestrator:
             if callable(closer):
                 self._register_async_cleanup("master_agent", closer)
         except EnvironmentError as exc:
+            # Missing env/config is expected in some (e.g., test) environments.
             logger.error("Failed to initialise MasterWorkflowAgent: %s", exc)
             self.master_agent = None
             self.log_filename = "polling_trigger.log"
             self._init_error = exc
             self.storage_agent = None
-            self._handle_exception(
-                exc, handled=True, context={"phase": "initialisation"}
-            )
+            self._handle_exception(exc, handled=True, context={"phase": "initialisation"})
 
     def _register_async_cleanup(
         self, label: str, closer: Callable[[], Awaitable[None]]
@@ -104,7 +91,7 @@ class WorkflowOrchestrator:
         if self._shutdown_lock is None or self._shutdown_event is None:
             try:
                 asyncio.get_running_loop()
-            except RuntimeError as exc:
+            except RuntimeError as exc:  # pragma: no cover - defensive guard
                 raise RuntimeError(
                     "WorkflowOrchestrator shutdown requires an active event loop"
                 ) from exc
@@ -117,8 +104,11 @@ class WorkflowOrchestrator:
         return self._shutdown_lock, self._shutdown_event
 
     def track_background_task(self, task: asyncio.Task[Any]) -> asyncio.Task[Any]:
+        """Track *task* for cooperative cancellation during shutdown."""
+
         if task.done():
             return task
+
         self._background_tasks.add(task)
 
         def _discard(completed: asyncio.Task[Any]) -> None:
@@ -130,6 +120,8 @@ class WorkflowOrchestrator:
     def install_signal_handlers(
         self, loop: Optional[asyncio.AbstractEventLoop] = None
     ) -> None:
+        """Install POSIX signal handlers that trigger a graceful shutdown."""
+
         try:
             loop = loop or asyncio.get_running_loop()
         except RuntimeError:
@@ -142,6 +134,7 @@ class WorkflowOrchestrator:
             sig = getattr(signal, signal_name, None)
             if sig is None:
                 continue
+
             try:
                 loop.add_signal_handler(
                     sig,
@@ -150,6 +143,7 @@ class WorkflowOrchestrator:
                     ),
                 )
             except (NotImplementedError, RuntimeError):
+                # Windows / non-main threads may not support signal handlers.
                 continue
 
     def _update_run_summary(
@@ -171,15 +165,8 @@ class WorkflowOrchestrator:
     def _log_run_manifest(self) -> None:
         if not self._last_run_summary:
             return
+
         summary = self._last_run_summary
-        run_id = summary.get("run_id")
-        if not isinstance(run_id, str):
-            return
-
-        # Guard gegen doppelte Manifest-Ausgabe
-        if not workflow_step_recorder.should_write_manifest(run_id):
-            return
-
         logger.info(
             "Run manifest: run_id=%s status=%s events=%s duration=%.3fs",
             summary.get("run_id"),
@@ -188,17 +175,20 @@ class WorkflowOrchestrator:
             summary.get("duration_seconds", 0.0),
         )
 
-    async def shutdown(
-        self, *, reason: str = "manual", timeout: Optional[float] = None
-    ) -> None:
+    async def shutdown(self, *, reason: str = "manual", timeout: Optional[float] = None) -> None:
+        """Gracefully release resources and cancel background activity."""
+
         try:
             resolved_timeout = (
-                self._shutdown_timeout if timeout is None else max(0.1, float(timeout))
+                self._shutdown_timeout
+                if timeout is None
+                else max(0.1, float(timeout))
             )
         except (TypeError, ValueError):
             resolved_timeout = self._shutdown_timeout
 
         lock, event = self._ensure_shutdown_primitives()
+
         wait_for_completion: Optional[asyncio.Event] = None
         async with lock:
             if self._shutdown_complete:
@@ -256,11 +246,8 @@ class WorkflowOrchestrator:
             try:
                 await flush_telemetry(timeout=resolved_timeout)
             except Exception:
-                logger.exception(
-                    "Failed to flush observability telemetry during shutdown"
-                )
+                logger.exception("Failed to flush observability telemetry during shutdown")
 
-            # Manifest (nur falls noch nicht geschrieben)
             self._log_run_manifest()
             logger.info("Orchestrator shutdown complete.")
         finally:
@@ -298,7 +285,7 @@ class WorkflowOrchestrator:
                         self._report_research_errors(context.run_id, results)
                         try:
                             self._store_research_outputs(context.run_id, results)
-                        except Exception as exc:
+                        except Exception as exc:  # pragma: no cover - defensive guard
                             logger.error(
                                 "Failed to persist research outputs", exc_info=True
                             )
@@ -328,7 +315,6 @@ class WorkflowOrchestrator:
             duration = time.perf_counter() - start_time
             self._current_run_started_at = None
             self._update_run_summary(run_context, events_processed, duration)
-            # Manifest hier (einmalig) – Guard in _log_run_manifest verhindert Doppelausgabe
             self._log_run_manifest()
 
     def _store_research_outputs(
@@ -352,9 +338,11 @@ class WorkflowOrchestrator:
                 "research": entry.get("research"),
                 "research_errors": entry.get("research_errors", []),
             }
+
             pdf_artifacts = self._generate_pdf_artifacts(run_id, entry)
             if pdf_artifacts:
                 sanitized_entry["pdf_artifacts"] = pdf_artifacts
+
             sanitized.append(sanitized_entry)
 
         summary_path.write_text(
@@ -398,12 +386,14 @@ class WorkflowOrchestrator:
                 exc,
             )
         except Exception:
-            logger.exception("Failed to generate PDF artefacts for event %s", event_id)
+            logger.exception(
+                "Failed to generate PDF artefacts for event %s", event_id
+            )
         return None
 
     @staticmethod
     def _resolve_pdf_source(
-        research_result: Mapping[str, object],
+        research_result: Mapping[str, object]
     ) -> Optional[Union[str, Path, Mapping[str, Any]]]:
         payload = research_result.get("payload")
         if isinstance(payload, Mapping):
@@ -413,7 +403,7 @@ class WorkflowOrchestrator:
         if isinstance(artifact_path, str) and artifact_path:
             return artifact_path
 
-        if isinstance(payload, Mapping):  # defensive double check
+        if isinstance(payload, Mapping):  # pragma: no cover - defensive double check
             nested_path = payload.get("artifact_path")
             if isinstance(nested_path, str) and nested_path:
                 return nested_path
@@ -425,6 +415,7 @@ class WorkflowOrchestrator:
     ) -> None:
         if not results:
             return
+
         for entry in results:
             for error in entry.get("research_errors", []) or []:
                 message = (
@@ -441,9 +432,12 @@ class WorkflowOrchestrator:
     def _finalize(self):
         if not self.master_agent:
             return
+
         try:
             self.master_agent.finalize_run_logs()
-            logger.info("Run log stored locally at %s", self.master_agent.log_file_path)
+            logger.info(
+                "Run log stored locally at %s", self.master_agent.log_file_path
+            )
         except Exception as exc:
             logger.error("Failed to finalise local log storage", exc_info=True)
             self._handle_exception(
@@ -451,8 +445,12 @@ class WorkflowOrchestrator:
                 handled=True,
                 context={"phase": "finalize"},
             )
+
         logger.info("Orchestration finalized.")
 
+    # ------------------------------------------------------------------
+    # Alert helpers
+    # ------------------------------------------------------------------
     def _handle_exception(
         self,
         exc: Exception,
@@ -486,6 +484,7 @@ class WorkflowOrchestrator:
     ) -> None:
         if not self.alert_agent:
             return
+
         self.alert_agent.send_alert(message, severity, context=context)
 
     def _map_exception_to_severity(self, exc: Exception) -> AlertSeverity:
@@ -498,10 +497,9 @@ class WorkflowOrchestrator:
         return AlertSeverity.ERROR
 
     def _increment_failure_count(self, key: str) -> int:
-        if self.storage_agent and hasattr(
-            self.storage_agent, "increment_failure_count"
-        ):
+        if self.storage_agent and hasattr(self.storage_agent, "increment_failure_count"):
             return self.storage_agent.increment_failure_count(key)
+
         self._failure_counts[key] = self._failure_counts.get(key, 0) + 1
         return self._failure_counts[key]
 

@@ -5,15 +5,28 @@ import os
 from typing import Optional
 
 from opentelemetry import trace, metrics
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.metrics import MeterProvider
-from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
-from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 
 logger = logging.getLogger(__name__)
+
+try:
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+    from opentelemetry.sdk.metrics import MeterProvider as SdkMeterProvider
+    from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
+        OTLPMetricExporter,
+    )
+    from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+except ImportError:
+    # Telemetrie-Pakete fehlen – stiller Rückzug
+    SdkTracerProvider = object  # type: ignore
+    SdkMeterProvider = object  # type: ignore
+
+    def setup_telemetry(*_, **__):  # type: ignore
+        logger.info("Telemetry dependencies not installed; skipping.")
+        return
+
 
 DISABLE_VALUES = {"none", "0", "false", "off"}
 
@@ -33,25 +46,38 @@ def _configured_endpoint() -> Optional[str]:
 
 
 def _is_disabled() -> bool:
-    # Wenn irgendein Exporter explizit auf 'none' gesetzt ist, komplett deaktivieren.
+    if os.environ.get("OTEL_DISABLE_DEV", "").lower() in DISABLE_VALUES:
+        return True
     if os.environ.get("OTEL_TRACES_EXPORTER", "").lower() in DISABLE_VALUES:
         return True
     if os.environ.get("OTEL_METRICS_EXPORTER", "").lower() in DISABLE_VALUES:
-        return True
-    if os.environ.get("OTEL_LOGS_EXPORTER", "").lower() in DISABLE_VALUES:
-        return True
-    if os.environ.get("OTEL_DISABLE_DEV", "").lower() in DISABLE_VALUES:
         return True
     return False
 
 
 def setup_telemetry(service_name: str = "leadmi") -> None:
     """
-    Initialisiert OTLP Exporter (Tracing + Metrics) mit kurzen Timeouts.
-    Fällt bei Fehlern still zurück und loggt nur einmal WARN.
+    Initialisiert OTLP Tracing + Metrics mit kurzer Timeout-Konfiguration.
+
+    - Verhindert doppelte Initialisierung über Umgebungs-Flag LEADMI_TELEMETRY_INITIALIZED.
+    - Erkennt bereits gesetzte Provider.
+    - Bei Fehler: einmalige WARN, keine Exception nach oben.
     """
     if _is_disabled():
-        logger.info("Telemetry disabled by environment flags.")
+        logger.info("Telemetry disabled via environment flags.")
+        return
+
+    if os.environ.get("LEADMI_TELEMETRY_INITIALIZED") == "1":
+        logger.debug("Telemetry already initialized (env flag).")
+        return
+
+    existing_tp = trace.get_tracer_provider()
+    existing_mp = metrics.get_meter_provider()
+    if isinstance(existing_tp, SdkTracerProvider) or isinstance(
+        existing_mp, SdkMeterProvider
+    ):
+        logger.debug("Telemetry providers already present; skipping re-init.")
+        os.environ["LEADMI_TELEMETRY_INITIALIZED"] = "1"
         return
 
     if not _configured_endpoint():
@@ -60,25 +86,22 @@ def setup_telemetry(service_name: str = "leadmi") -> None:
 
     try:
         resource = Resource.create({"service.name": service_name})
-        tracer_provider = TracerProvider(resource=resource)
-        tracer_provider.add_span_processor(
-            BatchSpanProcessor(OTLPSpanExporter(timeout=2))
-        )
-        trace.set_tracer_provider(tracer_provider)
+
+        tp = SdkTracerProvider(resource=resource)
+        tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(timeout=2)))
+        trace.set_tracer_provider(tp)
 
         metric_reader = PeriodicExportingMetricReader(
             OTLPMetricExporter(timeout=2),
             export_interval_millis=60000,
         )
-        meter_provider = MeterProvider(
-            resource=resource,
-            metric_readers=[metric_reader],
-        )
-        metrics.set_meter_provider(meter_provider)
+        mp = SdkMeterProvider(resource=resource, metric_readers=[metric_reader])
+        metrics.set_meter_provider(mp)
 
-        # Rauschen dämpfen, falls Collector offline
+        # Unterdrücke OTLP-Exporter-Rauschen, wenn Collector nicht da
         logging.getLogger("opentelemetry.exporter.otlp").setLevel(logging.ERROR)
 
+        os.environ["LEADMI_TELEMETRY_INITIALIZED"] = "1"
         logger.info("Telemetry initialized (OTLP).")
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Telemetry disabled (exporter init failed: %s)", exc)
+        logger.warning("Telemetry initialization failed (%s). Continuing without.", exc)

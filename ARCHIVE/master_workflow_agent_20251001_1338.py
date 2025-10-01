@@ -41,7 +41,6 @@ from utils.observability import (
 )
 from utils.pii import mask_pii
 from utils.trigger_loader import load_trigger_words
-from utils.workflow_steps import workflow_step_recorder  # NEU
 
 logger = logging.getLogger("MasterWorkflowAgent")
 
@@ -57,6 +56,7 @@ class MasterWorkflowAgent:
         crm_agent: Optional[BaseCrmAgent] = None,
         agent_overrides: Optional[Dict[str, str]] = None,
     ) -> None:
+        # Initialize configuration and all agents.
         resolved_overrides: Dict[str, str] = dict(settings.agent_overrides)
         if agent_overrides:
             resolved_overrides.update({k: v for k, v in agent_overrides.items() if v})
@@ -110,6 +110,7 @@ class MasterWorkflowAgent:
             description="similar company",
         )
 
+        # Local storage for log artefacts
         self.storage_agent = LocalStorageAgent(settings.run_log_dir, logger=logger)
         self.workflow_log_manager = WorkflowLogManager(settings.workflow_log_dir)
 
@@ -131,6 +132,8 @@ class MasterWorkflowAgent:
         self._config_watcher.start()
 
     def initialize_run(self, run_id: Optional[str] = None) -> None:
+        """Set up run-specific artefacts such as log files and audit logs."""
+
         self.run_id = run_id or datetime.now(timezone.utc).strftime(
             "%Y-%m-%dT%H-%M-%SZ"
         )
@@ -145,7 +148,7 @@ class MasterWorkflowAgent:
         if hasattr(self.human_agent, "set_run_context"):
             try:
                 self.human_agent.set_run_context(self.run_id, self.workflow_log_manager)
-            except Exception:
+            except Exception:  # pragma: no cover - defensive guard
                 logger.exception("Failed to set run context on human agent")
 
         for existing_handler in list(logger.handlers):
@@ -168,9 +171,12 @@ class MasterWorkflowAgent:
         logger.addHandler(file_handler)
 
     async def process_all_events(self) -> List[Dict[str, Any]]:
+        """Process all available events and return structured run results."""
+
         logger.info("MasterWorkflowAgent: Processing events...")
 
         processed_results: List[Dict[str, Any]] = []
+
         events = await self.event_agent.poll()
         for event in events:
             masked_event = self._mask_for_logging(event)
@@ -184,9 +190,6 @@ class MasterWorkflowAgent:
                 "status": "received",
             }
             processed_results.append(event_result)
-
-            # Step: start
-            workflow_step_recorder.record_step(self.run_id, event_id, "start")
 
             with observe_operation(
                 "trigger_detection", {"event.id": str(event_id)} if event_id else None
@@ -209,6 +212,7 @@ class MasterWorkflowAgent:
                 continue
 
             record_trigger_match(trigger_result.get("type", "unknown"))
+
             masked_trigger = self._mask_for_logging(trigger_result)
             logger.info(
                 "%s trigger detected in event %s (matched: %s in %s)",
@@ -254,11 +258,7 @@ class MasterWorkflowAgent:
             normalised_info = self._normalise_info_for_research(info)
             internal_status = None
             internal_result = None
-
-            # Verhindere doppelten internen Research bei Hard Trigger + vollständigen Daten:
-            if self._has_research_inputs(normalised_info) and not (
-                is_complete and trigger_result.get("type") == "hard"
-            ):
+            if self._has_research_inputs(normalised_info):
                 internal_result = await self._run_internal_research(
                     event_result,
                     event,
@@ -267,9 +267,6 @@ class MasterWorkflowAgent:
                     force=False,
                 )
                 internal_status = self._extract_internal_status(internal_result)
-                workflow_step_recorder.record_step(
-                    self.run_id, event_id, "internal_lookup_completed"
-                )
 
             if is_complete and internal_status == "AWAIT_REQUESTOR_DETAILS":
                 event_result["status"] = "awaiting_requestor_details"
@@ -300,12 +297,6 @@ class MasterWorkflowAgent:
                             "Missing info provided for event %s [audit_id=%s]",
                             event_id,
                             audit_id or "n/a",
-                        )
-                        workflow_step_recorder.record_step(
-                            self.run_id, event_id, "missing_optional_fields"
-                        )
-                        workflow_step_recorder.record_step(
-                            self.run_id, event_id, "fields_validated"
                         )
                         record_hitl_outcome("missing_info", "completed")
                         filled_info = self._normalise_info_for_research(
@@ -402,12 +393,6 @@ class MasterWorkflowAgent:
                             event_id,
                             fill_audit_id or "n/a",
                         )
-                        workflow_step_recorder.record_step(
-                            self.run_id, event_id, "missing_optional_fields"
-                        )
-                        workflow_step_recorder.record_step(
-                            self.run_id, event_id, "fields_validated"
-                        )
                         record_hitl_outcome("missing_info", "completed")
                         filled_info = self._normalise_info_for_research(
                             filled.get("info", {}) or {}
@@ -444,6 +429,7 @@ class MasterWorkflowAgent:
         return processed_results
 
     async def _detect_trigger(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        # Delegates to trigger agent, checks both summary and description
         return await self.trigger_agent.check(event)
 
     async def _send_to_crm_agent(
@@ -554,7 +540,6 @@ class MasterWorkflowAgent:
                 "cached",
                 result=existing if isinstance(existing, dict) else None,
             )
-            # Kein zusätzlicher Step-Recorder-Eintrag → bereits geloggt
             return existing
 
         trigger = self._build_research_trigger(event, info, event_id)
@@ -563,7 +548,7 @@ class MasterWorkflowAgent:
             try:
                 async with concurrency.RESEARCH_TASK_SEMAPHORE:
                     result = await agent.run(trigger)
-            except Exception as exc:  # pragma: no cover
+            except Exception as exc:  # pragma: no cover - defensive guard
                 logger.exception(
                     "%s research agent failed for event %s", agent_name, event_id
                 )
@@ -585,18 +570,6 @@ class MasterWorkflowAgent:
             "completed",
             result=result if isinstance(result, dict) else None,
         )
-
-        # Zentrale Step-Namensgebung:
-        step_map = {
-            "internal_research": "research.internal_research",
-            "dossier_research": "research.dossier_research",
-            "similar_companies": "research.similar_companies",
-            "similar_companies_level1": "research.similar_companies",
-        }
-        step_name = step_map.get(agent_name)
-        if step_name:
-            workflow_step_recorder.record_step(self.run_id, event_id, step_name)
-
         return result
 
     async def _run_internal_research(
@@ -769,19 +742,13 @@ class MasterWorkflowAgent:
         ):
             await self._send_to_crm_agent(event, crm_payload)
 
-        # Steps auf CRM-Pfad:
-        workflow_step_recorder.record_step(
-            self.run_id, event_id, "crm_matching_recorded"
-        )
-        if internal_status in (None, "REPORT_REQUIRED"):
-            workflow_step_recorder.record_step(self.run_id, event_id, "report_required")
-        workflow_step_recorder.record_step(self.run_id, event_id, "completed")
-
         event_result["status"] = "dispatched_to_crm"
         event_result["crm_dispatched"] = True
         event_result["crm_payload"] = crm_payload
 
     def finalize_run_logs(self) -> None:
+        """Persist metadata about the generated log file to local storage."""
+
         log_size = 0
         if self.log_file_path.exists():
             log_size = self.log_file_path.stat().st_size
@@ -791,7 +758,7 @@ class MasterWorkflowAgent:
         if audit_path.exists():
             try:
                 audit_entries = self.audit_log.load_entries()
-            except Exception:
+            except Exception:  # pragma: no cover - defensive guard for corrupted log
                 logger.warning(
                     "Unable to read audit log at %s during finalization", audit_path
                 )
@@ -811,7 +778,7 @@ class MasterWorkflowAgent:
         if hasattr(self.human_agent, "shutdown"):
             try:
                 self.human_agent.shutdown()
-            except Exception:
+            except Exception:  # pragma: no cover - defensive guard
                 logger.exception("Failed to shutdown human agent reminders")
 
         if hasattr(self, "_config_watcher"):
@@ -886,7 +853,7 @@ class MasterWorkflowAgent:
                 event_id=str(event_id) if event_id is not None else None,
                 error=error,
             )
-        except Exception:
+        except Exception:  # pragma: no cover - defensive guard
             logger.exception(
                 "Failed to append research workflow log for %s", agent_name
             )
@@ -922,6 +889,8 @@ class MasterWorkflowAgent:
             )
 
     async def aclose(self) -> None:
+        """Release child agents and background watchers."""
+
         async def _close_agent(name: str, agent: Optional[Any]) -> None:
             if agent is None:
                 return
@@ -929,7 +898,7 @@ class MasterWorkflowAgent:
             if callable(closer):
                 try:
                     await closer()
-                except Exception:
+                except Exception:  # pragma: no cover - defensive guard
                     logger.exception("Failed to close %s agent", name)
 
         agents_to_close = {
@@ -956,10 +925,12 @@ class MasterWorkflowAgent:
         if watcher is not None:
             try:
                 watcher.stop()
-            except Exception:
+            except Exception:  # pragma: no cover - defensive guard
                 logger.exception("Failed to stop configuration watcher")
 
     def _apply_llm_settings(self, current_settings) -> None:
+        """Copy the latest LLM settings from the shared settings object."""
+
         self.llm_confidence_thresholds = dict(
             current_settings.llm_confidence_thresholds
         )
@@ -973,6 +944,8 @@ class MasterWorkflowAgent:
         )
 
     def _meets_confidence_threshold(self, key: str, payload: Dict[str, Any]) -> bool:
+        """Check whether the payload satisfies the configured confidence threshold."""
+
         threshold = self.llm_confidence_thresholds.get(key)
         if threshold is None:
             return True
@@ -983,7 +956,7 @@ class MasterWorkflowAgent:
 
         try:
             return float(confidence) >= float(threshold)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError):  # pragma: no cover - defensive branch
             logger.warning(
                 "Invalid confidence value '%s' for key '%s'; allowing by default.",
                 confidence,

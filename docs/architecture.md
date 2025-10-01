@@ -78,22 +78,24 @@ sequenceDiagram
     participant CRM
 
     Polling->>Orchestrator: Candidate events
-    Orchestrator->>Extraction: Perform extraction
-    Extraction-->>Orchestrator: Structured dossier
-    Orchestrator->>Internal: Normalised dossier + run_id
-    Internal-->>Orchestrator: Existing dossier decision
-    alt Existing dossier found
-        Orchestrator->>Reporting: Compile PDFs from stored artefacts
-    else Refresh required
-        Orchestrator->>Dossier: Generate company_detail_research.json
-        Dossier-->>Orchestrator: Dossier artefact metadata
-        Orchestrator->>Similar: Generate similar_companies_level1.json
-        Similar-->>Orchestrator: Similar company artefact metadata
-        Orchestrator->>Reporting: Convert artefacts into PDFs
+    loop For each candidate event (async task)
+        Orchestrator->>Extraction: Perform extraction
+        Extraction-->>Orchestrator: Structured dossier
+        Orchestrator->>Internal: Normalised dossier + run_id
+        Internal-->>Orchestrator: Existing dossier decision
+        alt Existing dossier found
+            Orchestrator->>Reporting: Compile PDFs from stored artefacts
+        else Refresh required
+            Orchestrator->>Dossier: Generate company_detail_research.json
+            Dossier-->>Orchestrator: Dossier artefact metadata
+            Orchestrator->>Similar: Generate similar_companies_level1.json
+            Similar-->>Orchestrator: Similar company artefact metadata
+            Orchestrator->>Reporting: Convert artefacts into PDFs
+        end
+        Orchestrator->>Human: HITL decision requests (if needed)
+        Human-->>Orchestrator: Approve / modify / decline
+        Orchestrator->>CRM: Final payload with artefacts + links
     end
-    Orchestrator->>Human: HITL decision requests (if needed)
-    Human-->>Orchestrator: Approve / modify / decline
-    Orchestrator->>CRM: Final payload with artefacts + links
 ```
 
 `InternalResearchAgent` always runs first and can short-circuit the pipeline when an existing dossier is valid. When a refresh is required, the orchestrator fans out to `DossierResearchAgent` and the `similar_companies_level1` agent. The reporting utility then turns JSON artefacts into PDFs for distribution.
@@ -135,6 +137,12 @@ Research agents create JSON artefacts in deterministic locations:
 `utils.reporting.convert_research_artifacts_to_pdfs` consumes these JSON documents and writes PDFs to `RESEARCH_PDF_DIR/<run_id>/`. The CRM agent receives both the JSON and PDF paths. When `CRM_ATTACHMENT_BASE_URL` is set, the orchestrator appends stable URLs to the final payload so CRM operators can access artefacts without downloading attachments.
 
 Refer to [`docs/research_artifacts.md`](research_artifacts.md) for full schema references and sample outputs delivered to event organisers.
+
+## Lifecycle & shutdown
+
+All agents now expose asynchronous interfaces and are orchestrated without synchronous bridge adapters. `WorkflowOrchestrator` establishes a single event loop, tracks background tasks spawned by individual agents, and coordinates cooperative cancellation during shutdown. Signal handlers trigger `shutdown()` so long-running awaits are cancelled gracefully, artefact writers flush, and telemetry is finalised before the process exits.
+
+For a deep dive into startup ordering, cancellation semantics, and recommended integration patterns, see [`docs/lifecycle.md`](lifecycle.md).
 
 ## Deployment topology
 

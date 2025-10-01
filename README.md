@@ -148,7 +148,9 @@ The orchestrator wires the agents together and coordinates polling, enrichment, 
 python -m agents.workflow_orchestrator
 ```
 
-> **Async orchestration:** The workflow now runs fully asynchronously; call async APIs directly instead of relying on `utils.async_http.run_async`.
+> **Async orchestration:** The workflow now runs fully asynchronously. Compose agents via their coroutine interfaces and avoid introducing synchronous adapter layers.
+
+Refer to [`docs/lifecycle.md`](docs/lifecycle.md) for a detailed look at startup, cooperative cancellation, and graceful shutdown sequencing within the orchestrator.
 
 Individual agents can also be instantiated and exercised directly for targeted tests or integrations.
 

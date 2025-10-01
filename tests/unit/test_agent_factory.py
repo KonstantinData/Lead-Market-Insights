@@ -12,7 +12,7 @@ class DummyPollingAgent(BasePollingAgent):
     def __init__(self, *, token: str = "") -> None:
         self.token = token
 
-    def poll(self):  # pragma: no cover - not exercised in tests
+    async def poll(self):  # pragma: no cover - not exercised in tests
         return []
 
     def poll_contacts(self):  # pragma: no cover - not exercised in tests

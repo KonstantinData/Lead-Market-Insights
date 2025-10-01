@@ -113,7 +113,7 @@ class IntLvl1SimilarCompaniesAgent(BaseResearchAgent):
             or ""
         )
 
-        candidates = self._fetch_candidates(company_name)
+        candidates = await self._fetch_candidates(company_name)
         ranked_results = self._rank_candidates(candidates, target_context)
 
         limited_results = ranked_results[: self._result_limit]
@@ -173,8 +173,8 @@ class IntLvl1SimilarCompaniesAgent(BaseResearchAgent):
         context["description_tokens"] = description_tokens
         return context
 
-    def _fetch_candidates(self, company_name: str) -> Iterable[Mapping[str, Any]]:
-        return self._integration.list_similar_companies(
+    async def _fetch_candidates(self, company_name: str) -> List[Mapping[str, Any]]:
+        return await self._integration.list_similar_companies(
             company_name,
             limit=max(self._result_limit * 3, self._result_limit),
             properties=self.HUBSPOT_PROPERTIES,

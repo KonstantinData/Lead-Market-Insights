@@ -7,7 +7,7 @@ class DummyEventAgent:
     def __init__(self, events: Iterable[Dict[str, Any]]):
         self._events = list(events)
 
-    def poll(self) -> Iterable[Dict[str, Any]]:
+    async def poll(self) -> Iterable[Dict[str, Any]]:
         return list(self._events)
 
 

@@ -1,10 +1,10 @@
-import os
 import importlib
 
 import pytest
 from opentelemetry import trace
 
 # We import from our utils package
+from utils import telemetry as telemetry_mod
 from utils.telemetry import setup_telemetry
 
 
@@ -98,3 +98,156 @@ def test_custom_ratio_env(monkeypatch):
     for _ in range(10):
         with tracer.start_as_current_span("loop-span"):
             pass  # intentionally empty
+
+
+def test_parse_resource_kv_and_ratio_resolution(monkeypatch):
+    raw = "team=core, bad-entry, env = staging "
+    parsed = telemetry_mod._parse_resource_kv(raw)
+    assert parsed == {"team": "core", "env": "staging"}
+
+    assert telemetry_mod._resolve_ratio(2.0) == 1.0
+    assert telemetry_mod._resolve_ratio(-1.0) == 0.0
+
+    monkeypatch.setenv("OTEL_TRACES_SAMPLER_ARG", "0.15")
+    assert telemetry_mod._resolve_ratio(None) == pytest.approx(0.15)
+
+    monkeypatch.setenv("OTEL_TRACES_SAMPLER_ARG", "bogus")
+    assert telemetry_mod._resolve_ratio(None) == 1.0
+
+
+def test_endpoint_resolution_and_normalisation(monkeypatch):
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", raising=False)
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+
+    assert telemetry_mod._resolve_endpoint(None) is None
+
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "https://fallback")
+    assert telemetry_mod._resolve_endpoint(None) == "https://fallback"
+
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "https://override")
+    assert telemetry_mod._resolve_endpoint(None) == "https://override"
+
+    assert telemetry_mod._resolve_endpoint("https://explicit") == "https://explicit"
+
+    assert (
+        telemetry_mod._normalise_http_endpoint("https://collector")
+        == "https://collector/v1/traces"
+    )
+
+    with pytest.raises(ValueError):
+        telemetry_mod._normalise_http_endpoint("https:///missing-host")
+
+    assert (
+        telemetry_mod._normalise_grpc_endpoint("grpc://host:4317/v1/traces")
+        == "host:4317"
+    )
+    assert telemetry_mod._normalise_grpc_endpoint("collector:4317") == "collector:4317"
+
+
+def test_exporter_protocol_preference(monkeypatch):
+    reset_otel_singletons()
+
+    class DummyProvider:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.processors = []
+
+        def add_span_processor(self, processor):
+            self.processors.append(processor)
+
+    class DummyBatchProcessor:
+        def __init__(self, exporter):
+            self.exporter = exporter
+
+    class DummySimpleProcessor:
+        def __init__(self, exporter):
+            self.exporter = exporter
+
+    class DummyConsoleExporter:
+        pass
+
+    http_created = {}
+    grpc_created = {}
+
+    class DummyHTTPExporter:
+        def __init__(self, endpoint):
+            http_created["endpoint"] = endpoint
+
+    class DummyGrpcExporter:
+        def __init__(self, endpoint, insecure):
+            grpc_created["endpoint"] = endpoint
+            grpc_created["insecure"] = insecure
+
+    monkeypatch.setattr(telemetry_mod, "_SdkTracerProvider", DummyProvider)
+    monkeypatch.setattr(telemetry_mod, "BatchSpanProcessor", DummyBatchProcessor)
+    monkeypatch.setattr(telemetry_mod, "SimpleSpanProcessor", DummySimpleProcessor)
+    monkeypatch.setattr(telemetry_mod, "ConsoleSpanExporter", DummyConsoleExporter)
+    monkeypatch.setattr(telemetry_mod, "_build_real_sampler", lambda ratio: f"sampler:{ratio}")
+    monkeypatch.setattr(telemetry_mod, "Resource", None)
+    monkeypatch.setattr(telemetry_mod, "_HttpSpanExporter", DummyHTTPExporter)
+    monkeypatch.setattr(telemetry_mod, "_GrpcSpanExporter", DummyGrpcExporter)
+
+    provider = telemetry_mod._setup_real_provider(
+        ratio=0.5,
+        resource_attrs={"service.name": "svc"},
+        endpoint="https://collector",
+        use_console_exporter=True,
+    )
+
+    assert isinstance(provider, DummyProvider)
+    # HTTP preferred by default
+    assert http_created["endpoint"].endswith("/v1/traces")
+    assert "grpc" not in grpc_created
+
+    # Switch to prefer gRPC via protocol env and ensure fallback to HTTP when gRPC fails
+    def failing_grpc_exporter(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(telemetry_mod, "_GrpcSpanExporter", failing_grpc_exporter)
+    grpc_created.clear()
+
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
+
+    provider = telemetry_mod._setup_real_provider(
+        ratio=0.5,
+        resource_attrs={"service.name": "svc"},
+        endpoint="https://collector",
+        use_console_exporter=False,
+    )
+
+    assert isinstance(provider, DummyProvider)
+    # HTTP fallback should have been used because gRPC exporter failed
+    assert http_created["endpoint"].endswith("/v1/traces")
+
+
+def test_setup_telemetry_stub_fallback(monkeypatch):
+    reset_otel_singletons()
+
+    monkeypatch.setattr(telemetry_mod, "_SDK_AVAILABLE", True)
+
+    def boom(**_kwargs):
+        raise RuntimeError("nope")
+
+    stub_provider = telemetry_mod._CompatProvider(
+        telemetry_mod._AlwaysOnSampler(), {"service.name": "stub"}
+    )
+
+    monkeypatch.setattr(telemetry_mod, "_setup_real_provider", boom)
+    monkeypatch.setattr(telemetry_mod, "_setup_stub_provider", lambda **_kwargs: stub_provider)
+
+    setup_telemetry(force=True, service_name="stub")
+    assert trace.get_tracer_provider() is stub_provider
+
+
+def test_trace_provider_hooks(monkeypatch):
+    reset_otel_singletons()
+
+    monkeypatch.setattr(telemetry_mod, "_SDK_AVAILABLE", False)
+    setup_telemetry(force=True, service_name="compat")
+
+    new_provider = telemetry_mod._CompatProvider(
+        telemetry_mod._AlwaysOffSampler(), {"service.name": "compat"}
+    )
+
+    trace.set_tracer_provider(new_provider)
+    assert trace.get_tracer_provider() is new_provider

@@ -1,7 +1,5 @@
-import os
 import importlib
 
-import pytest
 from opentelemetry import trace
 
 # We import from our utils package

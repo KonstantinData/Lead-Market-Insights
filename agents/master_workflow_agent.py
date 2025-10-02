@@ -152,12 +152,30 @@ class MasterWorkflowAgent:
             if isinstance(existing_handler, logging.FileHandler) and getattr(
                 existing_handler, "_master_agent_handler", False
             ):
+                if hasattr(existing_handler, "_master_agent_run_id_filter"):
+                    existing_handler.removeFilter(
+                        existing_handler._master_agent_run_id_filter  # type: ignore[attr-defined]
+                    )
                 logger.removeHandler(existing_handler)
                 existing_handler.close()
 
         file_handler = logging.FileHandler(
             self.log_file_path, mode="w", encoding="utf-8"
         )
+
+        class _RunIdInjector(logging.Filter):
+            def __init__(self, run_id: str) -> None:
+                super().__init__(name="master-workflow-run")
+                self._run_id = run_id
+
+            def filter(self, record: logging.LogRecord) -> bool:  # pragma: no cover - simple setter
+                if getattr(record, "run_id", None) in {None, ""}:
+                    record.run_id = self._run_id
+                return True
+
+        run_filter = _RunIdInjector(self.run_id)
+        file_handler.addFilter(run_filter)
+        setattr(file_handler, "_master_agent_run_id_filter", run_filter)
         formatter = logging.Formatter(
             "%(asctime)s %(levelname)s [run_id=%(run_id)s] %(message)s"
         )

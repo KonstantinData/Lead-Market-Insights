@@ -130,9 +130,10 @@ class _CompatSpanContext:
 
 
 class _CompatSpan:
-    def __init__(self, name: str, sampled: bool) -> None:
+    def __init__(self, name: str, sampled: bool, attributes: Optional[Dict[str, object]] = None) -> None:
         self.name = name
         self._ctx = _CompatSpanContext(sampled)
+        self.attributes = dict(attributes or {})
 
     def __enter__(self):
         return self
@@ -148,10 +149,10 @@ class _CompatTracer:
     def __init__(self, sampler: _SamplerBase) -> None:
         self._sampler = sampler
 
-    def start_as_current_span(self, name: str):
+    def start_as_current_span(self, name: str, *, attributes: Optional[Dict[str, object]] = None, **_ignored):
         trace_id_hex = f"{random.getrandbits(128):032x}"
         sampled = self._sampler.should_sample(trace_id_hex).sampled
-        return _CompatSpan(name, sampled)
+        return _CompatSpan(name, sampled, attributes)
 
 
 class _CompatProvider:
@@ -211,7 +212,10 @@ def _normalise_http_endpoint(endpoint: str) -> str:
     endpoint = endpoint.rstrip("/")
     parsed = urlparse(endpoint)
     if parsed.scheme and not parsed.netloc:
-        endpoint = parsed.path.rstrip("/")
+        raise ValueError(
+            f"Malformed OTLP HTTP endpoint: '{endpoint}'. "
+            "URL has a scheme but no network location (netloc)."
+        )
     if not endpoint.endswith("/v1/traces"):
         endpoint = f"{endpoint}/v1/traces"
     return endpoint
@@ -220,8 +224,8 @@ def _normalise_http_endpoint(endpoint: str) -> str:
 def _normalise_grpc_endpoint(endpoint: str) -> str:
     parsed = urlparse(endpoint)
     if parsed.scheme:
-        host = parsed.netloc or parsed.path
-        endpoint = host or endpoint
+        if parsed.netloc:
+            endpoint = parsed.netloc
     endpoint = endpoint.rstrip("/")
     if endpoint.endswith("/v1/traces"):
         endpoint = endpoint[: -len("/v1/traces")]
@@ -300,10 +304,12 @@ def _setup_real_provider(
 
         if prefer_http:
             exporter = _create_http_exporter(resolved_endpoint)
-        if exporter is None:
+            if exporter is None:
+                exporter = _create_grpc_exporter(resolved_endpoint)
+        else:
             exporter = _create_grpc_exporter(resolved_endpoint)
-        if exporter is None and not prefer_http:
-            exporter = _create_http_exporter(resolved_endpoint)
+            if exporter is None:
+                exporter = _create_http_exporter(resolved_endpoint)
 
     if exporter is not None and BatchSpanProcessor is not None:
         provider.add_span_processor(BatchSpanProcessor(exporter))

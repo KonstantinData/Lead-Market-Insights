@@ -57,3 +57,30 @@ def test_iter_entries_skips_invalid_json(tmp_path: Path) -> None:
     entries = list(audit_log.iter_entries())
 
     assert entries == [{"audit_id": "a"}]
+
+
+def test_iter_entries_no_file(tmp_path: Path) -> None:
+    log_path = tmp_path / "audit.jsonl"
+    audit_log = AuditLog(log_path)
+
+    entries = list(audit_log.iter_entries())
+
+    assert entries == []
+
+
+def test_record_uses_provided_audit_id(tmp_path: Path) -> None:
+    log_path = tmp_path / "audit.jsonl"
+    audit_log = AuditLog(log_path)
+
+    audit_log.record(
+        event_id="evt-2",
+        request_type="dossier_confirmation",
+        stage="response",
+        responder="human",
+        outcome="approved",
+        audit_id="existing",
+    )
+
+    entries = audit_log.load_entries()
+
+    assert entries[0]["audit_id"] == "existing"

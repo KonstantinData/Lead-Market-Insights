@@ -4,12 +4,13 @@ Provides production-ready IMAP polling using asyncio + imaplib via to_thread wra
 """
 
 import asyncio
-import email
 import imaplib
 import logging
 import re
 from dataclasses import dataclass
+from email import message_from_bytes
 from email.header import decode_header
+from email.message import Message
 from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -22,7 +23,7 @@ class EmailMessage:
     subject: str
     from_addr: str
     body: str
-    raw_message: email.message.Message
+    raw_message: Message
 
 
 def decode_email_header(header: str) -> str:
@@ -43,7 +44,7 @@ def decode_email_header(header: str) -> str:
     return " ".join(decoded_parts)
 
 
-def extract_body_from_message(msg: email.message.Message) -> str:
+def extract_body_from_message(msg: Message) -> str:
     """Extract text body from email message."""
     body = ""
     
@@ -169,7 +170,7 @@ class AsyncIMAPClient:
                     
                     # Parse message
                     raw_email = msg_data[0][1]
-                    msg = email.message_from_bytes(raw_email)
+                    msg = message_from_bytes(raw_email)
                     
                     subject = decode_email_header(msg.get("Subject", ""))
                     from_addr = decode_email_header(msg.get("From", ""))

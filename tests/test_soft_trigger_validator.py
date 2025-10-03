@@ -118,3 +118,93 @@ def test_load_synonym_phrases_missing_file(tmp_path: Path, caplog: pytest.LogCap
 
     assert phrases == ()
     assert any("not found" in message for message in caplog.text.splitlines())
+
+
+def test_validator_marks_invalid_candidate() -> None:
+    validator = SoftTriggerValidator(synonyms=["kunden gespräch"])
+
+    accepted, rejected = validator.validate(
+        summary="", description="", matches=[{"soft_trigger": "", "source_field": "summary"}]
+    )
+
+    assert accepted == []
+    assert rejected and rejected[0]["reject_reason"] == "invalid_candidate"
+
+
+def test_validator_accepts_without_similarity_when_disabled() -> None:
+    validator = SoftTriggerValidator(
+        synonyms=[],
+        require_evidence_substring=False,
+        similarity_threshold=0.99,
+    )
+
+    candidate = {
+        "soft_trigger": "Custom Phrase",
+        "matched_hard_trigger": "placeholder",
+        "source_field": "summary",
+        "reason": "  extra spacing  ",
+    }
+
+    accepted, rejected = validator.validate(
+        summary="Custom Phrase present", description="", matches=[candidate]
+    )
+
+    assert len(accepted) == 1
+    assert accepted[0]["reason"] == "extra spacing"
+    assert accepted[0]["validation"]["similarity"] == 1.0
+    assert rejected == []
+
+
+def test_validator_tfidf_similarity_path() -> None:
+    validator = SoftTriggerValidator(
+        synonyms=["kunden termin", "projekt kickoff"],
+        similarity_method="tfidf",
+        similarity_threshold=0.1,
+    )
+
+    candidate = {
+        "soft_trigger": "Projekt Kickoff",
+        "matched_hard_trigger": "meeting",
+        "source_field": "summary",
+    }
+
+    accepted, rejected = validator.validate(
+        summary="Projekt Kickoff besprochen", description="", matches=[candidate]
+    )
+
+    assert accepted and accepted[0]["validation"]["method"] == "tfidf"
+    assert rejected == []
+
+
+def test_validator_unknown_similarity_falls_back(caplog: pytest.LogCaptureFixture) -> None:
+    validator = SoftTriggerValidator(
+        synonyms=["kunden termin"],
+        similarity_method="unknown",
+        similarity_threshold=0.5,
+    )
+
+    candidate = {
+        "soft_trigger": "Kunden Termin",
+        "matched_hard_trigger": "meeting",
+        "source_field": "summary",
+    }
+
+    with caplog.at_level("DEBUG"):
+        accepted, rejected = validator.validate(
+            summary="Kunden Termin anberaumt", description="", matches=[candidate]
+        )
+
+    assert accepted
+    assert rejected == []
+    assert any("falling back to Jaccard" in message for message in caplog.text.splitlines())
+
+
+def test_load_synonym_phrases_empty_file_warns(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    config_file = tmp_path / "synonyms.txt"
+    config_file.write_text("\n\n", encoding="utf-8")
+
+    with caplog.at_level("WARNING"):
+        phrases = load_synonym_phrases(config_file)
+
+    assert phrases == ()
+    assert any("is empty" in message for message in caplog.text.splitlines())

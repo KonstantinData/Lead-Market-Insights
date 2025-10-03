@@ -117,8 +117,7 @@ class MasterWorkflowAgent:
         self.run_directory: Path = self.storage_agent.base_dir
         self.log_file_path: Path = self.run_directory / "polling_trigger.log"
         self.log_filename: str = str(self.log_file_path)
-        self.audit_log: AuditLog
-        self.initialize_run()
+        self.audit_log: Optional[AuditLog] = None
 
         self.llm_confidence_thresholds: Dict[str, float] = {}
         self.llm_cost_caps: Dict[str, float] = {}
@@ -130,10 +129,15 @@ class MasterWorkflowAgent:
         )
         self._config_watcher.start()
 
-    def initialize_run(self, run_id: Optional[str] = None) -> None:
-        self.run_id = run_id or datetime.now(timezone.utc).strftime(
-            "%Y-%m-%dT%H-%M-%SZ"
-        )
+    def attach_run(
+        self, run_id: str, workflow_log_manager: WorkflowLogManager
+    ) -> None:
+        if not run_id:
+            raise ValueError("attach_run requires a non-empty run_id")
+
+        self.run_id = run_id
+        self.workflow_log_manager = workflow_log_manager
+
         self.run_directory = self.storage_agent.create_run_directory(self.run_id)
         self.log_file_path = self.run_directory / "polling_trigger.log"
         self.log_filename = str(self.log_file_path)
@@ -148,42 +152,59 @@ class MasterWorkflowAgent:
             except Exception:
                 logger.exception("Failed to set run context on human agent")
 
-        for existing_handler in list(logger.handlers):
-            if isinstance(existing_handler, logging.FileHandler) and getattr(
-                existing_handler, "_master_agent_handler", False
+        existing_handler: Optional[logging.FileHandler] = None
+        for handler in list(logger.handlers):
+            if isinstance(handler, logging.FileHandler) and getattr(
+                handler, "_master_agent_handler", False
             ):
-                if hasattr(existing_handler, "_master_agent_run_id_filter"):
-                    existing_handler.removeFilter(
-                        existing_handler._master_agent_run_id_filter  # type: ignore[attr-defined]
-                    )
+                existing_handler = handler
+                break
+
+        expected_path = str(self.log_file_path)
+        file_handler: Optional[logging.FileHandler] = None
+        if existing_handler is not None:
+            handler_path = getattr(existing_handler, "_master_agent_handler_path", None)
+            if handler_path == expected_path:
+                file_handler = existing_handler
+            else:
                 logger.removeHandler(existing_handler)
                 existing_handler.close()
 
-        file_handler = logging.FileHandler(
-            self.log_file_path, mode="w", encoding="utf-8"
-        )
+        if file_handler is None:
+            file_handler = logging.FileHandler(
+                self.log_file_path, mode="w", encoding="utf-8"
+            )
 
-        class _RunIdInjector(logging.Filter):
-            def __init__(self, run_id: str) -> None:
-                super().__init__(name="master-workflow-run")
-                self._run_id = run_id
+            class _RunIdInjector(logging.Filter):
+                def __init__(self, current_run_id: str) -> None:
+                    super().__init__(name="master-workflow-run")
+                    self._run_id = current_run_id
 
-            def filter(self, record: logging.LogRecord) -> bool:  # pragma: no cover - simple setter
-                if getattr(record, "run_id", None) in {None, ""}:
-                    record.run_id = self._run_id
-                return True
+                def filter(self, record: logging.LogRecord) -> bool:  # pragma: no cover - simple setter
+                    if getattr(record, "run_id", None) in {None, ""}:
+                        record.run_id = self._run_id
+                    return True
 
-        run_filter = _RunIdInjector(self.run_id)
-        file_handler.addFilter(run_filter)
-        setattr(file_handler, "_master_agent_run_id_filter", run_filter)
-        formatter = logging.Formatter(
-            "%(asctime)s %(levelname)s [run_id=%(run_id)s] %(message)s"
-        )
-        file_handler.setFormatter(formatter)
-        file_handler.setLevel(logging.INFO)
-        setattr(file_handler, "_master_agent_handler", True)
+            run_filter = _RunIdInjector(self.run_id)
+            file_handler.addFilter(run_filter)
+            setattr(file_handler, "_master_agent_run_id_filter", run_filter)
+            formatter = logging.Formatter(
+                "%(asctime)s %(levelname)s [run_id=%(run_id)s] %(message)s"
+            )
+            file_handler.setFormatter(formatter)
+            file_handler.setLevel(logging.INFO)
+            setattr(file_handler, "_master_agent_handler", True)
+            setattr(file_handler, "_master_agent_handler_path", expected_path)
+            logger.addHandler(file_handler)
+        else:
+            run_filter = getattr(
+                file_handler, "_master_agent_run_id_filter", None
+            )
+            if isinstance(run_filter, logging.Filter):
+                # Update run_id on reused handler in case of manual reattachment.
+                setattr(run_filter, "_run_id", self.run_id)
+
         logger.setLevel(logging.INFO)
-        logger.addHandler(file_handler)
 
     async def process_all_events(self) -> List[Dict[str, Any]]:
         logger.info("MasterWorkflowAgent: Processing events...")
@@ -806,7 +827,7 @@ class MasterWorkflowAgent:
 
         audit_path = self.storage_agent.get_audit_log_path(self.run_id)
         audit_entries = []
-        if audit_path.exists():
+        if audit_path.exists() and self.audit_log is not None:
             try:
                 audit_entries = self.audit_log.load_entries()
             except Exception:

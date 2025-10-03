@@ -7,6 +7,7 @@ import pytest
 
 from agents.master_workflow_agent import MasterWorkflowAgent
 from config.config import settings
+from utils.observability import current_run_id_var, generate_run_id
 from utils.pii import mask_pii
 
 
@@ -106,6 +107,10 @@ async def test_master_agent_masks_logged_events(orchestrator_environment):
             extraction_agent=DummyExtractionAgent(),
         )
 
+        run_id = generate_run_id()
+        current_run_id_var.set(run_id)
+        agent.attach_run(run_id, agent.workflow_log_manager)
+
         await agent.process_all_events()
 
         log_text = agent.log_file_path.read_text(encoding="utf-8")
@@ -153,6 +158,10 @@ async def test_human_agent_masks_messages(orchestrator_environment):
             trigger_agent=DummyTriggerAgent("soft"),
             extraction_agent=DummyExtractionAgent(),
         )
+
+        run_id = generate_run_id()
+        current_run_id_var.set(run_id)
+        agent.attach_run(run_id, agent.workflow_log_manager)
 
         await agent.process_all_events()
 

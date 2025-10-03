@@ -1,4 +1,10 @@
-"""WorkflowOrchestrator: Central orchestrator for the Agentic Intelligence Research workflow."""
+"""WorkflowOrchestrator: central coordinator for research workflows.
+
+The orchestrator now requires a ``run_id`` supplied by the caller. The run
+identifier must be generated before instantiating the orchestrator so that all
+logs and telemetry emitted during construction and execution are correlated to
+the same run.
+"""
 
 import asyncio
 import json
@@ -23,8 +29,9 @@ from agents.master_workflow_agent import MasterWorkflowAgent
 from config.config import settings
 from utils.observability import (
     configure_observability,
+    current_run_id_var,
     flush_telemetry,
-    generate_run_id,
+    get_current_run_id,
     workflow_run,
 )
 from utils.reporting import convert_research_artifacts_to_pdfs
@@ -40,6 +47,7 @@ class WorkflowOrchestrator:
         self,
         communication_backend=None,
         *,
+        run_id: Optional[str] = None,
         alert_agent: Optional[AlertAgent] = None,
         master_agent: Optional[MasterWorkflowAgent] = None,
         failure_threshold: int = 3,
@@ -49,6 +57,12 @@ class WorkflowOrchestrator:
         self.failure_threshold = max(1, failure_threshold)
         self._failure_key = "workflow_run"
         self._failure_counts: Dict[str, int] = {}
+        if not run_id:
+            raise ValueError("WorkflowOrchestrator requires a non-empty run_id")
+        self.run_id = run_id
+        current_context_run_id = get_current_run_id()
+        if current_context_run_id == "unassigned":
+            current_run_id_var.set(run_id)
         self._last_run_id: Optional[str] = None
         self._research_summary_root = (
             Path(settings.research_artifact_dir) / "workflow_runs"
@@ -271,7 +285,7 @@ class WorkflowOrchestrator:
             event.set()
 
     async def run(self) -> None:
-        run_id = generate_run_id()
+        run_id = self.run_id
         events_processed = 0
         run_context = None
         start_time = time.perf_counter()
@@ -290,8 +304,10 @@ class WorkflowOrchestrator:
                     context.mark_status("skipped")
                 else:
                     try:
-                        if hasattr(self.master_agent, "initialize_run"):
-                            self.master_agent.initialize_run(context.run_id)
+                        if hasattr(self.master_agent, "attach_run"):
+                            self.master_agent.attach_run(
+                                context.run_id, self.master_agent.workflow_log_manager
+                            )
 
                         results = await self.master_agent.process_all_events() or []
                         events_processed = len(results)

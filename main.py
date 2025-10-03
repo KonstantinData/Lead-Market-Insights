@@ -1,9 +1,15 @@
 import asyncio
 import logging
 import os
+from typing import Callable
+
 from dotenv import load_dotenv
 
-from utils.observability import get_current_run_id
+from utils.observability import (
+    current_run_id_var,
+    generate_run_id,
+    get_current_run_id,
+)
 
 try:
     from utils.telemetry import setup_telemetry
@@ -17,7 +23,7 @@ from utils.env_compat import apply_env_compat
 class _RunIdLoggingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         if getattr(record, "run_id", None) in {None, ""}:
-            record.run_id = get_current_run_id() or "n/a"
+            record.run_id = get_current_run_id()
         return True
 
 
@@ -46,10 +52,16 @@ def _init_logging() -> None:
             handler.addFilter(_run_id_filter)
 
 
-async def _run_once() -> None:
+def _assign_new_run_id() -> str:
+    run_id = generate_run_id()
+    current_run_id_var.set(run_id)
+    return run_id
+
+
+async def _run_once(run_id: str) -> None:
     from agents.workflow_orchestrator import WorkflowOrchestrator
 
-    orchestrator = WorkflowOrchestrator()
+    orchestrator = WorkflowOrchestrator(run_id=run_id)
     try:
         orchestrator.install_signal_handlers(asyncio.get_running_loop())
     except NotImplementedError:
@@ -62,13 +74,17 @@ async def _run_once() -> None:
         await orchestrator.shutdown()
 
 
-async def _daemon_loop(interval: int = 300) -> None:
+async def _daemon_loop(
+    *, interval: int = 300, prepare_run: Callable[[], str], initial_run_id: str
+) -> None:
     log = logging.getLogger(__name__)
+    run_id = initial_run_id
     while True:
         log.info("Daemon cycle start.")
-        await _run_once()
+        await _run_once(run_id)
         log.info("Daemon cycle complete. Sleeping %ss.", interval)
         await asyncio.sleep(interval)
+        run_id = prepare_run()
 
 
 async def _async_main() -> None:
@@ -83,6 +99,8 @@ async def _async_main() -> None:
     if not validate_environment(strict=True):
         logging.getLogger(__name__).error("Environment validation failed; exiting.")
         return
+
+    run_id = _assign_new_run_id()
 
     # Telemetrie (Traces)
     if setup_telemetry and os.getenv("OTEL_DISABLE_DEV", "").strip().lower() not in {
@@ -101,10 +119,12 @@ async def _async_main() -> None:
 
     run_mode = os.getenv("LEADMI_RUN_MODE", "daemon").lower()
     if run_mode == "oneshot":
-        await _run_once()
+        await _run_once(run_id)
     else:
         interval = int(os.getenv("LEADMI_DAEMON_INTERVAL", "300"))
-        await _daemon_loop(interval=interval)
+        await _daemon_loop(
+            interval=interval, prepare_run=_assign_new_run_id, initial_run_id=run_id
+        )
 
 
 def main() -> None:

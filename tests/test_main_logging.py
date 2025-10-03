@@ -34,7 +34,7 @@ def test_init_logging_injects_default_run_id(capsys):
         "log message emitted before orchestrator instantiation"
     )
     captured = capsys.readouterr()
-    assert "run_id=n/a" in captured.err
+    assert "run_id=unassigned" in captured.err
 
 
 def test_logging_filter_respects_existing_run_id(capsys):

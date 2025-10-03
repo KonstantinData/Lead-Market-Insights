@@ -6,12 +6,17 @@ import json
 from pathlib import Path
 from typing import List
 
+import json
+from pathlib import Path
+from typing import List
+
 import pytest
 
 import agents.master_workflow_agent as master_module
 import agents.workflow_orchestrator as workflow_orchestrator
 from agents.alert_agent import AlertSeverity
 from agents.workflow_orchestrator import WorkflowOrchestrator
+from utils.observability import current_run_id_var, generate_run_id
 
 
 pytestmark = pytest.mark.asyncio
@@ -54,8 +59,9 @@ class RecordingMasterAgent:
         self.initialized_runs: list[str] = []
         self.finalize_called = False
         self.storage_agent = None
+        self.workflow_log_manager = None
 
-    def initialize_run(self, run_id: str) -> None:
+    def attach_run(self, run_id: str, *_args, **_kwargs) -> None:
         self.initialized_runs.append(run_id)
 
     async def process_all_events(self) -> List[dict[str, object]]:
@@ -84,14 +90,20 @@ async def test_backend_failure_triggers_alert(
     monkeypatch.setattr(master_agent, "process_all_events", fail_process)
 
     alert_agent = DummyAlertAgent()
+    run_id = generate_run_id()
+    token = current_run_id_var.set(run_id)
     orchestrator = WorkflowOrchestrator(
-        alert_agent=alert_agent, master_agent=master_agent, failure_threshold=3
+        alert_agent=alert_agent,
+        master_agent=master_agent,
+        failure_threshold=3,
+        run_id=run_id,
     )
 
     try:
         await orchestrator.run()
     finally:
         await orchestrator.shutdown()
+        current_run_id_var.reset(token)
 
     assert alert_agent.calls
     call = alert_agent.calls[-1]
@@ -114,8 +126,13 @@ async def test_repeated_failures_escalate_to_critical(
     monkeypatch.setattr(master_agent, "process_all_events", fail_process)
 
     alert_agent = DummyAlertAgent()
+    run_id = generate_run_id()
+    token = current_run_id_var.set(run_id)
     orchestrator = WorkflowOrchestrator(
-        alert_agent=alert_agent, master_agent=master_agent, failure_threshold=2
+        alert_agent=alert_agent,
+        master_agent=master_agent,
+        failure_threshold=2,
+        run_id=run_id,
     )
 
     try:
@@ -123,6 +140,7 @@ async def test_repeated_failures_escalate_to_critical(
         await orchestrator.run()
     finally:
         await orchestrator.shutdown()
+        current_run_id_var.reset(token)
 
     assert len(alert_agent.calls) == 2
     first, second = alert_agent.calls
@@ -268,11 +286,14 @@ async def test_orchestrator_records_research_artifacts_and_email_details(
     log_dir.mkdir()
     master_agent = RecordingMasterAgent(log_dir=log_dir, results=research_results)
 
-    orchestrator = WorkflowOrchestrator(master_agent=master_agent)
+    run_id = generate_run_id()
+    token = current_run_id_var.set(run_id)
+    orchestrator = WorkflowOrchestrator(master_agent=master_agent, run_id=run_id)
     try:
         await orchestrator.run()
     finally:
         await orchestrator.shutdown()
+        current_run_id_var.reset(token)
 
     run_id = orchestrator._last_run_id
     assert run_id is not None

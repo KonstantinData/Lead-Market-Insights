@@ -28,7 +28,9 @@ def _resolve_entrypoint(spec: str) -> AsyncFactory:
     try:
         entrypoint = getattr(module, attr_name)
     except AttributeError as exc:  # pragma: no cover - defensive guard
-        raise ValueError(f"Module '{module_name}' has no attribute '{attr_name}'") from exc
+        raise ValueError(
+            f"Module '{module_name}' has no attribute '{attr_name}'"
+        ) from exc
 
     if not inspect.iscoroutinefunction(entrypoint):
         raise TypeError(

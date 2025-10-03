@@ -69,7 +69,10 @@ class CostGuard:
         self._monthly_spend = 0.0
         self._service_spend: Dict[str, float] = defaultdict(float)
         self._service_invocations: Dict[str, Deque[datetime]] = defaultdict(deque)
-        self._warned_limits: MutableMapping[str, bool] = {"daily": False, "monthly": False}
+        self._warned_limits: MutableMapping[str, bool] = {
+            "daily": False,
+            "monthly": False,
+        }
 
     # ------------------------------------------------------------------
     # Factory helpers
@@ -142,9 +145,7 @@ class CostGuard:
         self._monthly_spend += cost
         observability.record_cost_spend(normalised_service, cost)
 
-        warnings.extend(
-            self._evaluate_thresholds(normalised_service, metadata)
-        )
+        warnings.extend(self._evaluate_thresholds(normalised_service, metadata))
 
         return CostDecision(
             allowed=True,
@@ -176,7 +177,9 @@ class CostGuard:
 
     def _reset_if_needed(self, now: datetime) -> None:
         if now.date() != self._daily_anchor:
-            self.logger.debug("Resetting daily spend window: %s -> %s", self._daily_anchor, now.date())
+            self.logger.debug(
+                "Resetting daily spend window: %s -> %s", self._daily_anchor, now.date()
+            )
             self._daily_anchor = now.date()
             self._daily_spend = 0.0
             self._warned_limits["daily"] = False
@@ -184,7 +187,9 @@ class CostGuard:
         month_anchor = (now.year, now.month)
         if month_anchor != self._monthly_anchor:
             self.logger.debug(
-                "Resetting monthly spend window: %s -> %s", self._monthly_anchor, month_anchor
+                "Resetting monthly spend window: %s -> %s",
+                self._monthly_anchor,
+                month_anchor,
             )
             self._monthly_anchor = month_anchor
             self._monthly_spend = 0.0
@@ -223,16 +228,14 @@ class CostGuard:
         projected_monthly = self._monthly_spend + cost
 
         if self.daily_cap and projected_daily > self.daily_cap:
-            message = (
-                f"Daily cost cap of ${self.daily_cap:.2f} exceeded by service {service}."
+            message = f"Daily cost cap of ${self.daily_cap:.2f} exceeded by service {service}."
+            self._emit_breach_alert(
+                "daily", service, projected_daily, self.daily_cap, metadata
             )
-            self._emit_breach_alert("daily", service, projected_daily, self.daily_cap, metadata)
             return message
 
         if self.monthly_cap and projected_monthly > self.monthly_cap:
-            message = (
-                f"Monthly cost cap of ${self.monthly_cap:.2f} exceeded by service {service}."
-            )
+            message = f"Monthly cost cap of ${self.monthly_cap:.2f} exceeded by service {service}."
             self._emit_breach_alert(
                 "monthly", service, projected_monthly, self.monthly_cap, metadata
             )
@@ -251,7 +254,9 @@ class CostGuard:
             ratio = self._daily_spend / self.daily_cap if self.daily_cap else 0.0
             if ratio >= self.warning_threshold and not self._warned_limits["daily"]:
                 messages.append(
-                    self._emit_warning("daily", service, self._daily_spend, self.daily_cap, metadata)
+                    self._emit_warning(
+                        "daily", service, self._daily_spend, self.daily_cap, metadata
+                    )
                 )
 
         if self.monthly_cap:
@@ -259,7 +264,11 @@ class CostGuard:
             if ratio >= self.warning_threshold and not self._warned_limits["monthly"]:
                 messages.append(
                     self._emit_warning(
-                        "monthly", service, self._monthly_spend, self.monthly_cap, metadata
+                        "monthly",
+                        service,
+                        self._monthly_spend,
+                        self.monthly_cap,
+                        metadata,
                     )
                 )
 
@@ -292,9 +301,7 @@ class CostGuard:
         metadata: Optional[Mapping[str, object]],
     ) -> None:
         observability.record_cost_limit_event("breach", service, limit=limit)
-        message = (
-            f"{scope.capitalize()} cost limit hit for {service}: ${spend:.2f} exceeds ${limit:.2f}."
-        )
+        message = f"{scope.capitalize()} cost limit hit for {service}: ${spend:.2f} exceeds ${limit:.2f}."
         self.logger.error(message)
         self._send_alert(message, AlertSeverity.ERROR, metadata, scope, spend, limit)
 

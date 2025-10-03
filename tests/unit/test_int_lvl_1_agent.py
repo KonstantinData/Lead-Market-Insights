@@ -76,7 +76,9 @@ def base_trigger() -> dict[str, object]:
 
 
 @pytest.fixture()
-def trigger_factory(base_trigger: dict[str, object]) -> Callable[..., dict[str, object]]:
+def trigger_factory(
+    base_trigger: dict[str, object],
+) -> Callable[..., dict[str, object]]:
     def _factory(**updates: object) -> dict[str, object]:
         trigger = json.loads(json.dumps(base_trigger))
         payload = trigger["payload"]
@@ -202,7 +204,9 @@ async def test_candidates_without_valid_properties_are_ignored(tmp_path: Path) -
         config=_Config(tmp_path), hubspot_integration=integration, result_limit=5
     )
 
-    trigger = {"payload": {"company_name": "Example Analytics", "description": "Analytics"}}
+    trigger = {
+        "payload": {"company_name": "Example Analytics", "description": "Analytics"}
+    }
     results = (await agent.run(trigger))["payload"]["results"]
 
     assert [item["id"] for item in results] == ["valid"]

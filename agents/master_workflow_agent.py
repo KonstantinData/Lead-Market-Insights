@@ -138,9 +138,7 @@ class MasterWorkflowAgent:
         )
         self._config_watcher.start()
 
-    def attach_run(
-        self, run_id: str, workflow_log_manager: WorkflowLogManager
-    ) -> None:
+    def attach_run(self, run_id: str, workflow_log_manager: WorkflowLogManager) -> None:
         if not run_id:
             raise ValueError("attach_run requires a non-empty run_id")
 
@@ -189,7 +187,9 @@ class MasterWorkflowAgent:
                     super().__init__(name="master-workflow-run")
                     self._run_id = current_run_id
 
-                def filter(self, record: logging.LogRecord) -> bool:  # pragma: no cover - simple setter
+                def filter(
+                    self, record: logging.LogRecord
+                ) -> bool:  # pragma: no cover - simple setter
                     if getattr(record, "run_id", None) in {None, ""}:
                         record.run_id = self._run_id
                     return True
@@ -206,9 +206,7 @@ class MasterWorkflowAgent:
             setattr(file_handler, "_master_agent_handler_path", expected_path)
             logger.addHandler(file_handler)
         else:
-            run_filter = getattr(
-                file_handler, "_master_agent_run_id_filter", None
-            )
+            run_filter = getattr(file_handler, "_master_agent_run_id_filter", None)
             if isinstance(run_filter, logging.Filter):
                 # Update run_id on reused handler in case of manual reattachment.
                 setattr(run_filter, "_run_id", self.run_id)

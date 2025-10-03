@@ -114,7 +114,9 @@ def _read_agent_config_file(path: Path) -> Mapping[str, Any]:
 
     if suffix in {".yaml", ".yml"}:
         if _YAML_MODULE is None:
-            raise RuntimeError("PyYAML is required to load YAML agent configuration files.")
+            raise RuntimeError(
+                "PyYAML is required to load YAML agent configuration files."
+            )
         data = _YAML_MODULE.safe_load(text) or {}
     elif suffix == ".json":
         data = json.loads(text)
@@ -124,7 +126,9 @@ def _read_agent_config_file(path: Path) -> Mapping[str, Any]:
         )
 
     if not isinstance(data, Mapping):
-        raise ValueError("Agent configuration file must contain a mapping at the top level.")
+        raise ValueError(
+            "Agent configuration file must contain a mapping at the top level."
+        )
 
     return data
 
@@ -133,7 +137,9 @@ def _extract_agent_overrides(config_data: Mapping[str, Any]) -> Dict[str, str]:
     """Normalise agent override names from structured configuration data."""
 
     candidates = config_data
-    agents_section = config_data.get("agents") if isinstance(config_data, Mapping) else None
+    agents_section = (
+        config_data.get("agents") if isinstance(config_data, Mapping) else None
+    )
     if isinstance(agents_section, Mapping):
         candidates = agents_section
 
@@ -213,7 +219,10 @@ def _coerce_mapping(
             continue
         try:
             result[str(key).lower()] = cast(value)
-        except (TypeError, ValueError):  # pragma: no cover - configuration error surface
+        except (
+            TypeError,
+            ValueError,
+        ):  # pragma: no cover - configuration error surface
             raise ValueError(
                 f"Invalid value for '{key}' in LLM configuration; expected {cast.__name__}."
             ) from None
@@ -253,7 +262,9 @@ class Settings:
         )
 
         self.hubspot_access_token: Optional[str] = _get_env_var("HUBSPOT_ACCESS_TOKEN")
-        self.hubspot_client_secret: Optional[str] = _get_env_var("HUBSPOT_CLIENT_SECRET")
+        self.hubspot_client_secret: Optional[str] = _get_env_var(
+            "HUBSPOT_CLIENT_SECRET"
+        )
         self.hubspot_api_base_url: str = _get_env_var("HUBSPOT_API_BASE_URL") or (
             "https://api.hubapi.com"
         )
@@ -281,8 +292,14 @@ class Settings:
 
         self.trigger_words: Optional[str] = _get_env_var("TRIGGER_WORDS")
 
-        validator_flag = (_get_env_var("SOFT_TRIGGER_VALIDATOR") or "on").strip().lower()
-        self.soft_trigger_validator_enabled: bool = validator_flag not in {"off", "0", "false"}
+        validator_flag = (
+            (_get_env_var("SOFT_TRIGGER_VALIDATOR") or "on").strip().lower()
+        )
+        self.soft_trigger_validator_enabled: bool = validator_flag not in {
+            "off",
+            "0",
+            "false",
+        }
         self.synonym_trigger_path: Path = _get_path_env(
             "SYNONYM_TRIGGER_PATH", project_root / "config" / "synonym-trigger.txt"
         )
@@ -293,8 +310,8 @@ class Settings:
             "VALIDATOR_FUZZY_EVIDENCE_THRESHOLD", 0.88
         )
         self.validator_similarity_method: str = (
-            _get_env_var("VALIDATOR_SIMILARITY_METHOD") or "jaccard"
-        ).strip().lower()
+            (_get_env_var("VALIDATOR_SIMILARITY_METHOD") or "jaccard").strip().lower()
+        )
         self.validator_similarity_threshold: float = _get_float_env(
             "VALIDATOR_SIMILARITY_THRESHOLD", 0.60
         )
@@ -303,8 +320,8 @@ class Settings:
         )
 
         self.compliance_mode: str = (
-            _get_env_var("COMPLIANCE_MODE") or "standard"
-        ).strip().lower()
+            (_get_env_var("COMPLIANCE_MODE") or "standard").strip().lower()
+        )
         if self.compliance_mode not in {"standard", "strict"}:
             self.compliance_mode = "standard"
 
@@ -323,7 +340,9 @@ class Settings:
             "SERVICE_RATE_LIMIT_", int
         )
 
-        self.openai_api_base: str = _get_env_var("OPENAI_API_BASE") or "https://api.openai.com"
+        self.openai_api_base: str = (
+            _get_env_var("OPENAI_API_BASE") or "https://api.openai.com"
+        )
 
         whitelist_env = _get_env_var("PII_FIELD_WHITELIST")
         whitelist = {
@@ -370,7 +389,9 @@ class Settings:
                     self._raw_agent_config = data
                     self.agent_overrides.update(_extract_agent_overrides(data))
                     self.agent_config_file = candidate
-                except Exception as exc:  # pragma: no cover - configuration error surface
+                except (
+                    Exception
+                ) as exc:  # pragma: no cover - configuration error surface
                     raise EnvironmentError(
                         f"Failed to read agent configuration from {candidate}: {exc}"
                     ) from exc
@@ -417,18 +438,14 @@ class Settings:
         retry_budgets.update(_prefixed_env_mapping("LLM_RETRY_BUDGET_", int))
 
         llm_section = (
-            config_data.get("llm")
-            if isinstance(config_data, Mapping)
-            else None
+            config_data.get("llm") if isinstance(config_data, Mapping) else None
         )
         if isinstance(llm_section, Mapping):
             confidence_thresholds.update(
                 _coerce_mapping(llm_section.get("confidence_thresholds"), float)
             )
             cost_caps.update(_coerce_mapping(llm_section.get("cost_caps"), float))
-            retry_budgets.update(
-                _coerce_mapping(llm_section.get("retry_budgets"), int)
-            )
+            retry_budgets.update(_coerce_mapping(llm_section.get("retry_budgets"), int))
 
         self.llm_confidence_thresholds = confidence_thresholds
         self.llm_cost_caps = cost_caps
@@ -440,9 +457,7 @@ class Settings:
         prompt_versions = _prefixed_env_mapping("PROMPT_VERSION_", _cast_non_empty_str)
 
         prompts_section = (
-            config_data.get("prompts")
-            if isinstance(config_data, Mapping)
-            else None
+            config_data.get("prompts") if isinstance(config_data, Mapping) else None
         )
         if isinstance(prompts_section, Mapping):
             prompt_versions.update(
@@ -454,7 +469,9 @@ class Settings:
     def _load_storage_extensions(self) -> None:
         """Load optional storage-related settings from environment variables."""
 
-        self.agent_log_dir = _get_path_env("AGENT_LOG_DIR", self.log_storage_dir / "agents")
+        self.agent_log_dir = _get_path_env(
+            "AGENT_LOG_DIR", self.log_storage_dir / "agents"
+        )
 
         research_root = self.log_storage_dir / "research"
         self.research_artifact_dir = _get_path_env(
@@ -512,9 +529,9 @@ class Settings:
             if value:
                 credentials[key] = value
 
-        auth_provider = _get_env_var("GOOGLE_AUTH_PROVIDER_X509_CERT_URL") or _get_env_var(
-            "GHOOGLE_AUTH_PROVIDER_X509_CERT_URL"
-        )
+        auth_provider = _get_env_var(
+            "GOOGLE_AUTH_PROVIDER_X509_CERT_URL"
+        ) or _get_env_var("GHOOGLE_AUTH_PROVIDER_X509_CERT_URL")
         if auth_provider:
             credentials["auth_provider_x509_cert_url"] = auth_provider
 

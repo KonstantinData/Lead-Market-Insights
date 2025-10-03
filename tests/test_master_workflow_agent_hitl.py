@@ -86,7 +86,9 @@ def _prepare_agent(backend: DummyBackend) -> MasterWorkflowAgent:
     )
     agent._send_calls: List[Dict[str, Any]] = []
 
-    async def _capture_send(to_event: Dict[str, Any], event_info: Dict[str, Any]) -> None:
+    async def _capture_send(
+        to_event: Dict[str, Any], event_info: Dict[str, Any]
+    ) -> None:
         agent._send_calls.append({"event": to_event, "info": event_info})
 
     agent._send_to_crm_agent = _capture_send  # type: ignore[assignment]
@@ -154,7 +156,9 @@ async def test_audit_log_records_dossier_acceptance(tmp_path) -> None:
         assert len(entries) == 2
         assert {entry["stage"] for entry in entries} == {"request", "response"}
         assert len({entry["audit_id"] for entry in entries}) == 1
-        response_entry = next(entry for entry in entries if entry["stage"] == "response")
+        response_entry = next(
+            entry for entry in entries if entry["stage"] == "response"
+        )
         assert response_entry["outcome"] == "approved"
         assert response_entry["request_type"] == "dossier_confirmation"
         assert response_entry["responder"] == "DummyBackend"
@@ -185,7 +189,9 @@ async def test_audit_log_records_dossier_decline(tmp_path) -> None:
         entries = agent.audit_log.load_entries()
         assert len(entries) == 2
         assert {entry["stage"] for entry in entries} == {"request", "response"}
-        response_entry = next(entry for entry in entries if entry["stage"] == "response")
+        response_entry = next(
+            entry for entry in entries if entry["stage"] == "response"
+        )
         assert response_entry["outcome"] == "declined"
 
         log_contents = agent.log_file_path.read_text(encoding="utf-8")
@@ -274,7 +280,9 @@ async def test_audit_log_records_missing_info_flow(tmp_path) -> None:
         )
         agent._send_calls = []  # type: ignore[attr-defined]
 
-        async def _capture_send(to_event: Dict[str, Any], event_info: Dict[str, Any]) -> None:
+        async def _capture_send(
+            to_event: Dict[str, Any], event_info: Dict[str, Any]
+        ) -> None:
             agent._send_calls.append({"event": to_event, "info": event_info})
 
         agent._send_to_crm_agent = _capture_send  # type: ignore[assignment]
@@ -288,7 +296,9 @@ async def test_audit_log_records_missing_info_flow(tmp_path) -> None:
         entries = agent.audit_log.load_entries()
         assert len(entries) == 2
         assert {entry["request_type"] for entry in entries} == {"missing_info"}
-        response_entry = next(entry for entry in entries if entry["stage"] == "response")
+        response_entry = next(
+            entry for entry in entries if entry["stage"] == "response"
+        )
         assert response_entry["outcome"] == "completed"
         assert response_entry["responder"] == "simulation"
 

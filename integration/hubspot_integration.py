@@ -114,7 +114,10 @@ class HubSpotIntegration:
 
         for company in results:
             domain_value = self._extract_domain(company)
-            if domain_value and self._normalise_domain(domain_value) == normalised_domain:
+            if (
+                domain_value
+                and self._normalise_domain(domain_value) == normalised_domain
+            ):
                 return company
 
         return next(iter(results), None)

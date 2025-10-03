@@ -131,14 +131,18 @@ class ExtractionAgent(BaseExtractionAgent):
 
             if web_domain:
                 derived_name = self._derive_company_from_domain(web_domain)
-                if derived_name and (not company_name or company_name_source != "event"):
+                if derived_name and (
+                    not company_name or company_name_source != "event"
+                ):
                     company_name = derived_name
                     company_name_source = "domain"
 
             if not company_name:
                 text_candidates = self._generate_text_candidates(summary, description)
                 for candidate_text in text_candidates:
-                    candidate_name = self._extract_company_from_unstructured(candidate_text)
+                    candidate_name = self._extract_company_from_unstructured(
+                        candidate_text
+                    )
                     if candidate_name:
                         company_name = candidate_name
                         company_name_source = "text"
@@ -203,7 +207,10 @@ class ExtractionAgent(BaseExtractionAgent):
                 next_lower = next_word.lower()
                 if not next_word or not next_word[0].isupper():
                     break
-                if next_lower in self.STOP_WORDS and next_lower not in self.COMPANY_SUFFIXES:
+                if (
+                    next_lower in self.STOP_WORDS
+                    and next_lower not in self.COMPANY_SUFFIXES
+                ):
                     break
                 end += 1
 
@@ -236,7 +243,9 @@ class ExtractionAgent(BaseExtractionAgent):
 
     def _derive_company_from_domain(self, domain: str) -> Optional[str]:
         parts = domain.split(".")
-        parts = [part for part in parts if part and part not in self.SUBDOMAIN_EXCLUSIONS]
+        parts = [
+            part for part in parts if part and part not in self.SUBDOMAIN_EXCLUSIONS
+        ]
         if not parts:
             return None
 

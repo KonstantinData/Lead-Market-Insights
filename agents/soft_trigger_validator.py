@@ -81,7 +81,9 @@ class SoftTriggerValidator:
         self._synonym_tokens: Tuple[Tuple[str, ...], ...] = tuple(
             _tokenize(s) for s in self._synonyms_norm
         )
-        self._synonym_sets: Tuple[set[str], ...] = tuple(set(tokens) for tokens in self._synonym_tokens)
+        self._synonym_sets: Tuple[set[str], ...] = tuple(
+            set(tokens) for tokens in self._synonym_tokens
+        )
         self._synonym_tfidf: Tuple[Dict[str, float], ...]
         self._idf: Dict[str, float]
         self._default_idf: float
@@ -124,7 +126,9 @@ class SoftTriggerValidator:
             source = str(candidate.get("source_field", "")).strip()
             reason_value = candidate.get("reason")
             reason = (
-                str(reason_value).strip() if reason_value is not None and str(reason_value).strip() else None
+                str(reason_value).strip()
+                if reason_value is not None and str(reason_value).strip()
+                else None
             )
 
             if not soft or not hard or source not in {"summary", "description"}:
@@ -138,7 +142,10 @@ class SoftTriggerValidator:
                 continue
 
             similarity_score = self._max_similarity(soft)
-            if not self._similarity_disabled and similarity_score < self.similarity_threshold:
+            if (
+                not self._similarity_disabled
+                and similarity_score < self.similarity_threshold
+            ):
                 rejected.append(
                     {
                         **candidate,
@@ -201,7 +208,8 @@ class SoftTriggerValidator:
             return best
 
         logger.debug(
-            "Unknown similarity method '%s'; falling back to Jaccard.", self.similarity_method
+            "Unknown similarity method '%s'; falling back to Jaccard.",
+            self.similarity_method,
         )
         token_set = set(tokens)
         best = 0.0

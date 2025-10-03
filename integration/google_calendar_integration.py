@@ -62,7 +62,9 @@ class GoogleCalendarIntegration:
     # ------------------------------------------------------------------
     # Credential helpers
     # ------------------------------------------------------------------
-    def _prepare_credentials(self, credentials: Optional[Dict[str, str]]) -> OAuthCredentials:
+    def _prepare_credentials(
+        self, credentials: Optional[Dict[str, str]]
+    ) -> OAuthCredentials:
         if credentials is None:
             credentials = self._load_credentials_from_env()
 

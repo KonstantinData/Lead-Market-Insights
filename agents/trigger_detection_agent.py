@@ -6,7 +6,18 @@ import inspect
 import json
 import logging
 import os
-from typing import Any, Awaitable, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Union
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Union,
+)
 
 from collections import Counter
 
@@ -37,7 +48,9 @@ class _OpenAiSoftTriggerDetector:
     )
     _ENDPOINT = "/v1/chat/completions"
 
-    def __init__(self, api_key: str, *, model: str = "gpt-4o-mini", timeout: float = 30.0) -> None:
+    def __init__(
+        self, api_key: str, *, model: str = "gpt-4o-mini", timeout: float = 30.0
+    ) -> None:
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
@@ -71,9 +84,7 @@ class _OpenAiSoftTriggerDetector:
             "Content-Type": "application/json",
         }
 
-        response = await self._http.post(
-            self._ENDPOINT, headers=headers, json=payload
-        )
+        response = await self._http.post(self._ENDPOINT, headers=headers, json=payload)
         response.raise_for_status()
         data = response.json()
         choices = data.get("choices") or []
@@ -145,7 +156,9 @@ Antworte ausschließlich mit der JSON-Struktur.
         soft_trigger_detector: Optional[SoftTriggerDetector] = None,
         soft_trigger_validator: Optional[SoftTriggerValidator] = None,
     ) -> None:
-        provided = [str(word).strip() for word in (trigger_words or []) if str(word).strip()]
+        provided = [
+            str(word).strip() for word in (trigger_words or []) if str(word).strip()
+        ]
         self.hard_trigger_words: tuple[str, ...]
         if provided:
             deduplicated: List[str] = []
@@ -157,7 +170,9 @@ Antworte ausschließlich mit der JSON-Struktur.
                 seen.add(normalised)
                 deduplicated.append(str(word))
             self.original_trigger_words = tuple(deduplicated)
-            self.hard_trigger_words = tuple(normalize_text(word) for word in deduplicated)
+            self.hard_trigger_words = tuple(
+                normalize_text(word) for word in deduplicated
+            )
         else:
             default_word = "trigger word"
             self.original_trigger_words = (default_word,)
@@ -204,7 +219,9 @@ Antworte ausschließlich mit der JSON-Struktur.
             )
             return hard_result
 
-        logger.info("Event %s: No hard triggers found; evaluating soft triggers", event_id)
+        logger.info(
+            "Event %s: No hard triggers found; evaluating soft triggers", event_id
+        )
 
         soft_matches = await self._detect_soft_triggers(event)
         logger.info(
@@ -294,7 +311,9 @@ Antworte ausschließlich mit der JSON-Struktur.
 
         return self._check_text_field(text, field_name)
 
-    def _detect_hard_trigger(self, event: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    def _detect_hard_trigger(
+        self, event: Mapping[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         for field_name in ("summary", "description"):
             text = event.get(field_name)
             result = self._check_text_field(text, field_name)
@@ -302,7 +321,9 @@ Antworte ausschließlich mit der JSON-Struktur.
                 return result
         return None
 
-    async def _detect_soft_triggers(self, event: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    async def _detect_soft_triggers(
+        self, event: Mapping[str, Any]
+    ) -> List[Dict[str, Any]]:
         summary = event.get("summary") or ""
         description = event.get("description") or ""
         event_id = event.get("id")
@@ -330,7 +351,9 @@ Antworte ausschließlich mit der JSON-Struktur.
             if inspect.isawaitable(raw_matches):
                 raw_matches = await raw_matches
         except Exception as exc:  # pragma: no cover - defensive guard
-            logger.exception("Event %s: Soft trigger detection failed: %s", event_id, exc)
+            logger.exception(
+                "Event %s: Soft trigger detection failed: %s", event_id, exc
+            )
             return []
 
         if raw_matches is None:
@@ -398,7 +421,11 @@ Antworte ausschließlich mit der JSON-Struktur.
             soft_trigger = str(candidate.get("soft_trigger", "")).strip()
             matched = str(candidate.get("matched_hard_trigger", "")).strip()
             source_field = str(candidate.get("source_field", "")).strip()
-            if not soft_trigger or not matched or source_field not in {"summary", "description"}:
+            if (
+                not soft_trigger
+                or not matched
+                or source_field not in {"summary", "description"}
+            ):
                 continue
             reason_value = candidate.get("reason")
             reason = str(reason_value).strip() if reason_value is not None else None
@@ -429,9 +456,7 @@ Antworte ausschließlich mit der JSON-Struktur.
         run_identifier = self._safe_identifier(run_id, default="run")
 
         target_dir = (
-            settings.research_artifact_dir
-            / "soft_trigger_validation"
-            / run_identifier
+            settings.research_artifact_dir / "soft_trigger_validation" / run_identifier
         )
         try:
             target_dir.mkdir(parents=True, exist_ok=True)
@@ -468,16 +493,20 @@ Antworte ausschließlich mit der JSON-Struktur.
         ]
         metadata = event.get("metadata")
         if isinstance(metadata, Mapping):
-            candidates.extend([
-                metadata.get("run_id"),
-                metadata.get("runId"),
-            ])
+            candidates.extend(
+                [
+                    metadata.get("run_id"),
+                    metadata.get("runId"),
+                ]
+            )
         context = event.get("context")
         if isinstance(context, Mapping):
-            candidates.extend([
-                context.get("run_id"),
-                context.get("runId"),
-            ])
+            candidates.extend(
+                [
+                    context.get("run_id"),
+                    context.get("runId"),
+                ]
+            )
 
         for candidate in candidates:
             if isinstance(candidate, str) and candidate.strip():

@@ -82,7 +82,9 @@ class Tracer:
     def __init__(self, provider: "TracerProvider") -> None:
         self._provider = provider
 
-    def start_as_current_span(self, name: str, attributes: Optional[Dict[str, object]] = None):
+    def start_as_current_span(
+        self, name: str, attributes: Optional[Dict[str, object]] = None
+    ):
         parent = trace_api.get_current_span()
         span = Span(name, attributes=attributes, parent=parent)
         return _SpanContextManager(self, span)

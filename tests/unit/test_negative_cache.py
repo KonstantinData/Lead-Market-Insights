@@ -95,9 +95,7 @@ def test_purge_stale_removes_old_entries(tmp_path: Path) -> None:
     cache_path.write_text(json.dumps(raw), encoding="utf-8")
 
     reference_now = datetime(2024, 1, 1, tzinfo=timezone.utc).timestamp()
-    cache = NegativeEventCache.load(
-        cache_path, rule_hash="hash", now=reference_now
-    )
+    cache = NegativeEventCache.load(cache_path, rule_hash="hash", now=reference_now)
 
     assert cache.entries == {}
 

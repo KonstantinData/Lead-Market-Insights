@@ -92,7 +92,9 @@ class DossierResearchAgent(BaseResearchAgent):
         return dict(candidate)
 
     def _validate_payload(self, payload: Mapping[str, Any]) -> None:
-        missing = [field for field in self.REQUIRED_PAYLOAD_FIELDS if field not in payload]
+        missing = [
+            field for field in self.REQUIRED_PAYLOAD_FIELDS if field not in payload
+        ]
         if missing:
             raise ValueError(
                 "Missing required company fields for dossier research: "

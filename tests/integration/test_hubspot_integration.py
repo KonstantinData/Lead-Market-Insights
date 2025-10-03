@@ -73,9 +73,7 @@ async def test_find_company_by_domain_normalizes_and_matches(
 
     monkeypatch.setattr(integration._http, "post", fake_post)
 
-    result = await integration.find_company_by_domain_async(
-        "HTTPS://Example.com/"
-    )
+    result = await integration.find_company_by_domain_async("HTTPS://Example.com/")
 
     assert result == response_payload["results"][0]
     assert captured_payloads, "Expected HubSpot request payload to be captured"
@@ -157,10 +155,8 @@ async def test_hubspot_requests_respect_concurrency_limit(
         )
         expected_min = expected_batches * delay
 
-        assert (
-            elapsed >= expected_min - 0.02
-        ), f"Expected at least {expected_min:.3f}s but observed {elapsed:.3f}s"
-    finally:
-        concurrency.reload_limits(
-            hubspot=previous_hubspot, research=previous_research
+        assert elapsed >= expected_min - 0.02, (
+            f"Expected at least {expected_min:.3f}s but observed {elapsed:.3f}s"
         )
+    finally:
+        concurrency.reload_limits(hubspot=previous_hubspot, research=previous_research)

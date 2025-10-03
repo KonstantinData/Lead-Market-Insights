@@ -15,7 +15,10 @@ class RetryError(Exception):
 
 
 class retry_if_exception_type:
-    def __init__(self, exception_types: Union[Type[BaseException], Tuple[Type[BaseException], ...]]):
+    def __init__(
+        self,
+        exception_types: Union[Type[BaseException], Tuple[Type[BaseException], ...]],
+    ):
         if not isinstance(exception_types, tuple):
             exception_types = (exception_types,)
         self._types = exception_types

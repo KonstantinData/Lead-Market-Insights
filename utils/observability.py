@@ -232,9 +232,7 @@ def workflow_run(
 
     existing_run_id = current_run_id_var.get()
     if not (run_id or existing_run_id):
-        raise RuntimeError(
-            "run_id must be provided before creating workflow context"
-        )
+        raise RuntimeError("run_id must be provided before creating workflow context")
     resolved_run_id = run_id or existing_run_id
     token = current_run_id_var.set(resolved_run_id)
 
@@ -503,6 +501,7 @@ def _install_log_record_factory() -> None:
 
 
 # Convenience helpers for tests -------------------------------------------------
+
 
 def get_in_memory_exporters() -> Dict[str, object]:
     """Return configured in-memory testing exporters, if any."""

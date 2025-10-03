@@ -98,7 +98,9 @@ async def test_send_alert_uses_custom_dispatcher(email_channel):
     await asyncio.sleep(0)
 
     assert client.sent == []
-    assert dispatched == [("Check systems", AlertSeverity.WARNING, {"severity": "warning"})]
+    assert dispatched == [
+        ("Check systems", AlertSeverity.WARNING, {"severity": "warning"})
+    ]
 
 
 def test_send_via_channel_rejects_unknown_type():
@@ -298,9 +300,7 @@ async def test_schedule_coroutine_retains_original_when_scheduler_returns_none()
 
 def test_send_alert_propagates_dispatcher_exceptions(caplog):
     agent = AlertAgent(
-        [
-            {"type": "slack", "dispatcher": MagicMock(side_effect=ValueError("boom"))}
-        ]
+        [{"type": "slack", "dispatcher": MagicMock(side_effect=ValueError("boom"))}]
     )
     caplog.set_level(logging.ERROR)
 

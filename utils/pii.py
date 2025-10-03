@@ -90,7 +90,9 @@ def mask_pii(
     whitelist_set = {_normalise(item) for item in (whitelist or _DEFAULT_WHITELIST)}
     strict = mode.lower() == "strict"
 
-    def _mask(value: Any, key_hint: str | None = None, forced_marker: str | None = None) -> Any:
+    def _mask(
+        value: Any, key_hint: str | None = None, forced_marker: str | None = None
+    ) -> Any:
         key_norm = _normalise(key_hint) if key_hint is not None else None
         if key_norm and key_norm in whitelist_set:
             forced_marker = None
@@ -111,7 +113,9 @@ def mask_pii(
                 result[key] = _mask(sub_value, sub_key_norm, next_forced)
             return result
 
-        if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        if isinstance(value, Sequence) and not isinstance(
+            value, (str, bytes, bytearray)
+        ):
             return [_mask(item, key_hint, forced_marker) for item in value]
 
         if isinstance(value, set):
@@ -130,7 +134,12 @@ def mask_pii(
         if forced_marker and (key_norm not in whitelist_set if key_norm else True):
             return forced_marker
 
-        if strict and isinstance(value, (int, float)) and key_norm and key_norm not in whitelist_set:
+        if (
+            strict
+            and isinstance(value, (int, float))
+            and key_norm
+            and key_norm not in whitelist_set
+        ):
             return _REDACTED_GENERIC
 
         return value

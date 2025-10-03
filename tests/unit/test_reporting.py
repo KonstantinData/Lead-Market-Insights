@@ -18,7 +18,10 @@ from utils.reporting import convert_research_artifacts_to_pdfs
 )
 def artifact_inputs(tmp_path: Path, request) -> Tuple[object, object, Path]:
     dossier_data = {"company": "Acme", "summary": "Example"}
-    similar_data = {"results": ["Acme Subsidiary"], "metadata": {"link": "https://example.com"}}
+    similar_data = {
+        "results": ["Acme Subsidiary"],
+        "metadata": {"link": "https://example.com"},
+    }
 
     dossier_path = tmp_path / "dossier.json"
     similar_path = tmp_path / "similar.json"
@@ -40,7 +43,7 @@ def artifact_inputs(tmp_path: Path, request) -> Tuple[object, object, Path]:
 
 
 def test_convert_research_artifacts_to_pdfs_creates_files(
-    artifact_inputs: Tuple[object, object, Path]
+    artifact_inputs: Tuple[object, object, Path],
 ) -> None:
     dossier_input, similar_input, output_dir = artifact_inputs
 

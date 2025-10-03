@@ -67,7 +67,9 @@ async def test_handle_missing_fields_logs_and_returns_payload(agent, workflow_lo
     assert result["status"] == "AWAIT_REQUESTOR_DETAILS"
     assert result["payload"]["missing_required"] == ["company_domain"]
 
-    reminder_logs = [entry for entry in workflow_logs.records if entry["step"].startswith("reminder")]
+    reminder_logs = [
+        entry for entry in workflow_logs.records if entry["step"].startswith("reminder")
+    ]
     assert {entry["step"] for entry in reminder_logs} == {"reminder_sent"}
 
 
@@ -93,7 +95,9 @@ async def test_handle_missing_fields_logs_when_reminder_not_sent(agent, workflow
 
 
 @pytest.mark.asyncio
-async def test_dispatch_missing_field_reminder_uses_escalation(agent, monkeypatch, workflow_logs):
+async def test_dispatch_missing_field_reminder_uses_escalation(
+    agent, monkeypatch, workflow_logs
+):
     captured = {}
 
     class FakeReminder:
@@ -216,9 +220,7 @@ async def test_run_existing_report_records_artifacts(agent, tmp_path, workflow_l
         "payload": {
             "exists": True,
             "last_report_date": "2024-01-01T00:00:00Z",
-            "neighbors": [
-                {"company_name": "Neighbor Inc", "description": "Match"}
-            ],
+            "neighbors": [{"company_name": "Neighbor Inc", "description": "Match"}],
             "crm_attachment_link": "https://crm.example.com/doc",
         }
     }
@@ -240,7 +242,9 @@ async def test_run_existing_report_records_artifacts(agent, tmp_path, workflow_l
     assert Path(artifacts["neighbor_samples"]).exists()
     assert Path(artifacts["crm_match"]).exists()
     agent._send_existing_report_email.assert_awaited_once()
-    assert any(entry["step"] == "neighbor_samples_recorded" for entry in workflow_logs.records)
+    assert any(
+        entry["step"] == "neighbor_samples_recorded" for entry in workflow_logs.records
+    )
 
 
 @pytest.mark.asyncio
@@ -261,7 +265,9 @@ async def test_send_existing_report_email_success(agent, workflow_logs):
 
     assert status is True
     send_email.assert_awaited_once()
-    assert any(entry["step"] == "existing_report_email_sent" for entry in workflow_logs.records)
+    assert any(
+        entry["step"] == "existing_report_email_sent" for entry in workflow_logs.records
+    )
 
 
 @pytest.mark.asyncio

@@ -11,6 +11,7 @@ try:  # pragma: no cover - import guard for environments without ReportLab
     from reportlab.lib.units import inch
     from reportlab.lib.utils import simpleSplit
     from reportlab.pdfgen import canvas
+
     _REPORTLAB_IMPORT_ERROR: Optional[ImportError] = None
 except ImportError as exc:  # pragma: no cover - captured for graceful error reporting
     LETTER = (612.0, 792.0)  # type: ignore[assignment]

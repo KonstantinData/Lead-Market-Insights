@@ -310,7 +310,9 @@ async def test_orchestrator_records_research_artifacts_and_email_details(
 
     internal_payload = entry["research"]["internal_research"]["payload"]
     assert internal_payload["action"] == "REPORT_REQUIRED"
-    assert internal_payload["artifacts"]["crm_match"] == "stub/crm_matching_company.json"
+    assert (
+        internal_payload["artifacts"]["crm_match"] == "stub/crm_matching_company.json"
+    )
 
     dossier_payload = entry["research"]["dossier_research"]["payload"]
     assert dossier_payload["report_type"] == "Company Detail Research"

@@ -7,7 +7,17 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Tuple
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    MutableMapping,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 from agents.factory import register_agent
 from agents.interfaces import BaseResearchAgent
@@ -158,9 +168,7 @@ class IntLvl1SimilarCompaniesAgent(BaseResearchAgent):
     def _build_target_context(self, payload: Mapping[str, Any]) -> Dict[str, str]:
         context: Dict[str, str] = {}
         context["company_name"] = (
-            payload.get("company_name")
-            or payload.get("name")
-            or ""
+            payload.get("company_name") or payload.get("name") or ""
         )
         context["company_name_normalised"] = normalize_text(context["company_name"])
         for criteria_field in self._match_config.fields:

@@ -52,7 +52,9 @@ def test_normalise_domain_variants(
     ],
 )
 def test_extract_domain_prefers_primary_field(
-    hubspot_integration: HubSpotIntegration, properties: Mapping[str, Any], expected: str
+    hubspot_integration: HubSpotIntegration,
+    properties: Mapping[str, Any],
+    expected: str,
 ) -> None:
     """Domain extraction falls back across known HubSpot property names."""
 

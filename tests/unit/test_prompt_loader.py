@@ -27,7 +27,9 @@ def test_get_prompt_default_version_selects_latest(monkeypatch):
 
 
 def test_get_prompt_respects_config_override(monkeypatch):
-    monkeypatch.setattr(settings, "prompt_versions", {"customer_follow_up": "v1"}, raising=False)
+    monkeypatch.setattr(
+        settings, "prompt_versions", {"customer_follow_up": "v1"}, raising=False
+    )
 
     prompt = prompt_loader.get_prompt("customer_follow_up")
 
@@ -36,7 +38,9 @@ def test_get_prompt_respects_config_override(monkeypatch):
 
 
 def test_get_prompt_explicit_version_overrides_config(monkeypatch):
-    monkeypatch.setattr(settings, "prompt_versions", {"customer_follow_up": "v1"}, raising=False)
+    monkeypatch.setattr(
+        settings, "prompt_versions", {"customer_follow_up": "v1"}, raising=False
+    )
 
     prompt = prompt_loader.get_prompt("customer_follow_up", version="v2")
 

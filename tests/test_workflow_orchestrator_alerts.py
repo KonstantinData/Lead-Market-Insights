@@ -15,11 +15,13 @@ class DummyAlertAgent:
         self.calls = []
 
     def send_alert(self, message, severity, context=None):
-        self.calls.append({
-            "message": message,
-            "severity": severity,
-            "context": context or {},
-        })
+        self.calls.append(
+            {
+                "message": message,
+                "severity": severity,
+                "context": context or {},
+            }
+        )
 
 
 class StubMasterAgent:

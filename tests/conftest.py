@@ -10,9 +10,11 @@ from pathlib import Path
 from typing import Any, Dict, Iterable
 
 import pytest
+
 try:
     import pytest_asyncio
 except ImportError:  # pragma: no cover - fallback for minimal environments
+
     class _PytestAsyncioModule:
         @staticmethod
         def fixture(*args, **kwargs):
@@ -109,7 +111,9 @@ def stub_agent_registry(isolated_agent_registry):
         def __init__(self, *, communication_backend=None):
             self.communication_backend = communication_backend
 
-        def request_info(self, event: Dict[str, object], extracted: Dict[str, object]) -> Dict[str, object]:
+        def request_info(
+            self, event: Dict[str, object], extracted: Dict[str, object]
+        ) -> Dict[str, object]:
             return {
                 "info": extracted.get("info", {}),
                 "is_complete": True,
@@ -170,18 +174,18 @@ def stub_agent_registry(isolated_agent_registry):
 
     register_agent(BasePollingAgent, "stub-polling", is_default=True)(StubPollingAgent)
     register_agent(BaseTriggerAgent, "stub-trigger", is_default=True)(StubTriggerAgent)
-    register_agent(
-        BaseExtractionAgent, "stub-extraction", is_default=True
-    )(StubExtractionAgent)
+    register_agent(BaseExtractionAgent, "stub-extraction", is_default=True)(
+        StubExtractionAgent
+    )
     register_agent(BaseHumanAgent, "stub-human", is_default=True)(StubHumanAgent)
     register_agent(BaseCrmAgent, "stub-crm", is_default=True)(StubCrmAgent)
-    register_agent(
-        BaseResearchAgent, "internal_research", is_default=True
-    )(StubInternalResearchAgent)
+    register_agent(BaseResearchAgent, "internal_research", is_default=True)(
+        StubInternalResearchAgent
+    )
     register_agent(BaseResearchAgent, "dossier_research")(StubDossierResearchAgent)
-    register_agent(
-        BaseResearchAgent, "similar_companies_level1"
-    )(StubSimilarCompaniesAgent)
+    register_agent(BaseResearchAgent, "similar_companies_level1")(
+        StubSimilarCompaniesAgent
+    )
 
     return {
         "polling": StubPollingAgent,
@@ -219,7 +223,9 @@ async def orchestrator_environment(monkeypatch, tmp_path):
 
     reloaded_config = importlib.reload(config_module)
 
-    monkeypatch.setattr(master_module, "settings", reloaded_config.settings, raising=False)
+    monkeypatch.setattr(
+        master_module, "settings", reloaded_config.settings, raising=False
+    )
     monkeypatch.setattr(
         orchestrator_module, "settings", reloaded_config.settings, raising=False
     )

@@ -8,7 +8,17 @@ import hmac
 import json
 import logging
 from enum import Enum
-from typing import Any, Callable, Coroutine, Iterable, List, Mapping, MutableMapping, Optional, Set
+from typing import (
+    Any,
+    Callable,
+    Coroutine,
+    Iterable,
+    List,
+    Mapping,
+    MutableMapping,
+    Optional,
+    Set,
+)
 
 import requests
 
@@ -16,7 +26,9 @@ import requests
 def _maybe_sign(payload: dict, secret: Optional[str]) -> Mapping[str, str]:
     if not secret:
         return {}
-    body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
     sig = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
     return {"X-Signature": f"sha256={sig}"}
 
@@ -53,7 +65,9 @@ class AlertAgent:
         channels: Optional[Iterable[MutableMapping[str, Any]]] = None,
         *,
         logger: Optional[logging.Logger] = None,
-        task_scheduler: Optional[Callable[[asyncio.Task[Any]], asyncio.Task[Any]]] = None,
+        task_scheduler: Optional[
+            Callable[[asyncio.Task[Any]], asyncio.Task[Any]]
+        ] = None,
     ) -> None:
         self.logger = logger or logging.getLogger(self.__class__.__name__)
         self._channels: List[MutableMapping[str, Any]] = []

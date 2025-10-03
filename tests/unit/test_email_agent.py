@@ -8,7 +8,9 @@ import pytest
 from agents.email_agent import EmailAgent
 
 
-def _install_dummy_async_smtp(monkeypatch: pytest.MonkeyPatch, sent_messages: List[str]) -> None:
+def _install_dummy_async_smtp(
+    monkeypatch: pytest.MonkeyPatch, sent_messages: List[str]
+) -> None:
     async def fake_send_email_ssl(*, host, username, password, port, message, to_addrs):
         sent_messages.append(message)
 
@@ -73,5 +75,7 @@ async def test_email_agent_handles_missing_attachments_gracefully(
     assert result is True
     assert sent_messages
     message = email.message_from_string(sent_messages[0], policy=policy.default)
-    text_part = next(part for part in message.walk() if part.get_content_type() == "text/plain")
+    text_part = next(
+        part for part in message.walk() if part.get_content_type() == "text/plain"
+    )
     assert text_part.get_content().startswith("Simple body")

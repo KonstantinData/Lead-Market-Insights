@@ -28,10 +28,12 @@ def trigger_file(tmp_path: Path) -> Path:
 
 
 def test_load_trigger_words_from_env_overrides_file(trigger_file: Path) -> None:
-    words = load_trigger_words(
-        "Alpha, Beta , ,Gamma", triggers_file=trigger_file
-    )
-    assert words == [normalize_text("Alpha"), normalize_text("Beta"), normalize_text("Gamma")]
+    words = load_trigger_words("Alpha, Beta , ,Gamma", triggers_file=trigger_file)
+    assert words == [
+        normalize_text("Alpha"),
+        normalize_text("Beta"),
+        normalize_text("Gamma"),
+    ]
 
 
 def test_load_trigger_words_from_file_when_env_missing(trigger_file: Path) -> None:

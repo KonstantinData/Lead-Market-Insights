@@ -182,7 +182,9 @@ def test_exporter_protocol_preference(monkeypatch):
     monkeypatch.setattr(telemetry_mod, "BatchSpanProcessor", DummyBatchProcessor)
     monkeypatch.setattr(telemetry_mod, "SimpleSpanProcessor", DummySimpleProcessor)
     monkeypatch.setattr(telemetry_mod, "ConsoleSpanExporter", DummyConsoleExporter)
-    monkeypatch.setattr(telemetry_mod, "_build_real_sampler", lambda ratio: f"sampler:{ratio}")
+    monkeypatch.setattr(
+        telemetry_mod, "_build_real_sampler", lambda ratio: f"sampler:{ratio}"
+    )
     monkeypatch.setattr(telemetry_mod, "Resource", None)
     monkeypatch.setattr(telemetry_mod, "_HttpSpanExporter", DummyHTTPExporter)
     monkeypatch.setattr(telemetry_mod, "_GrpcSpanExporter", DummyGrpcExporter)
@@ -233,7 +235,9 @@ def test_setup_telemetry_stub_fallback(monkeypatch):
     )
 
     monkeypatch.setattr(telemetry_mod, "_setup_real_provider", boom)
-    monkeypatch.setattr(telemetry_mod, "_setup_stub_provider", lambda **_kwargs: stub_provider)
+    monkeypatch.setattr(
+        telemetry_mod, "_setup_stub_provider", lambda **_kwargs: stub_provider
+    )
 
     setup_telemetry(force=True, service_name="stub")
     assert trace.get_tracer_provider() is stub_provider

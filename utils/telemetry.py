@@ -130,7 +130,9 @@ class _CompatSpanContext:
 
 
 class _CompatSpan:
-    def __init__(self, name: str, sampled: bool, attributes: Optional[Dict[str, object]] = None) -> None:
+    def __init__(
+        self, name: str, sampled: bool, attributes: Optional[Dict[str, object]] = None
+    ) -> None:
         self.name = name
         self._ctx = _CompatSpanContext(sampled)
         self.attributes = dict(attributes or {})
@@ -149,7 +151,9 @@ class _CompatTracer:
     def __init__(self, sampler: _SamplerBase) -> None:
         self._sampler = sampler
 
-    def start_as_current_span(self, name: str, *, attributes: Optional[Dict[str, object]] = None, **_ignored):
+    def start_as_current_span(
+        self, name: str, *, attributes: Optional[Dict[str, object]] = None, **_ignored
+    ):
         trace_id_hex = f"{random.getrandbits(128):032x}"
         sampled = self._sampler.should_sample(trace_id_hex).sampled
         return _CompatSpan(name, sampled, attributes)
@@ -314,7 +318,11 @@ def _setup_real_provider(
     if exporter is not None and BatchSpanProcessor is not None:
         provider.add_span_processor(BatchSpanProcessor(exporter))
 
-    if use_console_exporter and ConsoleSpanExporter is not None and SimpleSpanProcessor is not None:
+    if (
+        use_console_exporter
+        and ConsoleSpanExporter is not None
+        and SimpleSpanProcessor is not None
+    ):
         provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
 
     trace.set_tracer_provider(provider)

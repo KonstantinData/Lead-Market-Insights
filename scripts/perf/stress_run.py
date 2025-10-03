@@ -123,7 +123,9 @@ def load_config() -> LoadConfig:
         results_path=Path(os.getenv("PERF_RESULTS_PATH", "logs/perf/results.json")),
         enable_prometheus=os.getenv("PERF_ENABLE_PROMETHEUS") == "1",
         prometheus_port=_load_env_int("PERF_PROMETHEUS_PORT", 9464),
-        random_seed=int(os.getenv("PERF_RANDOM_SEED")) if os.getenv("PERF_RANDOM_SEED") else None,
+        random_seed=int(os.getenv("PERF_RANDOM_SEED"))
+        if os.getenv("PERF_RANDOM_SEED")
+        else None,
     )
 
 
@@ -150,7 +152,9 @@ async def record_concurrency(metrics: Dict[str, int]) -> AsyncIterator[None]:
         metrics["current"] -= 1
 
 
-async def process_event(event_id: str, config: LoadConfig, concurrency_metrics: Dict[str, int]) -> EventMetrics:
+async def process_event(
+    event_id: str, config: LoadConfig, concurrency_metrics: Dict[str, int]
+) -> EventMetrics:
     start_time = time.perf_counter()
     retries = 0
     success = False
@@ -200,16 +204,25 @@ async def run_load_test(config: LoadConfig) -> Dict[str, object]:
             result = await process_event(event_id, config, concurrency_metrics)
             events.append(result)
 
-    tasks = [asyncio.create_task(worker(f"perf-event-{idx:05d}")) for idx in range(config.event_count)]
+    tasks = [
+        asyncio.create_task(worker(f"perf-event-{idx:05d}"))
+        for idx in range(config.event_count)
+    ]
     await asyncio.gather(*tasks)
 
     error_count = sum(1 for event in events if not event.success)
     retry_avg = statistics.mean(event.retries for event in events) if events else 0.0
-    latency_avg = statistics.mean(event.latency_ms for event in events) if events else 0.0
-    latency_p95 = statistics.quantiles(
-        [event.latency_ms for event in events],
-        n=20,
-    )[18] if len(events) >= 20 else latency_avg
+    latency_avg = (
+        statistics.mean(event.latency_ms for event in events) if events else 0.0
+    )
+    latency_p95 = (
+        statistics.quantiles(
+            [event.latency_ms for event in events],
+            n=20,
+        )[18]
+        if len(events) >= 20
+        else latency_avg
+    )
 
     config_payload = asdict(config)
     config_payload["results_path"] = str(config.results_path)
@@ -247,14 +260,20 @@ def _start_prometheus(
 
     registry = CollectorRegistry()
     gauges: Dict[str, PromGauge] = {
-        "average_latency_ms": Gauge("perf_average_latency_ms", "Average latency", registry=registry),
-        "p95_latency_ms": Gauge("perf_p95_latency_ms", "95th percentile latency", registry=registry),
+        "average_latency_ms": Gauge(
+            "perf_average_latency_ms", "Average latency", registry=registry
+        ),
+        "p95_latency_ms": Gauge(
+            "perf_p95_latency_ms", "95th percentile latency", registry=registry
+        ),
         "max_concurrent_tasks": Gauge(
             "perf_max_concurrent_tasks",
             "Maximum observed concurrency",
             registry=registry,
         ),
-        "average_retries": Gauge("perf_average_retries", "Average retries per event", registry=registry),
+        "average_retries": Gauge(
+            "perf_average_retries", "Average retries per event", registry=registry
+        ),
         "error_rate": Gauge("perf_error_rate", "Error rate", registry=registry),
     }
 

@@ -15,17 +15,22 @@ except ImportError:  # pragma: no cover - Python 3.10 fallback
     try:
         from types import ExceptionGroup  # type: ignore[attr-defined]
     except ImportError:  # pragma: no cover - minimal shim
+
         class ExceptionGroup(Exception):  # type: ignore[override]
             """Lightweight ExceptionGroup for Python 3.10 environments."""
 
-            def __init__(self, message: str, exceptions: Iterable[BaseException]) -> None:
+            def __init__(
+                self, message: str, exceptions: Iterable[BaseException]
+            ) -> None:
                 super().__init__(message)
                 self.exceptions = list(exceptions)
 
     # Ensure subsequent imports via ``builtins`` observe the fallback class.
     import builtins as _builtins
 
-    if getattr(_builtins, "ExceptionGroup", None) is None:  # pragma: no cover - sanity guard
+    if (
+        getattr(_builtins, "ExceptionGroup", None) is None
+    ):  # pragma: no cover - sanity guard
         _builtins.ExceptionGroup = ExceptionGroup  # type: ignore[attr-defined]
 
 _DEFAULT_HUBSPOT_LIMIT = 5
@@ -152,7 +157,9 @@ async def run_in_task_group(
                 group.create_task(runner())
         return
 
-    tasks: List[asyncio.Task[None]] = [asyncio.create_task(runner()) for runner in runners_list]
+    tasks: List[asyncio.Task[None]] = [
+        asyncio.create_task(runner()) for runner in runners_list
+    ]
     pending: List[asyncio.Task[None]] = tasks.copy()
     exceptions: List[BaseException] = []
 
@@ -173,9 +180,7 @@ async def run_in_task_group(
             if exceptions:
                 for task in pending:
                     task.cancel()
-                cancel_results = await asyncio.gather(
-                    *pending, return_exceptions=True
-                )
+                cancel_results = await asyncio.gather(*pending, return_exceptions=True)
                 for result in cancel_results:
                     if isinstance(result, BaseException):
                         exceptions.append(result)

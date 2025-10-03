@@ -180,4 +180,3 @@ class InboxAgent:
             if key in {"company_name", "web_domain"}:
                 result[key] = value
         return result
-

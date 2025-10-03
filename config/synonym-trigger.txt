@@ -1,12 +1,127 @@
 # Synonyme/Paraphrasen für Soft-Trigger-Validierung
 # Eine Phrase pro Zeile. Kommentare erlaubt, leere Zeilen ignorieren.
 
-termin mit kunde
-kundengespräch
-meeting mit dem kunden
-vorab-recherche
-hintergrundanalyse
-kundenrecherche
-auftaktgespräch zum projektstart
-onboarding session für neue mitarbeiter
-einführung neuer kollegen
+Untersuchung
+Hintergrundanalyse
+Informationsbeschaffung
+Faktensammlung
+Literaturstudie
+Bestandsaufnahme
+Vorstudie
+Desk-Analyse
+Umfeldanalyse
+Quellenprüfung
+Dossier-Erstellung
+investigation
+background analysis
+information gathering
+fact-finding
+literature review
+scoping study
+initial assessment
+desk study
+landscape analysis
+source verification
+compile a dossier
+
+Zielgruppenanalyse
+Kundenanalyse
+Käufer-Profiling
+Persona-Erarbeitung
+Bedarfsermittlung
+Voice-of-Customer-Auswertung
+Umfrageauswertung
+Segmentierungsstudie
+Churn-/Loyalitätsanalyse
+Kaufverhaltensanalyse
+audience analysis
+customer insights
+buyer profiling
+persona building
+needs assessment
+voice-of-customer review
+survey analysis
+segmentation study
+churn/loyalty analysis
+purchasing behavior analysis
+
+Firmenprofil erstellen
+Unternehmensanalyse
+Geschäftsmodell-Check
+Wettbewerbsvergleich (Firma)
+Stakeholder-Mapping
+Presse- und News-Scan
+Finanzkennzahlen-Sichtung
+SWOT auf Unternehmensebene
+Marktpositionierung prüfen
+Firmendossier anlegen
+company profiling
+corporate analysis
+business review
+competitor benchmarking (firm-level)
+stakeholder mapping
+press/news scan
+financials review
+company-level SWOT
+market positioning review
+build a company dossier
+
+Gesprächsunterlagen zusammenstellen
+Agenda abstimmen
+Ziele und Fragen definieren
+Stichpunkte sammeln
+Vorab-Notizen erstellen
+Kontext klären
+Entscheidungsrahmen festlegen
+Gesprächsleitfaden entwerfen
+Pre-Read-Paket schnüren
+To-do-Liste für das Gespräch
+agenda setting
+define objectives and questions
+compile talking points
+draft pre-notes
+align context
+establish decision framework
+design a conversation guide
+assemble a pre-read pack
+create a session checklist
+outline discussion flow
+
+Besuch planen
+Ablauf und Zeiten koordinieren
+Teilnehmer abstimmen
+Raumreservierung klären
+Demo-Set vorbereiten
+Anreise organisieren
+Tagesordnung ausarbeiten
+Technik-Check durchführen
+Unterlagenpaket packen
+visit planning
+coordinate timing
+align attendees
+secure room booking
+prep demo kit
+arrange travel
+develop the session agenda
+run a tech check
+assemble materials pack
+
+Kunden-Call
+Austausch mit dem Kunden
+Kundenbesprechung
+Check-in beim Kunden
+Vor-Ort-Gespräch
+Account-Review
+Abstimmungsrunde
+Kunden-Sync
+Rücksprache mit dem Kunden
+client call
+customer check-in
+client session
+on-site discussion
+account review
+alignment round
+customer touchpoint
+sync with the client
+follow-up with customer
+

@@ -126,6 +126,16 @@ async def test_soft_trigger_dossier_request_declined() -> None:
     assert backend.requests[0]["info"]["company_name"] == "Example Corp"
 
 
+async def test_soft_trigger_dossier_request_declined_status_only() -> None:
+    backend = DummyBackend({"status": "declined"})
+    agent = _prepare_agent(backend)
+
+    await agent.process_all_events()
+
+    assert agent._send_calls == []
+    assert len(backend.requests) == 1
+
+
 async def test_audit_log_records_dossier_acceptance(tmp_path) -> None:
     backend = DummyBackend(
         {"dossier_required": True, "details": {"note": "Yes, please prepare it."}}
@@ -218,6 +228,16 @@ async def test_soft_trigger_dossier_request_pending(tmp_path) -> None:
             agent.finalize_run_logs()
         settings.run_log_dir = original_run_dir
         settings.workflow_log_dir = original_workflow_dir
+
+
+async def test_soft_trigger_dossier_request_approved_status_only() -> None:
+    backend = DummyBackend({"status": "approved"})
+    agent = _prepare_agent(backend)
+
+    await agent.process_all_events()
+
+    assert len(agent._send_calls) == 1
+    assert len(backend.requests) == 1
 
 
 async def test_audit_log_records_missing_info_flow(tmp_path) -> None:

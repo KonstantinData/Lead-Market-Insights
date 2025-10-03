@@ -117,10 +117,10 @@ class HumanInLoopAgent(BaseHumanAgent):
                 },
             )
 
-        print(
-            "Please provide missing info for event {}: {}".format(
-                masked_event.get("id", "<unknown>"), masked_initial_info
-            )
+        logger.info(
+            "Requesting missing info for event %s: %s",
+            masked_event.get("id", "<unknown>"),
+            masked_initial_info,
         )
         # Notes: Simulate human response for demo purposes.
         extracted["info"]["company_name"] = (

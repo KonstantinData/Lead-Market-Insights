@@ -281,6 +281,27 @@ class Settings:
 
         self.trigger_words: Optional[str] = _get_env_var("TRIGGER_WORDS")
 
+        validator_flag = (_get_env_var("SOFT_TRIGGER_VALIDATOR") or "on").strip().lower()
+        self.soft_trigger_validator_enabled: bool = validator_flag not in {"off", "0", "false"}
+        self.synonym_trigger_path: Path = _get_path_env(
+            "SYNONYM_TRIGGER_PATH", project_root / "config" / "synonym-trigger.txt"
+        )
+        self.validator_require_evidence_substring: bool = _get_bool_env(
+            "VALIDATOR_REQUIRE_EVIDENCE_SUBSTRING", True
+        )
+        self.validator_fuzzy_evidence_threshold: float = _get_float_env(
+            "VALIDATOR_FUZZY_EVIDENCE_THRESHOLD", 0.88
+        )
+        self.validator_similarity_method: str = (
+            _get_env_var("VALIDATOR_SIMILARITY_METHOD") or "jaccard"
+        ).strip().lower()
+        self.validator_similarity_threshold: float = _get_float_env(
+            "VALIDATOR_SIMILARITY_THRESHOLD", 0.60
+        )
+        self.soft_validator_write_artifacts: bool = _get_bool_env(
+            "SOFT_VALIDATOR_WRITE_ARTIFACTS", False
+        )
+
         self.compliance_mode: str = (
             _get_env_var("COMPLIANCE_MODE") or "standard"
         ).strip().lower()

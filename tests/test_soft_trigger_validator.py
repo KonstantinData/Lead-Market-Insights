@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import textwrap
 
 import pytest
 
@@ -90,14 +91,19 @@ def test_validator_accepts_fuzzy_evidence() -> None:
 
 def test_load_synonym_phrases_ignores_comments(tmp_path: Path) -> None:
     config_file = tmp_path / "synonyms.txt"
-    config_file.write_text("""
-# comment
+    config_file.write_text(
+        textwrap.dedent(
+            """
+            # comment
 
-termin mit kunde
- meeting mit kunden  
-# another comment
+            termin mit kunde
+            meeting mit kunden
+            # another comment
 
-""".strip(), encoding="utf-8")
+            """
+        ).strip(),
+        encoding="utf-8",
+    )
 
     phrases = load_synonym_phrases(config_file)
 

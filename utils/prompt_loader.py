@@ -77,9 +77,7 @@ def _prompt_index(directory: Path) -> Mapping[str, Mapping[str, Path]]:
         index.setdefault(name, {})[version] = path
 
     if not index:
-        raise PromptLoaderError(
-            f"No prompt templates discovered in '{directory}'."
-        )
+        raise PromptLoaderError(f"No prompt templates discovered in '{directory}'.")
 
     return index
 
@@ -92,7 +90,9 @@ def _load_prompt_file(path: Path) -> PromptDefinition:
         try:
             data = json.loads(text)
         except json.JSONDecodeError as exc:  # pragma: no cover - defensive branch
-            raise PromptLoaderError(f"Failed to parse JSON prompt '{path}': {exc}.") from exc
+            raise PromptLoaderError(
+                f"Failed to parse JSON prompt '{path}': {exc}."
+            ) from exc
     elif suffix in {".yaml", ".yml"}:
         if yaml is None:  # pragma: no cover - dependency guard
             raise PromptLoaderError(
@@ -101,7 +101,9 @@ def _load_prompt_file(path: Path) -> PromptDefinition:
         try:
             data = yaml.safe_load(text) or {}
         except yaml.YAMLError as exc:  # pragma: no cover - defensive branch
-            raise PromptLoaderError(f"Failed to parse YAML prompt '{path}': {exc}.") from exc
+            raise PromptLoaderError(
+                f"Failed to parse YAML prompt '{path}': {exc}."
+            ) from exc
     else:  # pragma: no cover - extension guard
         raise PromptLoaderError(f"Unsupported prompt file format: '{path.suffix}'.")
 

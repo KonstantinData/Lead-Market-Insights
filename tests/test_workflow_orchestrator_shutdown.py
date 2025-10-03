@@ -39,7 +39,9 @@ class _StubMasterAgent:
         self.run_ids: list[str] = []
         self.workflow_log_manager = None
 
-    def attach_run(self, run_id: str, *_args, **_kwargs) -> None:  # pragma: no cover - stub hook
+    def attach_run(
+        self, run_id: str, *_args, **_kwargs
+    ) -> None:  # pragma: no cover - stub hook
         self.run_ids.append(run_id)
 
     async def process_all_events(self):

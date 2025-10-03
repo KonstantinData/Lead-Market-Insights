@@ -37,7 +37,9 @@ class FakeBackend:
     async def send_email_async(
         self, recipient: str, subject: str, body: str, **_: Any
     ) -> bool:
-        self.sent_emails.append({"recipient": recipient, "subject": subject, "body": body})
+        self.sent_emails.append(
+            {"recipient": recipient, "subject": subject, "body": body}
+        )
         return True
 
 
@@ -70,7 +72,9 @@ async def test_pending_confirmation_triggers_reminders(tmp_path) -> None:
 
     assert backend.sent_emails, "Reminders should trigger email sends"
     assert backend.sent_emails[0]["subject"].startswith("Reminder:")
-    assert any(email["subject"].startswith("Escalation:") for email in backend.sent_emails)
+    assert any(
+        email["subject"].startswith("Escalation:") for email in backend.sent_emails
+    )
 
     workflow_files = list(workflow_dir.glob("*.jsonl"))
     assert workflow_files, "Workflow logs should record reminders"

@@ -51,7 +51,9 @@ def test_record_preserves_payload(tmp_path: Path) -> None:
 
 def test_iter_entries_skips_invalid_json(tmp_path: Path) -> None:
     log_path = tmp_path / "audit.jsonl"
-    log_path.write_text("{invalid}\n" + json.dumps({"audit_id": "a"}) + "\n", encoding="utf-8")
+    log_path.write_text(
+        "{invalid}\n" + json.dumps({"audit_id": "a"}) + "\n", encoding="utf-8"
+    )
 
     audit_log = AuditLog(log_path)
     entries = list(audit_log.iter_entries())

@@ -8,7 +8,16 @@ import os
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    MutableMapping,
+    Optional,
+    Sequence,
+)
 
 from agents.factory import register_agent
 from agents.interfaces import BaseResearchAgent
@@ -70,7 +79,9 @@ class InternalResearchAgent(BaseResearchAgent):
             f"{__name__}.{self.__class__.__name__}"
         )
 
-        self.research_artifact_dir = Path(config.research_artifact_dir) / "internal_research"
+        self.research_artifact_dir = (
+            Path(config.research_artifact_dir) / "internal_research"
+        )
         self.research_artifact_dir.mkdir(parents=True, exist_ok=True)
 
         self.agent_log_dir = Path(config.agent_log_dir) / "internal_research"
@@ -79,9 +90,7 @@ class InternalResearchAgent(BaseResearchAgent):
 
         self.email_agent = email_agent or self._build_email_agent_from_env()
         self._default_signature_text = "Best regards,\nInternal Research Agent"
-        self._default_signature_html = (
-            "<p>Best regards,<br>Internal Research Agent</p>"
-        )
+        self._default_signature_html = "<p>Best regards,<br>Internal Research Agent</p>"
 
     # ------------------------------------------------------------------
     # Public API
@@ -129,9 +138,7 @@ class InternalResearchAgent(BaseResearchAgent):
         payload_result = research_result.get("payload") or {}
 
         samples = self._collect_neighbor_samples(payload_result)
-        neighbor_artifact = self._write_artifact(
-            run_id, "level1_samples.json", samples
-        )
+        neighbor_artifact = self._write_artifact(run_id, "level1_samples.json", samples)
         if samples and neighbor_artifact:
             self._log_workflow(
                 run_id,
@@ -162,7 +169,9 @@ class InternalResearchAgent(BaseResearchAgent):
             "completed",
             f"Internal research completed with status {action}.",
             event_id,
-            error=None if email_status else "email_delivery_failed"
+            error=None
+            if email_status
+            else "email_delivery_failed"
             if email_status is False
             else None,
         )
@@ -225,12 +234,16 @@ class InternalResearchAgent(BaseResearchAgent):
         try:
             port_number = int(port)
         except ValueError:
-            self.logger.warning("Invalid SMTP_PORT value '%s'; skipping email setup.", port)
+            self.logger.warning(
+                "Invalid SMTP_PORT value '%s'; skipping email setup.", port
+            )
             return None
 
         return EmailAgent(host, port_number, username, password, sender)
 
-    def _clone_payload(self, payload: Optional[Mapping[str, Any]]) -> MutableMapping[str, Any]:
+    def _clone_payload(
+        self, payload: Optional[Mapping[str, Any]]
+    ) -> MutableMapping[str, Any]:
         return dict(payload or {})
 
     def _normalise_payload(self, payload: MutableMapping[str, Any]) -> None:
@@ -288,9 +301,7 @@ class InternalResearchAgent(BaseResearchAgent):
         missing_optional: Sequence[str],
     ) -> NormalizedPayload:
         company = (
-            payload.get("company_name")
-            or payload.get("company")
-            or "Unknown Company"
+            payload.get("company_name") or payload.get("company") or "Unknown Company"
         )
         message = (
             f"Missing required fields for {company}: {', '.join(missing_required)}."
@@ -347,7 +358,9 @@ class InternalResearchAgent(BaseResearchAgent):
             return False
 
         subject = "Additional details required for research request"
-        company = payload.get("company_name") or payload.get("company") or "your company"
+        company = (
+            payload.get("company_name") or payload.get("company") or "your company"
+        )
         missing_all = list(missing_required) + list(missing_optional)
         formatted_missing = ", ".join(missing_all)
         body = (
@@ -414,9 +427,7 @@ class InternalResearchAgent(BaseResearchAgent):
             )
         return samples
 
-    def _write_artifact(
-        self, run_id: str, filename: str, data: Any
-    ) -> Optional[str]:
+    def _write_artifact(self, run_id: str, filename: str, data: Any) -> Optional[str]:
         if not data:
             return None
 
@@ -491,7 +502,9 @@ class InternalResearchAgent(BaseResearchAgent):
                 "existing_report_email_skipped",
                 "Existing report email skipped due to configuration.",
                 event_id,
-                error="email_not_configured" if not self.email_agent else "missing_recipient",
+                error="email_not_configured"
+                if not self.email_agent
+                else "missing_recipient",
             )
             return None
 
@@ -595,9 +608,7 @@ class InternalResearchAgent(BaseResearchAgent):
         rendered = template.format_map(safe_context)
         return rendered
 
-    def _build_crm_portal_link(
-        self, *sources: Mapping[str, Any]
-    ) -> Optional[str]:
+    def _build_crm_portal_link(self, *sources: Mapping[str, Any]) -> Optional[str]:
         for source in sources:
             if not isinstance(source, Mapping):
                 continue

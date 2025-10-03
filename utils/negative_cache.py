@@ -92,9 +92,7 @@ class NegativeEventCache:
                 "decision": entry.get("decision"),
                 "first_seen": entry.get("first_seen"),
                 "last_seen": last_seen if isinstance(last_seen, (int, float)) else None,
-                "classification_version": entry.get(
-                    "classification_version", "v1"
-                ),
+                "classification_version": entry.get("classification_version", "v1"),
             }
 
         cache = cls(path=path, entries=entries, dirty=False)
@@ -143,7 +141,9 @@ class NegativeEventCache:
             return entry.get("decision")
         return None
 
-    def record_no_trigger(self, event: Dict[str, Any], rule_hash: str, decision: str) -> None:
+    def record_no_trigger(
+        self, event: Dict[str, Any], rule_hash: str, decision: str
+    ) -> None:
         event_id = event.get("id")
         if not event_id or not isinstance(event_id, str):
             return
@@ -191,7 +191,9 @@ class NegativeEventCache:
             )
             self.dirty = False
         except Exception:
-            logger.warning("Failed to flush negative cache to %s", self.path, exc_info=True)
+            logger.warning(
+                "Failed to flush negative cache to %s", self.path, exc_info=True
+            )
 
     def _fingerprint(self, event: Dict[str, Any]) -> tuple[str, Optional[str]]:
         event_id = str(event.get("id")) if event.get("id") is not None else ""
@@ -222,7 +224,9 @@ class NegativeEventCache:
         removed = [
             event_id
             for event_id, entry in list(self.entries.items())
-            if not self._is_entry_fresh(entry.get("updated"), entry.get("last_seen"), now)
+            if not self._is_entry_fresh(
+                entry.get("updated"), entry.get("last_seen"), now
+            )
         ]
         for event_id in removed:
             del self.entries[event_id]

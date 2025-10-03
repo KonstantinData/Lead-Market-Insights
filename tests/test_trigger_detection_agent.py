@@ -72,7 +72,10 @@ async def test_agent_detects_soft_triggers_via_llm(
     validated_match = result["soft_trigger_matches"][0]
     assert validated_match["soft_trigger"] == soft_match["soft_trigger"]
     assert validated_match["validation"]["evidence"] == "fuzzy"
-    assert result["extraction_context"]["soft_trigger_matches"] == result["soft_trigger_matches"]
+    assert (
+        result["extraction_context"]["soft_trigger_matches"]
+        == result["soft_trigger_matches"]
+    )
 
 
 async def test_agent_ignores_invalid_llm_response(
@@ -86,7 +89,9 @@ async def test_agent_ignores_invalid_llm_response(
             "invalid",  # type: ignore[list-item]
         ]
 
-    agent = TriggerDetectionAgent(trigger_words=["meeting"], soft_trigger_detector=_detector)
+    agent = TriggerDetectionAgent(
+        trigger_words=["meeting"], soft_trigger_detector=_detector
+    )
 
     result = await agent.check({"summary": "Quarterly planning"})
     assert result == {

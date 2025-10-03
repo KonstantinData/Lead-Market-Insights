@@ -90,9 +90,7 @@ class EmailAgent:
     ) -> Optional[str]:
         if not links or html_body is None:
             return html_body
-        link_items = "".join(
-            f'<li><a href="{link}">{link}</a></li>' for link in links
-        )
+        link_items = "".join(f'<li><a href="{link}">{link}</a></li>' for link in links)
         link_block = (
             "<hr><p>Access the dossier using the following link(s):</p>"
             f"<ul>{link_items}</ul>"

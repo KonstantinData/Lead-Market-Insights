@@ -48,7 +48,9 @@ def test_validator_rejects_without_evidence() -> None:
 
 
 def test_validator_rejects_low_similarity() -> None:
-    validator = SoftTriggerValidator(synonyms=["hintergrundanalyse"], similarity_threshold=0.8)
+    validator = SoftTriggerValidator(
+        synonyms=["hintergrundanalyse"], similarity_threshold=0.8
+    )
     summary = "Statusupdate zur Projektplanung"
     candidate = {
         "soft_trigger": "Statusupdate",
@@ -110,7 +112,9 @@ def test_load_synonym_phrases_ignores_comments(tmp_path: Path) -> None:
     assert phrases == ("termin mit kunde", "meeting mit kunden")
 
 
-def test_load_synonym_phrases_missing_file(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_load_synonym_phrases_missing_file(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     missing_file = tmp_path / "missing.txt"
 
     with caplog.at_level("WARNING"):
@@ -124,7 +128,9 @@ def test_validator_marks_invalid_candidate() -> None:
     validator = SoftTriggerValidator(synonyms=["kunden gespräch"])
 
     accepted, rejected = validator.validate(
-        summary="", description="", matches=[{"soft_trigger": "", "source_field": "summary"}]
+        summary="",
+        description="",
+        matches=[{"soft_trigger": "", "source_field": "summary"}],
     )
 
     assert accepted == []
@@ -176,7 +182,9 @@ def test_validator_tfidf_similarity_path() -> None:
     assert rejected == []
 
 
-def test_validator_unknown_similarity_falls_back(caplog: pytest.LogCaptureFixture) -> None:
+def test_validator_unknown_similarity_falls_back(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     validator = SoftTriggerValidator(
         synonyms=["kunden termin"],
         similarity_method="unknown",
@@ -196,10 +204,14 @@ def test_validator_unknown_similarity_falls_back(caplog: pytest.LogCaptureFixtur
 
     assert accepted
     assert rejected == []
-    assert any("falling back to Jaccard" in message for message in caplog.text.splitlines())
+    assert any(
+        "falling back to Jaccard" in message for message in caplog.text.splitlines()
+    )
 
 
-def test_load_synonym_phrases_empty_file_warns(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_load_synonym_phrases_empty_file_warns(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     config_file = tmp_path / "synonyms.txt"
     config_file.write_text("\n\n", encoding="utf-8")
 

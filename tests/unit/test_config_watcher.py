@@ -146,7 +146,9 @@ def test_handle_event_loads_dotenv(monkeypatch, tmp_path: Path):
     env_file.write_text("FOO=1", encoding="utf-8")
     load_calls: list[bool] = []
 
-    monkeypatch.setattr("config.watcher.load_dotenv", lambda override=True: load_calls.append(override))
+    monkeypatch.setattr(
+        "config.watcher.load_dotenv", lambda override=True: load_calls.append(override)
+    )
 
     watcher = LlmConfigurationWatcher(DummySettings(), extra_paths=[env_file])
     watcher._handle_event(env_file)  # type: ignore[attr-defined]

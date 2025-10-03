@@ -16,7 +16,9 @@ class Counter:
         self.description = description
         self._values: Dict[frozenset[tuple[str, object]], float] = {}
 
-    def add(self, amount: float, attributes: Optional[Dict[str, object]] = None) -> None:
+    def add(
+        self, amount: float, attributes: Optional[Dict[str, object]] = None
+    ) -> None:
         key = frozenset((attributes or {}).items())
         self._values[key] = self._values.get(key, 0.0) + amount
 
@@ -31,7 +33,9 @@ class Histogram:
         self.unit = unit
         self._values: Dict[frozenset[tuple[str, object]], List[float]] = {}
 
-    def record(self, value: float, attributes: Optional[Dict[str, object]] = None) -> None:
+    def record(
+        self, value: float, attributes: Optional[Dict[str, object]] = None
+    ) -> None:
         key = frozenset((attributes or {}).items())
         self._values.setdefault(key, []).append(value)
 
@@ -50,7 +54,9 @@ class Meter:
         self._counters[name] = counter
         return counter
 
-    def create_histogram(self, name: str, description: str = "", unit: str = "") -> Histogram:
+    def create_histogram(
+        self, name: str, description: str = "", unit: str = ""
+    ) -> Histogram:
         histogram = Histogram(name, description, unit)
         self._histograms[name] = histogram
         return histogram

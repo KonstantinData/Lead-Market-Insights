@@ -38,7 +38,9 @@ class EventPollingAgent(BasePollingAgent):
         keywords = ("birthday", "geburtstag")
         for key in ("summary", "description", "summaryOverride"):
             value = event.get(key)
-            if isinstance(value, str) and any(keyword in value.lower() for keyword in keywords):
+            if isinstance(value, str) and any(
+                keyword in value.lower() for keyword in keywords
+            ):
                 return True
 
         direct_flag = event.get("isBirthday")

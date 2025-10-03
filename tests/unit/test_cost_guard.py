@@ -14,7 +14,9 @@ class DummyAlertAgent:
     def __init__(self) -> None:
         self.calls = []
 
-    def send_alert(self, message, severity, context=None):  # pragma: no cover - exercised in tests
+    def send_alert(
+        self, message, severity, context=None
+    ):  # pragma: no cover - exercised in tests
         self.calls.append((message, severity, context or {}))
 
 

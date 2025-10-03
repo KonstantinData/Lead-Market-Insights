@@ -40,7 +40,9 @@ def load_trigger_words(
     collected: List[str] = []
 
     if env_value:
-        env_words = [segment.strip() for segment in env_value.split(",") if segment.strip()]
+        env_words = [
+            segment.strip() for segment in env_value.split(",") if segment.strip()
+        ]
         collected.extend(env_words)
         if logger is not None:
             logger.info(

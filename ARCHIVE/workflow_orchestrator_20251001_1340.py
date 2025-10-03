@@ -6,7 +6,17 @@ import logging
 import signal
 import time
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, Mapping, Optional, Sequence, Set, Union
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Union,
+)
 
 from agents.alert_agent import AlertAgent, AlertSeverity
 from agents.master_workflow_agent import MasterWorkflowAgent
@@ -41,7 +51,9 @@ class WorkflowOrchestrator:
         self._failure_key = "workflow_run"
         self._failure_counts: Dict[str, int] = {}
         self._last_run_id: Optional[str] = None
-        self._research_summary_root = Path(settings.research_artifact_dir) / "workflow_runs"
+        self._research_summary_root = (
+            Path(settings.research_artifact_dir) / "workflow_runs"
+        )
 
         self._background_tasks: Set[asyncio.Task[Any]] = set()
         self._async_cleanups: list[tuple[str, Callable[[], Awaitable[None]]]] = []
@@ -50,7 +62,9 @@ class WorkflowOrchestrator:
         self._shutdown_started = False
         self._shutdown_complete = False
         self._shutdown_event: Optional[asyncio.Event] = None
-        timeout_setting = getattr(settings, "shutdown_timeout_seconds", DEFAULT_SHUTDOWN_TIMEOUT)
+        timeout_setting = getattr(
+            settings, "shutdown_timeout_seconds", DEFAULT_SHUTDOWN_TIMEOUT
+        )
         try:
             self._shutdown_timeout = max(0.1, float(timeout_setting))
         except (TypeError, ValueError):
@@ -77,7 +91,9 @@ class WorkflowOrchestrator:
             self.log_filename = "polling_trigger.log"
             self._init_error = exc
             self.storage_agent = None
-            self._handle_exception(exc, handled=True, context={"phase": "initialisation"})
+            self._handle_exception(
+                exc, handled=True, context={"phase": "initialisation"}
+            )
 
     def _register_async_cleanup(
         self, label: str, closer: Callable[[], Awaitable[None]]
@@ -175,14 +191,14 @@ class WorkflowOrchestrator:
             summary.get("duration_seconds", 0.0),
         )
 
-    async def shutdown(self, *, reason: str = "manual", timeout: Optional[float] = None) -> None:
+    async def shutdown(
+        self, *, reason: str = "manual", timeout: Optional[float] = None
+    ) -> None:
         """Gracefully release resources and cancel background activity."""
 
         try:
             resolved_timeout = (
-                self._shutdown_timeout
-                if timeout is None
-                else max(0.1, float(timeout))
+                self._shutdown_timeout if timeout is None else max(0.1, float(timeout))
             )
         except (TypeError, ValueError):
             resolved_timeout = self._shutdown_timeout
@@ -246,7 +262,9 @@ class WorkflowOrchestrator:
             try:
                 await flush_telemetry(timeout=resolved_timeout)
             except Exception:
-                logger.exception("Failed to flush observability telemetry during shutdown")
+                logger.exception(
+                    "Failed to flush observability telemetry during shutdown"
+                )
 
             self._log_run_manifest()
             logger.info("Orchestrator shutdown complete.")
@@ -386,14 +404,12 @@ class WorkflowOrchestrator:
                 exc,
             )
         except Exception:
-            logger.exception(
-                "Failed to generate PDF artefacts for event %s", event_id
-            )
+            logger.exception("Failed to generate PDF artefacts for event %s", event_id)
         return None
 
     @staticmethod
     def _resolve_pdf_source(
-        research_result: Mapping[str, object]
+        research_result: Mapping[str, object],
     ) -> Optional[Union[str, Path, Mapping[str, Any]]]:
         payload = research_result.get("payload")
         if isinstance(payload, Mapping):
@@ -435,9 +451,7 @@ class WorkflowOrchestrator:
 
         try:
             self.master_agent.finalize_run_logs()
-            logger.info(
-                "Run log stored locally at %s", self.master_agent.log_file_path
-            )
+            logger.info("Run log stored locally at %s", self.master_agent.log_file_path)
         except Exception as exc:
             logger.error("Failed to finalise local log storage", exc_info=True)
             self._handle_exception(
@@ -497,7 +511,9 @@ class WorkflowOrchestrator:
         return AlertSeverity.ERROR
 
     def _increment_failure_count(self, key: str) -> int:
-        if self.storage_agent and hasattr(self.storage_agent, "increment_failure_count"):
+        if self.storage_agent and hasattr(
+            self.storage_agent, "increment_failure_count"
+        ):
             return self.storage_agent.increment_failure_count(key)
 
         self._failure_counts[key] = self._failure_counts.get(key, 0) + 1

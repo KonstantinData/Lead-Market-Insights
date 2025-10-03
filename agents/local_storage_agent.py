@@ -15,7 +15,9 @@ Metadata = Dict[str, object]
 class LocalStorageAgent:
     """Persist generated artefacts in a structured local directory."""
 
-    def __init__(self, base_dir: Path, *, logger: Optional[logging.Logger] = None) -> None:
+    def __init__(
+        self, base_dir: Path, *, logger: Optional[logging.Logger] = None
+    ) -> None:
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.logger = logger or logging.getLogger(self.__class__.__name__)

@@ -580,9 +580,7 @@ class HumanInLoopAgent(BaseHumanAgent):
 
         if policy.escalation_delay is not None:
             escalation_seconds = max(policy.escalation_delay.total_seconds(), 0)
-            escalation_recipient = (
-                policy.escalation_recipient or contact_email
-            )
+            escalation_recipient = policy.escalation_recipient or contact_email
             self.reminder_escalation.schedule_escalation(
                 escalation_recipient,
                 self._build_escalation_subject(subject),

@@ -84,7 +84,9 @@ class LlmConfigurationWatcher:
             return False
 
         if not self._directories:
-            logger.debug("No configuration files found for LLM watcher; skipping start.")
+            logger.debug(
+                "No configuration files found for LLM watcher; skipping start."
+            )
             return False
 
         self._observer = Observer()

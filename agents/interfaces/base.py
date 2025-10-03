@@ -45,11 +45,15 @@ class BaseHumanAgent(ABC):
     # NOTE: Diese Methoden bleiben vorerst synchron, da aktuelle Implementierungen
     #       keine asynchronen Nebenwirkungen besitzen. Netzwerk-Hooks werden bei
     #       Bedarf in einem späteren Schritt auf async angehoben.
-    def request_info(self, event: Mapping[str, Any], extracted: Dict[str, Any]) -> Dict[str, Any]:
+    def request_info(
+        self, event: Mapping[str, Any], extracted: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Request missing information from a human collaborator."""
 
     @abstractmethod
-    def request_dossier_confirmation(self, event: Mapping[str, Any], info: Mapping[str, Any]) -> Dict[str, Any]:
+    def request_dossier_confirmation(
+        self, event: Mapping[str, Any], info: Mapping[str, Any]
+    ) -> Dict[str, Any]:
         """Ask whether a dossier should be produced for the supplied event."""
 
 

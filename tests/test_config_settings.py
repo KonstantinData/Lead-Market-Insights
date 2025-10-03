@@ -71,13 +71,18 @@ def test_research_and_agent_paths_default(monkeypatch):
 def test_research_and_agent_paths_override(monkeypatch, tmp_path):
     monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
     monkeypatch.setenv("AGENT_LOG_DIR", str(tmp_path / "agents"))
-    monkeypatch.setenv("RESEARCH_ARTIFACT_DIR", str(tmp_path / "research" / "artifacts"))
+    monkeypatch.setenv(
+        "RESEARCH_ARTIFACT_DIR", str(tmp_path / "research" / "artifacts")
+    )
     monkeypatch.setenv("RESEARCH_PDF_DIR", str(tmp_path / "research" / "pdfs"))
 
     settings = reload_settings()
 
     assert settings.agent_log_dir == (tmp_path / "agents").resolve()
-    assert settings.research_artifact_dir == (tmp_path / "research" / "artifacts").resolve()
+    assert (
+        settings.research_artifact_dir
+        == (tmp_path / "research" / "artifacts").resolve()
+    )
     assert settings.research_pdf_dir == (tmp_path / "research" / "pdfs").resolve()
 
 
@@ -88,12 +93,11 @@ def test_crm_attachment_base_url(monkeypatch):
     settings = reload_settings()
     assert settings.crm_attachment_base_url == ""
 
-    monkeypatch.setenv("CRM_ATTACHMENT_BASE_URL", "https://crm.example.com/attachments/")
-    settings = reload_settings()
-    assert (
-        settings.crm_attachment_base_url
-        == "https://crm.example.com/attachments/"
+    monkeypatch.setenv(
+        "CRM_ATTACHMENT_BASE_URL", "https://crm.example.com/attachments/"
     )
+    settings = reload_settings()
+    assert settings.crm_attachment_base_url == "https://crm.example.com/attachments/"
 
 
 def test_compliance_defaults(monkeypatch):

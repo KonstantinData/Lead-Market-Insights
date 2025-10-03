@@ -108,7 +108,9 @@ async def test_sequences_are_normalised(
     expected_insights,
     expected_sources,
 ) -> None:
-    trigger = trigger_factory(payload={"insights": insights_input, "sources": sources_input})
+    trigger = trigger_factory(
+        payload={"insights": insights_input, "sources": sources_input}
+    )
 
     dossier = (await agent.run(trigger))["payload"]
 
@@ -184,7 +186,9 @@ async def test_company_detail_schema_snapshot(
     artifact_path = Path(result["artifact_path"])
     saved_payload = json.loads(artifact_path.read_text(encoding="utf-8"))
 
-    snapshot_path = Path(__file__).resolve().parent / "snapshots" / "company_detail_research.json"
+    snapshot_path = (
+        Path(__file__).resolve().parent / "snapshots" / "company_detail_research.json"
+    )
     expected_payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
 
     assert saved_payload == expected_payload

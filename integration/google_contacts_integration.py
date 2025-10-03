@@ -34,7 +34,9 @@ class GoogleContactsIntegration:
             params["pageToken"] = page_token
 
         headers = {"Authorization": f"Bearer {self.access_token}"}
-        response = await self._http.get("/v1/people/me/connections", params=params, headers=headers)
+        response = await self._http.get(
+            "/v1/people/me/connections", params=params, headers=headers
+        )
         response.raise_for_status()
         payload = response.json()
         return payload.get("connections", [])

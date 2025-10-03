@@ -13,7 +13,9 @@ class ReminderEscalation:
         workflow_log_manager=None,
         run_id=None,
         *,
-        task_scheduler: Optional[Callable[[asyncio.Task[Any]], asyncio.Task[Any]]] = None,
+        task_scheduler: Optional[
+            Callable[[asyncio.Task[Any]], asyncio.Task[Any]]
+        ] = None,
     ):
         self.email_agent = email_agent
         self.workflow_log_manager = workflow_log_manager

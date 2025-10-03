@@ -82,19 +82,14 @@ def test_resolve_limit_with_invalid_values(monkeypatch, caplog):
 
 def test_normalise_limit_handles_bad_overrides(caplog):
     caplog.set_level("WARNING")
+    assert concurrency_module._normalise_limit(None, fallback=2, name="TEST_LIMIT") == 2
     assert (
-        concurrency_module._normalise_limit(None, fallback=2, name="TEST_LIMIT") == 2
-    )
-    assert (
-        concurrency_module._normalise_limit("bad", fallback=3, name="TEST_LIMIT")
-        == 3
+        concurrency_module._normalise_limit("bad", fallback=3, name="TEST_LIMIT") == 3
     )
     assert "Invalid override" in caplog.text
 
     caplog.clear()
-    assert (
-        concurrency_module._normalise_limit(0, fallback=3, name="TEST_LIMIT") == 3
-    )
+    assert concurrency_module._normalise_limit(0, fallback=3, name="TEST_LIMIT") == 3
     assert "override must be positive" in caplog.text
 
 

@@ -20,11 +20,16 @@ def test_load_audit_entries_returns_empty_when_missing(storage_agent):
 def test_load_audit_entries_skips_invalid_lines(storage_agent, tmp_path):
     audit_path = storage_agent.get_audit_log_path("run-1")
     audit_path.parent.mkdir(parents=True, exist_ok=True)
-    audit_path.write_text('\n'.join([
-        json.dumps({"id": 1}),
-        "not-json",
-        json.dumps({"id": 2}),
-    ]), encoding="utf-8")
+    audit_path.write_text(
+        "\n".join(
+            [
+                json.dumps({"id": 1}),
+                "not-json",
+                json.dumps({"id": 2}),
+            ]
+        ),
+        encoding="utf-8",
+    )
 
     entries = storage_agent.load_audit_entries("run-1")
 

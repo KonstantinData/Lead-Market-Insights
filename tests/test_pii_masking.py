@@ -37,7 +37,10 @@ class DummyTriggerAgent:
 
 class DummyExtractionAgent:
     async def extract(self, event: Dict[str, Any]) -> Dict[str, Any]:
-        return {"info": {"company_name": "Example", "contact_name": "Ada"}, "is_complete": True}
+        return {
+            "info": {"company_name": "Example", "contact_name": "Ada"},
+            "is_complete": True,
+        }
 
 
 class DummyHumanBackend:

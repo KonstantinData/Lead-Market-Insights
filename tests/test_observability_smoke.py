@@ -5,22 +5,21 @@ from typing import Any, Dict, Iterable
 import json
 import pytest
 
-pytest.importorskip("opentelemetry")
-pytest.importorskip("opentelemetry.sdk.metrics.export")
-pytest.importorskip("opentelemetry.sdk.trace.export")
+try:
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+    from opentelemetry.sdk.trace.export import InMemorySpanExporter, SimpleSpanProcessor
+except ModuleNotFoundError:  # pragma: no cover - handled by pytest skip
+    pytest.skip("opentelemetry is required for observability tests", allow_module_level=True)
 
-
-pytestmark = pytest.mark.asyncio
-
-from opentelemetry.sdk.metrics.export import InMemoryMetricReader
-from opentelemetry.sdk.trace.export import InMemorySpanExporter, SimpleSpanProcessor
-
-from agents.master_workflow_agent import MasterWorkflowAgent
 from agents.interfaces import BaseResearchAgent
+from agents.master_workflow_agent import MasterWorkflowAgent
 from agents.workflow_orchestrator import WorkflowOrchestrator
 from config.config import settings
 from utils import observability
 from utils.observability import current_run_id_var, generate_run_id
+
+
+pytestmark = pytest.mark.asyncio
 
 
 class DummyEventAgent:
@@ -148,8 +147,9 @@ async def test_observability_records_metrics_and_traces(
                         "artifact_path": self.artifact_path,
                         "results": [
                             {
-                                "company_name": trigger.get("payload", {})
-                                .get("company_name")
+                                "company_name": trigger.get("payload", {}).get(
+                                    "company_name"
+                                )
                                 or "Example Corp",
                                 "score": 1.0,
                             }
@@ -214,14 +214,14 @@ async def test_observability_records_metrics_and_traces(
         )
         assert (
             hitl_points[
-                frozenset({("hitl.kind", "missing_info"), ("hitl.outcome", "completed")})
+                frozenset(
+                    {("hitl.kind", "missing_info"), ("hitl.outcome", "completed")}
+                )
             ]
             == 1
         )
 
-        latency_metric = _find_metric(
-            metrics_data, "workflow_operation_duration_ms"
-        )
+        latency_metric = _find_metric(metrics_data, "workflow_operation_duration_ms")
         operations = _collect_histogram_operations(latency_metric)
         assert {
             "run",

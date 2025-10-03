@@ -74,7 +74,9 @@ class SyntheticEvent:
             attendees=[
                 {
                     "email": f"participant{participant}@example.com",
-                    "responseStatus": random.choice(["accepted", "tentative", "needsAction"]),
+                    "responseStatus": random.choice(
+                        ["accepted", "tentative", "needsAction"]
+                    ),
                 }
                 for participant in range(1, random.randint(2, 6))
             ],
@@ -86,7 +88,9 @@ def _ensure_directory(path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def generate_events(*, count: int, base_start: datetime, step_minutes: int) -> Iterable[SyntheticEvent]:
+def generate_events(
+    *, count: int, base_start: datetime, step_minutes: int
+) -> Iterable[SyntheticEvent]:
     duration_minutes = max(step_minutes // 2, 15)
     duration = timedelta(minutes=duration_minutes)
     delta = timedelta(minutes=step_minutes)

@@ -231,7 +231,11 @@ def workflow_run(
         configure_observability()
 
     existing_run_id = current_run_id_var.get()
-    resolved_run_id = run_id or existing_run_id or generate_run_id()
+    if not (run_id or existing_run_id):
+        raise RuntimeError(
+            "run_id must be provided before creating workflow context"
+        )
+    resolved_run_id = run_id or existing_run_id
     token = current_run_id_var.set(resolved_run_id)
 
     span_attributes = {"workflow.run_id": resolved_run_id, "run.id": resolved_run_id}
@@ -241,6 +245,15 @@ def workflow_run(
     start_time = time.perf_counter()
 
     with _start_span("workflow.run", span_attributes) as span:
+        if (
+            resolved_run_id
+            and resolved_run_id != "unassigned"
+            and hasattr(span, "set_attribute")
+        ):
+            try:
+                span.set_attribute("run.id", resolved_run_id)
+            except Exception:  # pragma: no cover - defensive guard
+                pass
         context = RunContext(resolved_run_id, span, start_time)
         try:
             yield context
@@ -272,6 +285,11 @@ def observe_operation(
     start = time.perf_counter()
 
     with _start_span(f"workflow.{operation}", span_attributes) as span:
+        if run_id and run_id != "unassigned" and hasattr(span, "set_attribute"):
+            try:
+                span.set_attribute("run.id", run_id)
+            except Exception:  # pragma: no cover - defensive guard
+                pass
         try:
             yield span
         except Exception as exc:

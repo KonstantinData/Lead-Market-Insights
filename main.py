@@ -61,7 +61,11 @@ def _assign_new_run_id() -> str:
 async def _run_once(run_id: str) -> None:
     from agents.workflow_orchestrator import WorkflowOrchestrator
 
+    current_run_id_var.set(run_id)
     orchestrator = WorkflowOrchestrator(run_id=run_id)
+    logging.getLogger(__name__).info(
+        "WorkflowOrchestrator instantiated for run.id=%s", run_id
+    )
     try:
         orchestrator.install_signal_handlers(asyncio.get_running_loop())
     except NotImplementedError:
@@ -80,7 +84,8 @@ async def _daemon_loop(
     log = logging.getLogger(__name__)
     run_id = initial_run_id
     while True:
-        log.info("Daemon cycle start.")
+        current_run_id_var.set(run_id)
+        log.info("Daemon cycle start for run.id=%s", run_id)
         await _run_once(run_id)
         log.info("Daemon cycle complete. Sleeping %ss.", interval)
         await asyncio.sleep(interval)

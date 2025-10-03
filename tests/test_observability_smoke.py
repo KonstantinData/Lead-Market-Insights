@@ -193,7 +193,7 @@ async def test_observability_records_metrics_and_traces(
         log_contents = orchestrator.master_agent.log_file_path.read_text(
             encoding="utf-8"
         )
-        assert orchestrator._last_run_id in log_contents
+        assert run_id in log_contents
 
         metrics_data = metric_reader.get_metrics_data()
         run_metric = _find_metric(metrics_data, "workflow_runs_total")
@@ -241,16 +241,18 @@ async def test_observability_records_metrics_and_traces(
         assert len(trace_ids) == 1
 
         run_span = next(span for span in finished_spans if span.name == "workflow.run")
-        assert run_span.attributes["workflow.run_id"] == orchestrator._last_run_id
+        assert run_span.attributes["workflow.run_id"] == run_id
+        assert run_span.attributes["run.id"] == run_id
 
         child_spans = [span for span in finished_spans if span is not run_span]
         assert child_spans, "Expected child spans for operations"
         for span in child_spans:
             assert span.parent is not None
             assert span.parent.span_id == run_span.context.span_id
-            assert span.attributes.get("workflow.run_id") == orchestrator._last_run_id
+            assert span.attributes.get("workflow.run_id") == run_id
+            assert span.attributes.get("run.id") == run_id
 
-        workflow_log_path = settings.workflow_log_dir / f"{orchestrator._last_run_id}.jsonl"
+        workflow_log_path = settings.workflow_log_dir / f"{run_id}.jsonl"
         assert workflow_log_path.exists()
         log_entries = [
             json.loads(line)

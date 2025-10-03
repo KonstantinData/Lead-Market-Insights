@@ -1,9 +1,8 @@
 """WorkflowOrchestrator: central coordinator for research workflows.
 
-The orchestrator now requires a ``run_id`` supplied by the caller. The run
-identifier must be generated before instantiating the orchestrator so that all
-logs and telemetry emitted during construction and execution are correlated to
-the same run.
+Requires externally provided ``run_id`` (generated in :mod:`main`). The
+orchestrator neither generates nor mutates the identifier; callers must provide
+the run id before instantiation to guarantee consistent telemetry correlation.
 """
 
 import asyncio
@@ -29,9 +28,7 @@ from agents.master_workflow_agent import MasterWorkflowAgent
 from config.config import settings
 from utils.observability import (
     configure_observability,
-    current_run_id_var,
     flush_telemetry,
-    get_current_run_id,
     workflow_run,
 )
 from utils.reporting import convert_research_artifacts_to_pdfs
@@ -47,7 +44,7 @@ class WorkflowOrchestrator:
         self,
         communication_backend=None,
         *,
-        run_id: Optional[str] = None,
+        run_id: str,
         alert_agent: Optional[AlertAgent] = None,
         master_agent: Optional[MasterWorkflowAgent] = None,
         failure_threshold: int = 3,
@@ -60,10 +57,6 @@ class WorkflowOrchestrator:
         if not run_id:
             raise ValueError("WorkflowOrchestrator requires a non-empty run_id")
         self.run_id = run_id
-        current_context_run_id = get_current_run_id()
-        if current_context_run_id == "unassigned":
-            current_run_id_var.set(run_id)
-        self._last_run_id: Optional[str] = None
         self._research_summary_root = (
             Path(settings.research_artifact_dir) / "workflow_runs"
         )
@@ -294,7 +287,6 @@ class WorkflowOrchestrator:
         try:
             with workflow_run(run_id=run_id) as context:
                 run_context = context
-                self._last_run_id = context.run_id
                 logger.info("Workflow orchestrator started.")
 
                 if self._init_error is not None or not self.master_agent:

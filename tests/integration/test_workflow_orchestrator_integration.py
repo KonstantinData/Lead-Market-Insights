@@ -291,8 +291,6 @@ async def test_orchestrator_records_research_artifacts_and_email_details(
         await orchestrator.shutdown()
         current_run_id_var.reset(token)
 
-    run_id = orchestrator._last_run_id
-    assert run_id is not None
     assert master_agent.initialized_runs == [run_id]
     assert master_agent.finalize_called is True
 

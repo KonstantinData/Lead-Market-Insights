@@ -1,17 +1,23 @@
-research
 recherche
 kundenrecherche
-customer research
 unternehmensrecherche
-meeting preparation
-meeting-vorbereitung
 meetingvorbereitung
-terminvorbereitung
-besuchsvorbereitung
-briefing
+meeting-vorbereitung
 meeting vorbereitung
+terminvorbereitung
 termin vorbereitung
+besuchsvorbereitung
 vorbereitung meeting
-customer meeting
-customer-meeting
+briefing
+kundentermin
+kundenmeeting
+kunden-meeting
+kundenbesuch
+research
+customer research
+company research
+meeting preparation
 meetingpreparation
+meeting prep
+customer meeting
+client meeting

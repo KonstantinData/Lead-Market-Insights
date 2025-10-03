@@ -5,6 +5,7 @@ from typing import Any, Dict, Iterable
 import pytest
 
 from agents.master_workflow_agent import MasterWorkflowAgent
+from utils.observability import current_run_id_var, generate_run_id
 
 
 pytestmark = pytest.mark.asyncio
@@ -43,6 +44,10 @@ async def test_hard_trigger_with_complete_info_dispatches_without_unhandled_stat
         trigger_agent=DummyTriggerAgent({"trigger": True, "type": "hard"}),
         extraction_agent=DummyExtractionAgent({"info": info, "is_complete": True}),
     )
+
+    run_id = generate_run_id()
+    current_run_id_var.set(run_id)
+    agent.attach_run(run_id, agent.workflow_log_manager)
 
     dispatched: Dict[str, Any] = {"called": False}
 

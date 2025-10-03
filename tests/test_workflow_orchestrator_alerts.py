@@ -4,6 +4,7 @@ import pytest
 
 from agents.alert_agent import AlertSeverity
 from agents.workflow_orchestrator import WorkflowOrchestrator
+from utils.observability import current_run_id_var, generate_run_id
 
 
 pytestmark = pytest.mark.asyncio
@@ -29,6 +30,11 @@ class StubMasterAgent:
         self.log_filename = "stub.log"
         self.log_file_path = "stub.log"
         self.storage_agent = None
+        self.run_ids: list[str] = []
+        self.workflow_log_manager = None
+
+    def attach_run(self, run_id: str, *_args, **_kwargs) -> None:
+        self.run_ids.append(run_id)
 
     async def process_all_events(self):
         self.process_calls += 1
@@ -43,15 +49,19 @@ class StubMasterAgent:
 async def test_orchestrator_emits_alert_on_handled_exception():
     alert_agent = DummyAlertAgent()
     master_agent = StubMasterAgent(fail_finalize=True)
+    run_id = generate_run_id()
+    token = current_run_id_var.set(run_id)
     orchestrator = WorkflowOrchestrator(
         alert_agent=alert_agent,
         master_agent=master_agent,
+        run_id=run_id,
     )
 
     try:
         await orchestrator.run()
     finally:
         await orchestrator.shutdown()
+        current_run_id_var.reset(token)
 
     assert len(alert_agent.calls) == 1
     call = alert_agent.calls[0]
@@ -63,10 +73,13 @@ async def test_orchestrator_emits_alert_on_handled_exception():
 async def test_orchestrator_escalates_alert_on_repeated_failures():
     alert_agent = DummyAlertAgent()
     master_agent = StubMasterAgent(fail_process=True)
+    run_id = generate_run_id()
+    token = current_run_id_var.set(run_id)
     orchestrator = WorkflowOrchestrator(
         alert_agent=alert_agent,
         master_agent=master_agent,
         failure_threshold=2,
+        run_id=run_id,
     )
 
     try:
@@ -74,6 +87,7 @@ async def test_orchestrator_escalates_alert_on_repeated_failures():
         await orchestrator.run()
     finally:
         await orchestrator.shutdown()
+        current_run_id_var.reset(token)
 
     assert len(alert_agent.calls) == 2
     first, second = alert_agent.calls

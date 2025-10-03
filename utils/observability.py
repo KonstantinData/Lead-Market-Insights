@@ -52,8 +52,8 @@ _logger = logging.getLogger(__name__)
 _TRACER_NAME = "agentic.workflow"
 _SERVICE_NAME = "agentic-intelligence-workflow"
 
-_run_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
-    "workflow_run_id", default=None
+current_run_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "workflow_run_id", default=""
 )
 
 _tracer_provider: Optional[Any] = None
@@ -230,10 +230,11 @@ def workflow_run(
     if not _configured:
         configure_observability()
 
-    resolved_run_id = run_id or generate_run_id()
-    token = _run_id_var.set(resolved_run_id)
+    existing_run_id = current_run_id_var.get()
+    resolved_run_id = run_id or existing_run_id or generate_run_id()
+    token = current_run_id_var.set(resolved_run_id)
 
-    span_attributes = {"workflow.run_id": resolved_run_id}
+    span_attributes = {"workflow.run_id": resolved_run_id, "run.id": resolved_run_id}
     if attributes:
         span_attributes.update(attributes)
 
@@ -248,7 +249,7 @@ def workflow_run(
             raise
         finally:
             context.finish()
-            _run_id_var.reset(token)
+            current_run_id_var.reset(token)
 
 
 @contextlib.contextmanager
@@ -261,9 +262,10 @@ def observe_operation(
         configure_observability()
 
     span_attributes = {"workflow.operation": operation}
-    run_id = get_current_run_id()
+    run_id = current_run_id_var.get()
     if run_id:
         span_attributes["workflow.run_id"] = run_id
+        span_attributes["run.id"] = run_id
     if attributes:
         span_attributes.update(attributes)
 
@@ -350,8 +352,9 @@ def record_cost_limit_event(
         _logger.exception("Failed to record cost limit event metric")
 
 
-def get_current_run_id() -> Optional[str]:
-    return _run_id_var.get()
+def get_current_run_id() -> str:
+    run_id = current_run_id_var.get()
+    return run_id or "unassigned"
 
 
 async def flush_telemetry(timeout: float = 5.0) -> None:
@@ -474,7 +477,7 @@ def _install_log_record_factory() -> None:
 
     def record_factory(*args, **kwargs):  # type: ignore[override]
         record = _original_log_record_factory(*args, **kwargs)
-        record.run_id = get_current_run_id() or "n/a"
+        record.run_id = get_current_run_id()
         return record
 
     logging.setLogRecordFactory(record_factory)

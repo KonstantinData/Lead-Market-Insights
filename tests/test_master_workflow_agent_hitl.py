@@ -6,6 +6,7 @@ import pytest
 
 from agents.master_workflow_agent import MasterWorkflowAgent
 from config.config import settings
+from utils.observability import current_run_id_var, generate_run_id
 
 
 pytestmark = pytest.mark.asyncio
@@ -89,6 +90,9 @@ def _prepare_agent(backend: DummyBackend) -> MasterWorkflowAgent:
         agent._send_calls.append({"event": to_event, "info": event_info})
 
     agent._send_to_crm_agent = _capture_send  # type: ignore[assignment]
+    run_id = generate_run_id()
+    current_run_id_var.set(run_id)
+    agent.attach_run(run_id, agent.workflow_log_manager)
     return agent
 
 
@@ -254,6 +258,10 @@ async def test_audit_log_records_missing_info_flow(tmp_path) -> None:
             agent._send_calls.append({"event": to_event, "info": event_info})
 
         agent._send_to_crm_agent = _capture_send  # type: ignore[assignment]
+
+        run_id = generate_run_id()
+        current_run_id_var.set(run_id)
+        agent.attach_run(run_id, agent.workflow_log_manager)
 
         await agent.process_all_events()
 

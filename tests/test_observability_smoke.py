@@ -20,6 +20,7 @@ from agents.interfaces import BaseResearchAgent
 from agents.workflow_orchestrator import WorkflowOrchestrator
 from config.config import settings
 from utils import observability
+from utils.observability import current_run_id_var, generate_run_id
 
 
 class DummyEventAgent:
@@ -157,6 +158,8 @@ async def test_observability_records_metrics_and_traces(
                 }
 
         crm_agent = DummyCrmAgent()
+        run_id = generate_run_id()
+        token = current_run_id_var.set(run_id)
         orchestrator = WorkflowOrchestrator(
             master_agent=MasterWorkflowAgent(
                 event_agent=DummyEventAgent([event]),
@@ -171,7 +174,8 @@ async def test_observability_records_metrics_and_traces(
                 extraction_agent=DummyExtractionAgent(extraction_payload),
                 human_agent=DummyHumanAgent(),
                 crm_agent=crm_agent,
-            )
+            ),
+            run_id=run_id,
         )
 
         orchestrator.master_agent.similar_companies_agent = DummySimilarCompaniesAgent(
@@ -182,6 +186,7 @@ async def test_observability_records_metrics_and_traces(
             await orchestrator.run()
         finally:
             await orchestrator.shutdown()
+            current_run_id_var.reset(token)
 
         assert crm_agent.sent, "CRM agent should have been invoked"
 

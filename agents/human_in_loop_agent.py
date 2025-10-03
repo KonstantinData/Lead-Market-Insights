@@ -378,10 +378,22 @@ class HumanInLoopAgent(BaseHumanAgent):
         Normalizes the response from a backend or simulation to a standard structure.
         """
         if isinstance(response, dict):
+            status = response.get("status")
+            status_decision_map = {
+                "approved": True,
+                "declined": False,
+                "rejected": False,
+                "denied": False,
+                "pending": None,
+            }
+            normalized_status = (
+                str(status).strip().lower() if isinstance(status, str) else None
+            )
+
             if "dossier_required" in response:
                 dossier_required = response.get("dossier_required")
-            elif response.get("status") in {"pending", None}:
-                dossier_required = None
+            elif normalized_status in status_decision_map:
+                dossier_required = status_decision_map[normalized_status]
             else:
                 dossier_required = bool(response)
             details = response.get("details")

@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-import pytest
-
 from agents.alert_agent import AlertSeverity
 from agents.workflow_orchestrator import WorkflowOrchestrator
 from utils.observability import current_run_id_var, generate_run_id

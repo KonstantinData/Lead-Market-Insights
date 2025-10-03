@@ -6,10 +6,6 @@ import json
 from pathlib import Path
 from typing import List
 
-import json
-from pathlib import Path
-from typing import List
-
 import pytest
 
 import agents.master_workflow_agent as master_module

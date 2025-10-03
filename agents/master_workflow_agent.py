@@ -1,8 +1,10 @@
 """MasterWorkflowAgent: Pure logic agent for polling and event-processing."""
 
 import asyncio
+import hashlib
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -38,6 +40,7 @@ from utils.observability import (
     record_hitl_outcome,
     record_trigger_match,
 )
+from utils.negative_cache import NegativeEventCache
 from utils.pii import mask_pii
 from utils.trigger_loader import load_trigger_words
 from utils.workflow_steps import workflow_step_recorder  # NEU
@@ -71,6 +74,9 @@ class MasterWorkflowAgent:
         self.trigger_words = load_trigger_words(
             settings.trigger_words, triggers_file=trigger_words_file, logger=logger
         )
+        self._rule_hash = hashlib.sha256(
+            "\n".join(sorted(self.trigger_words)).encode("utf-8")
+        ).hexdigest()
         self.trigger_agent = trigger_agent or create_agent(
             BaseTriggerAgent,
             resolved_overrides.get("trigger"),
@@ -111,6 +117,10 @@ class MasterWorkflowAgent:
 
         self.storage_agent = LocalStorageAgent(settings.run_log_dir, logger=logger)
         self.workflow_log_manager = WorkflowLogManager(settings.workflow_log_dir)
+        self._negative_cache_path = (
+            self.storage_agent.base_dir / "state" / "negative_cache.json"
+        )
+        self._negative_cache: Optional[NegativeEventCache] = None
 
         self.run_id: str = ""
         self.run_directory: Path = self.storage_agent.base_dir
@@ -209,6 +219,12 @@ class MasterWorkflowAgent:
         logger.info("MasterWorkflowAgent: Processing events...")
 
         processed_results: List[Dict[str, Any]] = []
+        if self._negative_cache is None:
+            self._negative_cache = NegativeEventCache.load(
+                self._negative_cache_path,
+                rule_hash=self._rule_hash,
+                now=time.time(),
+            )
         events = await self.event_agent.poll()
         for event in events:
             masked_event = self._mask_for_logging(event)
@@ -226,6 +242,23 @@ class MasterWorkflowAgent:
             # Step: start
             workflow_step_recorder.record_step(self.run_id, event_id, "start")
 
+            if self._negative_cache and self._negative_cache.should_skip(
+                event, self._rule_hash
+            ):
+                decision = self._negative_cache.get_decision(
+                    event_id if isinstance(event_id, str) else None
+                )
+                logger.info(
+                    "Prefilter skip (negative_cache) event_id=%s decision=%s",
+                    event_id,
+                    decision,
+                )
+                workflow_step_recorder.record_step(
+                    self.run_id, event_id, "prefilter.negative_cache"
+                )
+                event_result["status"] = "skipped_negative_cache"
+                continue
+
             with observe_operation(
                 "trigger_detection", {"event.id": str(event_id)} if event_id else None
             ):
@@ -240,13 +273,25 @@ class MasterWorkflowAgent:
                     self.llm_confidence_thresholds.get("trigger", 0.0),
                 )
                 event_result["status"] = "skipped_trigger_threshold"
+                if self._negative_cache:
+                    self._negative_cache.record_no_trigger(
+                        event,
+                        self._rule_hash,
+                        "skipped_trigger_threshold",
+                    )
                 continue
             if not trigger_result.get("trigger"):
                 logger.info(f"No trigger detected for event {event_id}")
                 event_result["status"] = "no_trigger"
+                if self._negative_cache:
+                    self._negative_cache.record_no_trigger(
+                        event, self._rule_hash, "no_trigger"
+                    )
                 continue
 
             record_trigger_match(trigger_result.get("type", "unknown"))
+            if self._negative_cache:
+                self._negative_cache.forget(event_id)
             masked_trigger = self._mask_for_logging(trigger_result)
             logger.info(
                 "%s trigger detected in event %s (matched: %s in %s)",
@@ -845,6 +890,9 @@ class MasterWorkflowAgent:
             self.log_file_path,
             metadata=metadata,
         )
+
+        if self._negative_cache:
+            self._negative_cache.flush()
 
         if hasattr(self.human_agent, "shutdown"):
             try:

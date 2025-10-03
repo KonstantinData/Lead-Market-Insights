@@ -23,6 +23,16 @@ environments. For a visual overview of how these agents collaborate, refer to
 | [`trigger_detection_agent.py`](trigger_detection_agent.py) | Detects hard and soft trigger phrases in event summaries and descriptions using normalised keyword matching. |
 | [`workflow_orchestrator.py`](workflow_orchestrator.py) | High-level orchestrator that initialises the `MasterWorkflowAgent`, handles error resilience, and finalises runs by recording local log metadata. |
 
+## Negative cache for unchanged events
+
+The `MasterWorkflowAgent` persists a lightweight "negative cache" in
+`<RUN_LOG_DIR>/state/negative_cache.json`. Each cache entry stores a fingerprint of
+the event payload, the trigger word rule hash, and the last classification decision.
+During subsequent runs, events whose fingerprints, trigger rules, and classification
+version remain unchanged are skipped before trigger detection. Entries automatically
+expire after 30 days or when the calendar event is updated, ensuring that modified
+events are reprocessed without manual intervention.
+
 ## Extension points
 
 Reusable abstract base classes live in [`interfaces/`](interfaces). They define the minimum

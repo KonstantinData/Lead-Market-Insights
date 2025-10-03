@@ -4,6 +4,7 @@ from typing import Iterable, Mapping, Sequence
 
 import pytest
 
+from agents.soft_trigger_validator import SoftTriggerValidator
 from agents.trigger_detection_agent import TriggerDetectionAgent
 from utils.text_normalization import normalize_text
 
@@ -37,31 +38,41 @@ async def test_agent_detects_soft_triggers_via_llm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     soft_match = {
-        "soft_trigger": "Kick-off Termin",
+        "soft_trigger": "Kickoff Meeting",
         "matched_hard_trigger": "meeting preparation",
         "source_field": "summary",
-        "reason": "Kick-off signalisiert eine Meeting Vorbereitung",
+        "reason": "Kickoff entspricht dem vorgesehenen Hard-Trigger",
     }
 
     def _detector(
         summary: str, description: str, hard_triggers: Sequence[str]
     ) -> Iterable[Mapping[str, str]]:
-        assert summary == "Kick-off mit neuem Kunden"
+        assert summary == "Kick-off Meeting mit neuem Kunden"
         assert description == ""
         assert "meeting preparation" in hard_triggers
         return [soft_match]
 
-    agent = TriggerDetectionAgent(
-        trigger_words=["meeting preparation"], soft_trigger_detector=_detector
+    validator = SoftTriggerValidator(
+        synonyms=["kickoff meeting"],
+        fuzzy_evidence_threshold=0.5,
     )
 
-    result = await agent.check({"summary": "Kick-off mit neuem Kunden"})
+    agent = TriggerDetectionAgent(
+        trigger_words=["meeting preparation"],
+        soft_trigger_detector=_detector,
+        soft_trigger_validator=validator,
+    )
+
+    result = await agent.check({"summary": "Kick-off Meeting mit neuem Kunden"})
     assert result["trigger"] is True
     assert result["type"] == "soft"
     assert result["matched_word"] == soft_match["soft_trigger"]
     assert result["matched_field"] == soft_match["source_field"]
-    assert result["soft_trigger_matches"] == [soft_match]
-    assert result["extraction_context"]["soft_trigger_matches"] == [soft_match]
+    assert len(result["soft_trigger_matches"]) == 1
+    validated_match = result["soft_trigger_matches"][0]
+    assert validated_match["soft_trigger"] == soft_match["soft_trigger"]
+    assert validated_match["validation"]["evidence"] == "fuzzy"
+    assert result["extraction_context"]["soft_trigger_matches"] == result["soft_trigger_matches"]
 
 
 async def test_agent_ignores_invalid_llm_response(
@@ -100,3 +111,75 @@ async def test_agent_handles_missing_fields() -> None:
         "soft_trigger_matches": [],
         "hard_triggers": ["alert"],
     }
+
+
+async def test_agent_soft_validator_rejects_all_candidates() -> None:
+    candidate = {
+        "soft_trigger": "Statusupdate",
+        "matched_hard_trigger": "meeting",
+        "source_field": "summary",
+    }
+
+    def _detector(
+        summary: str, description: str, hard_triggers: Sequence[str]
+    ) -> Iterable[Mapping[str, str]]:
+        assert "meeting" in hard_triggers
+        return [candidate]
+
+    validator = SoftTriggerValidator(
+        synonyms=["kundengespräch"],
+        similarity_threshold=0.7,
+    )
+
+    agent = TriggerDetectionAgent(
+        trigger_words=["meeting"],
+        soft_trigger_detector=_detector,
+        soft_trigger_validator=validator,
+    )
+
+    result = await agent.check({"summary": "Statusupdate zum Projekt"})
+    assert result == {
+        "trigger": False,
+        "type": None,
+        "matched_word": None,
+        "matched_field": None,
+        "soft_trigger_matches": [],
+        "hard_triggers": ["meeting"],
+    }
+
+
+async def test_agent_soft_validator_disabled_uses_llm_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = {
+        "soft_trigger": "Planungsgespräch",
+        "matched_hard_trigger": "meeting",
+        "source_field": "summary",
+    }
+
+    def _detector(
+        summary: str, description: str, hard_triggers: Sequence[str]
+    ) -> Iterable[Mapping[str, str]]:
+        assert "meeting" in hard_triggers
+        return [candidate]
+
+    monkeypatch.setattr(
+        "agents.trigger_detection_agent.settings.soft_trigger_validator_enabled",
+        False,
+    )
+    monkeypatch.setattr(
+        "agents.trigger_detection_agent.settings.soft_validator_write_artifacts",
+        False,
+    )
+
+    agent = TriggerDetectionAgent(
+        trigger_words=["meeting"], soft_trigger_detector=_detector
+    )
+
+    result = await agent.check({"summary": "Planungsgespräch mit Kunde"})
+    assert result["trigger"] is True
+    assert result["type"] == "soft"
+    assert len(result["soft_trigger_matches"]) == 1
+    raw_match = result["soft_trigger_matches"][0]
+    assert raw_match["soft_trigger"] == candidate["soft_trigger"]
+    assert "validation" not in raw_match

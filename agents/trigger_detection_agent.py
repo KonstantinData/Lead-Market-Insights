@@ -8,8 +8,14 @@ import logging
 import os
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Union
 
+from collections import Counter
+
 from agents.factory import register_agent
 from agents.interfaces import BaseTriggerAgent
+from agents.soft_trigger_validator import (
+    SoftTriggerValidator,
+    load_synonym_phrases,
+)
 from config.config import settings
 from utils.async_http import AsyncHTTP
 from utils.text_normalization import normalize_text
@@ -137,6 +143,7 @@ Antworte ausschließlich mit der JSON-Struktur.
         trigger_words: Optional[Sequence[str]] = None,
         *,
         soft_trigger_detector: Optional[SoftTriggerDetector] = None,
+        soft_trigger_validator: Optional[SoftTriggerValidator] = None,
     ) -> None:
         provided = [str(word).strip() for word in (trigger_words or []) if str(word).strip()]
         self.hard_trigger_words: tuple[str, ...]
@@ -157,6 +164,29 @@ Antworte ausschließlich mit der JSON-Struktur.
             self.hard_trigger_words = (normalize_text(default_word),)
 
         self._soft_trigger_detector = soft_trigger_detector
+        self._soft_trigger_validator: Optional[SoftTriggerValidator]
+        if soft_trigger_validator is not None:
+            self._soft_trigger_validator = soft_trigger_validator
+        elif settings.soft_trigger_validator_enabled:
+            try:
+                synonyms = load_synonym_phrases(settings.synonym_trigger_path)
+                self._soft_trigger_validator = SoftTriggerValidator(
+                    synonyms=synonyms,
+                    require_evidence_substring=settings.validator_require_evidence_substring,
+                    fuzzy_evidence_threshold=settings.validator_fuzzy_evidence_threshold,
+                    similarity_method=settings.validator_similarity_method,
+                    similarity_threshold=settings.validator_similarity_threshold,
+                )
+            except Exception as exc:  # pragma: no cover - defensive guard
+                logger.warning(
+                    "Initialising soft trigger validator failed: %s. Soft matches will bypass validation.",
+                    exc,
+                )
+                self._soft_trigger_validator = None
+        else:
+            self._soft_trigger_validator = None
+
+        self._soft_validator_write_artifacts = settings.soft_validator_write_artifacts
 
     async def check(self, event: Dict[str, Any]) -> Dict[str, Any]:
         """Evaluate an event for hard and soft triggers."""
@@ -177,17 +207,71 @@ Antworte ausschließlich mit der JSON-Struktur.
         logger.info("Event %s: No hard triggers found; evaluating soft triggers", event_id)
 
         soft_matches = await self._detect_soft_triggers(event)
-        if soft_matches:
-            first_match = soft_matches[0]
+        logger.info(
+            "Event %s: Soft trigger candidates after initial sanitisation: %d",
+            event_id,
+            len(soft_matches),
+        )
+
+        validated_matches: List[Dict[str, Any]] = list(soft_matches)
+
+        if soft_matches and self._soft_trigger_validator is not None:
+            try:
+                accepted, rejected = self._soft_trigger_validator.validate(
+                    summary=event.get("summary") or "",
+                    description=event.get("description") or "",
+                    matches=soft_matches,
+                )
+            except Exception as exc:  # pragma: no cover - defensive guard
+                logger.warning(
+                    "Event %s: Soft trigger validation failed (%s); using raw LLM candidates.",
+                    event_id,
+                    exc,
+                )
+                accepted = list(soft_matches)
+                rejected = []
+            else:
+                logger.info(
+                    "Event %s: Soft validator accepted=%d rejected=%d",
+                    event_id,
+                    len(accepted),
+                    len(rejected),
+                )
+                if rejected:
+                    breakdown = Counter(
+                        entry.get("reject_reason", "unknown") for entry in rejected
+                    )
+                    logger.info(
+                        "Event %s: Soft validator reject breakdown=%s",
+                        event_id,
+                        dict(breakdown),
+                    )
+                if self._soft_validator_write_artifacts:
+                    self._persist_soft_validator_artifact(
+                        event,
+                        llm_candidates=soft_matches,
+                        accepted=accepted,
+                        rejected=rejected,
+                    )
+
+            validated_matches = list(accepted)
+        elif soft_matches and self._soft_trigger_validator is None:
             logger.info(
-                "Event %s: Soft trigger(s) detected via LLM (matched hard trigger '%s')",
+                "Event %s: Soft trigger validator disabled; using LLM candidates without validation.",
+                event_id,
+            )
+
+        if validated_matches:
+            first_match = validated_matches[0]
+            logger.info(
+                "Event %s: Soft trigger(s) detected after validation (matched hard trigger '%s')",
                 event_id,
                 first_match.get("matched_hard_trigger"),
             )
             extraction_context = {
                 "summary": event.get("summary"),
                 "description": event.get("description"),
-                "soft_trigger_matches": soft_matches,
+                "soft_trigger_matches": validated_matches,
                 "hard_triggers": list(self.original_trigger_words),
             }
             return {
@@ -195,12 +279,14 @@ Antworte ausschließlich mit der JSON-Struktur.
                 "type": "soft",
                 "matched_word": first_match.get("soft_trigger"),
                 "matched_field": first_match.get("source_field"),
-                "soft_trigger_matches": soft_matches,
+                "soft_trigger_matches": validated_matches,
                 "hard_triggers": list(self.original_trigger_words),
                 "extraction_context": extraction_context,
             }
 
-        logger.info("Event %s: No hard or soft triggers detected", event_id)
+        logger.info(
+            "Event %s: No valid soft triggers detected after validation", event_id
+        )
         return self._default_response()
 
     def check_field(self, text: Optional[str], field_name: str) -> Dict[str, Any]:
@@ -247,10 +333,28 @@ Antworte ausschließlich mit der JSON-Struktur.
             logger.exception("Event %s: Soft trigger detection failed: %s", event_id, exc)
             return []
 
-        validated = self._validate_soft_trigger_matches(raw_matches)
-        if not validated:
+        if raw_matches is None:
+            candidates: List[Mapping[str, Any]] = []
+        else:
+            try:
+                candidates = list(raw_matches)
+            except TypeError:
+                logger.warning(
+                    "Event %s: Soft trigger detector returned a non-iterable response; ignoring.",
+                    event_id,
+                )
+                candidates = []
+
+        logger.info(
+            "Event %s: Soft trigger LLM produced %d candidate(s)",
+            event_id,
+            len(candidates),
+        )
+
+        validated = self._validate_soft_trigger_matches(candidates)
+        if not validated and candidates:
             logger.info(
-                "Event %s: LLM returned no valid soft trigger matches", event_id
+                "Event %s: LLM candidates discarded due to invalid structure", event_id
             )
         return validated
 
@@ -308,3 +412,84 @@ Antworte ausschließlich mit der JSON-Struktur.
             )
 
         return validated
+
+    def _persist_soft_validator_artifact(
+        self,
+        event: Mapping[str, Any],
+        *,
+        llm_candidates: Sequence[Mapping[str, Any]],
+        accepted: Sequence[Mapping[str, Any]],
+        rejected: Sequence[Mapping[str, Any]],
+    ) -> None:
+        if not self._soft_validator_write_artifacts:
+            return
+
+        run_id = self._resolve_run_id(event)
+        event_identifier = self._safe_identifier(event.get("id"), default="event")
+        run_identifier = self._safe_identifier(run_id, default="run")
+
+        target_dir = (
+            settings.research_artifact_dir
+            / "soft_trigger_validation"
+            / run_identifier
+        )
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:  # pragma: no cover - filesystem issues
+            logger.warning(
+                "Failed to create validator artifact directory %s: %s",
+                target_dir,
+                exc,
+            )
+            return
+
+        payload = {
+            "llm_candidates": list(llm_candidates),
+            "accepted": list(accepted),
+            "rejected": list(rejected),
+        }
+        artifact_path = target_dir / f"{event_identifier}.json"
+        try:
+            artifact_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except OSError as exc:  # pragma: no cover - filesystem issues
+            logger.warning(
+                "Failed to write validator artifact for event %s: %s",
+                event_identifier,
+                exc,
+            )
+
+    def _resolve_run_id(self, event: Mapping[str, Any]) -> str:
+        candidates = [
+            event.get("run_id"),
+            event.get("runId"),
+        ]
+        metadata = event.get("metadata")
+        if isinstance(metadata, Mapping):
+            candidates.extend([
+                metadata.get("run_id"),
+                metadata.get("runId"),
+            ])
+        context = event.get("context")
+        if isinstance(context, Mapping):
+            candidates.extend([
+                context.get("run_id"),
+                context.get("runId"),
+            ])
+
+        for candidate in candidates:
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+        return "default"
+
+    @staticmethod
+    def _safe_identifier(value: Any, *, default: str) -> str:
+        text = str(value).strip() if value is not None else ""
+        if not text:
+            return default
+        sanitized = "".join(
+            ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in text
+        ).strip("_")
+        return sanitized or default

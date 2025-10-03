@@ -1,0 +1,12 @@
+# Synonyme/Paraphrasen für Soft-Trigger-Validierung
+# Eine Phrase pro Zeile. Kommentare erlaubt, leere Zeilen ignorieren.
+
+termin mit kunde
+kundengespräch
+meeting mit dem kunden
+vorab-recherche
+hintergrundanalyse
+kundenrecherche
+auftaktgespräch zum projektstart
+onboarding session für neue mitarbeiter
+einführung neuer kollegen

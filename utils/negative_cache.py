@@ -245,4 +245,3 @@ class NegativeEventCache:
             return age <= NEG_CACHE_MAX_AGE_SECONDS
 
         return True
-

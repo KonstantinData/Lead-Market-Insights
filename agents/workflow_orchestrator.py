@@ -211,6 +211,13 @@ class WorkflowOrchestrator:
 
         task.add_done_callback(_clear)
 
+    def _on_pending_audit(
+        self, kind: str, audit_id: str, context: Dict[str, Any]
+    ) -> None:
+        """Backward-compatible entry point for registering pending audits."""
+
+        self.on_pending(kind, audit_id, context)
+
     def on_pending(self, kind: str, audit_id: str, context: Dict[str, Any]) -> None:
         """Register reply handler for pending HITL audits."""
 

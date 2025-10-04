@@ -22,6 +22,7 @@ class ReminderEscalation:
         self.run_id = run_id
         self._task_scheduler = task_scheduler
         self._tasks: Set[asyncio.Task[Any]] = set()
+        self._audit_tasks: Dict[str, Set[asyncio.Task[Any]]] = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -144,24 +145,72 @@ class ReminderEscalation:
             metadata,
         )
 
+    def schedule_admin_recurring_reminders(
+        self,
+        admin_email: str,
+        subject: str,
+        body: str,
+        interval_hours: float,
+        *,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> asyncio.Task[None]:
+        interval_seconds = max(float(interval_hours), 0.0) * 3600.0
+        if interval_seconds <= 0:
+            raise ValueError("interval_hours must be greater than 0 for recurring reminders")
+
+        metadata = dict(metadata or {})
+        due_time = datetime.now(timezone.utc) + timedelta(seconds=interval_seconds)
+        self._append_log(
+            "admin_recurring_reminder_scheduled",
+            (
+                "Recurring admin reminder scheduled for "
+                f"{admin_email} starting at {due_time.isoformat()} ({subject})"
+            ),
+            metadata=metadata,
+        )
+
+        async def _recurring() -> None:
+            try:
+                while True:
+                    await asyncio.sleep(interval_seconds)
+                    await self.send_reminder(
+                        admin_email,
+                        subject,
+                        body,
+                        metadata=metadata,
+                    )
+            except asyncio.CancelledError:
+                raise
+
+        audit_id = metadata.get("audit_id") if metadata else None
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError as exc:  # pragma: no cover - defensive guard
+            raise RuntimeError(
+                "ReminderEscalation scheduling requires an active asyncio event loop"
+            ) from exc
+
+        task = loop.create_task(_recurring())
+        tracked = self._register_task(task, audit_id=audit_id)
+        return tracked
+
     def cancel_pending(self) -> None:
         tasks = list(self._tasks)
         self._tasks.clear()
+        self._audit_tasks.clear()
         for task in tasks:
             task.cancel()
 
     def cancel_for_audit(self, audit_id: str) -> None:
-        """Cancel reminders associated with *audit_id*.
+        """Cancel reminders associated with *audit_id*."""
 
-        The current implementation does not track reminders per audit and will
-        therefore cancel all pending tasks. The signature is provided so that
-        callers can uniformly request cancellation without needing to know the
-        underlying storage model. Future enhancements can scope cancellation to
-        specific audit identifiers.
-        """
+        tasks = self._audit_tasks.pop(audit_id, set())
+        if not tasks:
+            return
 
-        _ = audit_id  # Placeholder until reminders are tracked per audit.
-        self.cancel_pending()
+        for task in list(tasks):
+            task.cancel()
+            self._tasks.discard(task)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -199,10 +248,18 @@ class ReminderEscalation:
             ) from exc
 
         task = loop.create_task(_execute())
-        tracked = self._register_task(task)
+        tracked = self._register_task(
+            task,
+            audit_id=metadata.get("audit_id") if metadata else None,
+        )
         return tracked
 
-    def _register_task(self, task: asyncio.Task[Any]) -> asyncio.Task[Any]:
+    def _register_task(
+        self,
+        task: asyncio.Task[Any],
+        *,
+        audit_id: Optional[str] = None,
+    ) -> asyncio.Task[Any]:
         tracked = task
         if self._task_scheduler:
             try:
@@ -214,7 +271,31 @@ class ReminderEscalation:
                     tracked = scheduled
 
         self._tasks.add(tracked)
-        tracked.add_done_callback(self._tasks.discard)
+
+        def _remove_from_tasks(completed: asyncio.Task[Any]) -> None:
+            self._tasks.discard(completed)
+
+        tracked.add_done_callback(_remove_from_tasks)
+
+        normalized_audit_id: Optional[str] = None
+        if audit_id:
+            text_id = str(audit_id)
+            if text_id.lower() != "n/a":
+                normalized_audit_id = text_id
+
+        if normalized_audit_id:
+            audit_tasks = self._audit_tasks.setdefault(normalized_audit_id, set())
+            audit_tasks.add(tracked)
+
+            def _remove_from_audit(completed: asyncio.Task[Any]) -> None:
+                tasks = self._audit_tasks.get(normalized_audit_id)
+                if not tasks:
+                    return
+                tasks.discard(completed)
+                if not tasks:
+                    self._audit_tasks.pop(normalized_audit_id, None)
+
+            tracked.add_done_callback(_remove_from_audit)
         return tracked
 
     def _append_log(

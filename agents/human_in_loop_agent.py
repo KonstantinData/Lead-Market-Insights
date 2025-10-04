@@ -581,23 +581,48 @@ class HumanInLoopAgent(BaseHumanAgent):
         if policy.escalation_delay is not None:
             escalation_seconds = max(policy.escalation_delay.total_seconds(), 0)
             escalation_recipient = policy.escalation_recipient or contact_email
+            escalation_subject = self._build_escalation_subject(subject)
+            escalation_body = self._build_escalation_message(
+                message,
+                contact,
+                event,
+                info,
+                details,
+                audit_id=audit_id,
+            )
+            escalation_metadata = {
+                **metadata,
+                "escalation_recipient": escalation_recipient,
+            }
             self.reminder_escalation.schedule_escalation(
                 escalation_recipient,
-                self._build_escalation_subject(subject),
-                self._build_escalation_message(
-                    message,
-                    contact,
-                    event,
-                    info,
-                    details,
-                    audit_id=audit_id,
-                ),
+                escalation_subject,
+                escalation_body,
                 escalation_seconds,
-                metadata={
-                    **metadata,
-                    "escalation_recipient": escalation_recipient,
-                },
+                metadata=escalation_metadata,
             )
+
+            admin_email = settings.hitl_admin_email
+            admin_interval = self._admin_reminder_interval_hours()
+            if admin_email and admin_interval:
+                admin_metadata = {
+                    **escalation_metadata,
+                    "admin_recipient": admin_email,
+                }
+                try:
+                    self.reminder_escalation.schedule_admin_recurring_reminders(
+                        admin_email,
+                        escalation_subject,
+                        escalation_body,
+                        admin_interval,
+                        metadata=admin_metadata,
+                    )
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    logger.exception(
+                        "Failed to schedule admin recurring reminders for %s: %s",
+                        admin_email,
+                        exc,
+                    )
 
     def _build_reminder_subject(self, original_subject: str) -> str:
         return f"Reminder: {original_subject}"
@@ -623,6 +648,17 @@ class HumanInLoopAgent(BaseHumanAgent):
         lines.append("")
         lines.append("Please respond at your earliest convenience.")
         return "\n".join(lines)
+
+    def _admin_reminder_interval_hours(self) -> Optional[float]:
+        intervals = getattr(settings, "hitl_admin_reminder_hours", ()) or ()
+        for value in intervals:
+            try:
+                interval = float(value)
+            except (TypeError, ValueError):  # pragma: no cover - defensive guard
+                continue
+            if interval > 0:
+                return interval
+        return None
 
     def _build_escalation_subject(self, original_subject: str) -> str:
         return f"Escalation: {original_subject}"

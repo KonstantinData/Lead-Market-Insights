@@ -7,12 +7,82 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Awaitable, Callable, Mapping, Optional, Sequence
+from typing import Awaitable, Callable, Dict, Mapping, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
 
 AuditHandler = Callable[["InboxMessage", Optional[str]], Awaitable[None]]
+
+
+_APPROVED_DECISIONS = {
+    "approve",
+    "approved",
+    "ok",
+    "okay",
+    "yes",
+    "ja",
+    "sure",
+}
+_DECLINED_DECISIONS = {
+    "decline",
+    "declined",
+    "no",
+    "nope",
+    "reject",
+    "rejected",
+    "nein",
+}
+_FIELD_KEY_WHITELIST = {"company_name", "web_domain"}
+_FIELD_KEY_ALIASES = {
+    "company_domain": "web_domain",
+    "domain": "web_domain",
+    "website": "web_domain",
+}
+
+
+def parse_dossier_decision(body: str) -> Optional[str]:
+    """Return the organiser's dossier decision extracted from *body*."""
+
+    if not body:
+        return None
+
+    for raw_line in body.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        lowered = line.lower()
+        for token in _APPROVED_DECISIONS:
+            if re.search(rf"\b{re.escape(token)}\b", lowered):
+                return "approved"
+        for token in _DECLINED_DECISIONS:
+            if re.search(rf"\b{re.escape(token)}\b", lowered):
+                return "declined"
+        return None
+    return None
+
+
+def parse_missing_info_key_values(body: str) -> Dict[str, str]:
+    """Return normalised key/value pairs extracted from *body*."""
+
+    if not body:
+        return {}
+
+    fields: Dict[str, str] = {}
+    for raw_line in body.splitlines():
+        if ":" not in raw_line:
+            continue
+        key_part, value_part = raw_line.split(":", 1)
+        normalised_key = re.sub(r"[^a-z0-9]+", "_", key_part.strip().lower()).strip("_")
+        if not normalised_key:
+            continue
+        mapped_key = _FIELD_KEY_ALIASES.get(normalised_key, normalised_key)
+        if mapped_key not in _FIELD_KEY_WHITELIST:
+            continue
+        value = value_part.strip()
+        if value:
+            fields[mapped_key] = value
+    return fields
 
 
 @dataclass(slots=True)
@@ -190,4 +260,10 @@ class InboxAgent:
         return bool(host and user and password)
 
 
-__all__ = ["InboxAgent", "InboxMessage", "AuditHandler"]
+__all__ = [
+    "InboxAgent",
+    "InboxMessage",
+    "AuditHandler",
+    "parse_dossier_decision",
+    "parse_missing_info_key_values",
+]

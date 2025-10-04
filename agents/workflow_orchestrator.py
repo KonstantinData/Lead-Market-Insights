@@ -25,11 +25,12 @@ from typing import (
 
 from agents.alert_agent import AlertAgent, AlertSeverity
 from agents.master_workflow_agent import MasterWorkflowAgent
-from human_in_the_loop.reply_parsers import (
-    parse_dossier_reply,
-    parse_missing_info_reply,
+from polling.inbox_agent import (
+    InboxAgent,
+    InboxMessage,
+    parse_dossier_decision,
+    parse_missing_info_key_values,
 )
-from polling.inbox_agent import InboxAgent, InboxMessage
 from config.config import settings
 from utils.observability import (
     configure_observability,
@@ -89,6 +90,7 @@ class WorkflowOrchestrator:
         self._inbox_polling_task: Optional[asyncio.Task[Any]] = None
         self._pending_audits: Dict[str, Dict[str, Any]] = {}
         self._resolved_audits: Set[str] = set()
+        self._handled_audit_replies: Set[str] = set()
         if self.inbox_agent:
             self.inbox_agent.register_handler(self._handle_inbox_reply)
 
@@ -227,6 +229,9 @@ class WorkflowOrchestrator:
         audit_id = detected_audit_id or ""
         if not audit_id:
             return
+        if audit_id in self._handled_audit_replies:
+            logger.debug("Duplicate inbox reply detected for audit %s", audit_id)
+            return
         record = self._pending_audits.get(audit_id)
         if not record:
             if self._is_audit_resolved(audit_id):
@@ -238,6 +243,7 @@ class WorkflowOrchestrator:
 
         kind = record.get("kind", "")
         context = record.get("context", {})
+        self._handled_audit_replies.add(audit_id)
         normalised = self._normalise_inbox_message(kind, message)
         self._record_audit_response(kind, audit_id, context, message, normalised)
         self._cancel_reminders(audit_id)
@@ -268,12 +274,15 @@ class WorkflowOrchestrator:
     def _normalise_inbox_message(
         self, kind: str, message: InboxMessage
     ) -> Dict[str, Any]:
-        subject = message.subject or ""
         body = message.body or ""
         if kind == "missing_info":
-            return parse_missing_info_reply(subject, body)
+            fields = parse_missing_info_key_values(body)
+            outcome = "parsed" if fields else "received"
+            return {"fields": fields, "outcome": outcome}
         if kind == "dossier":
-            return parse_dossier_reply(subject, body)
+            decision = parse_dossier_decision(body)
+            outcome = decision or "received"
+            return {"decision": decision, "outcome": outcome}
         return {"outcome": "received"}
 
     def _record_audit_response(

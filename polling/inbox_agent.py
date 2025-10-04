@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import imaplib
 import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
+from email import message_from_bytes
+from email.header import decode_header, make_header
+from email.message import Message
+from email.utils import parseaddr, parsedate_to_datetime
 from typing import Awaitable, Callable, Dict, Mapping, Optional, Sequence
 
 logger = logging.getLogger(__name__)
@@ -192,7 +197,201 @@ class InboxAgent:
         Sub-classes can override this method to integrate with an IMAP client.
         """
 
-        raise NotImplementedError
+        if not self._is_configured():
+            return []
+
+        return await asyncio.to_thread(self._fetch_new_messages_sync)
+
+    # ------------------------------------------------------------------
+    def _fetch_new_messages_sync(self) -> Sequence[InboxMessage]:
+        """Synchronously retrieve unseen messages from the configured mailbox."""
+
+        host = self._config_value("imap_host")
+        username = self._config_value("imap_username") or self._config_value("imap_user")
+        password = self._config_value("imap_password")
+
+        def _config_attr(name: str, default: Optional[object] = None) -> Optional[object]:
+            if isinstance(self.config, Mapping):
+                return self.config.get(name, default)
+            return getattr(self.config, name, default)
+
+        port_value = _config_attr("imap_port", 993)
+        try:
+            port = int(port_value) if port_value is not None else 993
+        except (TypeError, ValueError):
+            port = 993
+
+        use_ssl_value = _config_attr("imap_use_ssl", _config_attr("imap_ssl", True))
+
+        def _as_bool(value: Optional[object]) -> bool:
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                lowered = value.strip().lower()
+                if lowered in {"1", "true", "yes", "on"}:
+                    return True
+                if lowered in {"0", "false", "no", "off"}:
+                    return False
+            return bool(value)
+
+        use_ssl = _as_bool(use_ssl_value)
+        mailbox = _config_attr("imap_mailbox", "INBOX") or "INBOX"
+
+        if not (host and username and password):
+            logger.debug("IMAP configuration incomplete; skipping fetch.")
+            return []
+
+        imap_factory: Callable[[str, int], imaplib.IMAP4] = (
+            imaplib.IMAP4_SSL if use_ssl else imaplib.IMAP4
+        )
+
+        messages: list[InboxMessage] = []
+        client: Optional[imaplib.IMAP4] = None
+
+        try:
+            client = imap_factory(host, port)
+            client.login(username, password)
+            status, _ = client.select(mailbox)
+            if status != "OK":
+                logger.warning("Unable to select mailbox %s", mailbox)
+                return []
+
+            status, search_data = client.search(None, "UNSEEN")
+            if status != "OK" or not search_data:
+                return []
+
+            message_ids = search_data[0].split()
+
+            for msg_id in message_ids:
+                status, payload = client.fetch(msg_id, "(RFC822 UID)")
+                if status != "OK" or not payload:
+                    continue
+
+                raw_email: Optional[bytes] = None
+                response_header: Optional[bytes] = None
+                for item in payload:
+                    if isinstance(item, tuple) and len(item) >= 2:
+                        response_header = item[0]
+                        raw_email = item[1]
+                        break
+
+                if not raw_email:
+                    continue
+
+                message = message_from_bytes(raw_email)
+                uid = None
+                if isinstance(response_header, bytes):
+                    uid_match = re.search(rb"UID\s+(\d+)", response_header)
+                    if uid_match:
+                        uid = uid_match.group(1).decode("ascii", errors="ignore")
+
+                if not uid:
+                    uid = msg_id.decode("ascii", errors="ignore")
+
+                inbox_message = InboxMessage(
+                    id=uid,
+                    subject=self._decode_header_value(message.get("Subject")),
+                    sender=self._parse_sender(message.get("From")),
+                    body=self._extract_body(message),
+                    headers=self._extract_headers(message),
+                    received_at=self._parse_received_at(message),
+                )
+
+                messages.append(inbox_message)
+
+                try:
+                    client.store(msg_id, "+FLAGS", "(\\Seen)")
+                except Exception:  # pragma: no cover - defensive best effort
+                    logger.debug("Failed to mark message %s as seen", uid, exc_info=True)
+
+        except imaplib.IMAP4.error:
+            logger.exception("Failed to fetch IMAP messages from %s", host)
+            return []
+        finally:
+            if client is not None:
+                try:
+                    client.logout()
+                except Exception:  # pragma: no cover - network cleanup best effort
+                    logger.debug("Failed to logout from IMAP server", exc_info=True)
+
+        return messages
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _decode_header_value(value: Optional[str]) -> str:
+        if not value:
+            return ""
+        try:
+            return str(make_header(decode_header(value)))
+        except Exception:  # pragma: no cover - defensive
+            return value
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _parse_sender(value: Optional[str]) -> str:
+        decoded = InboxAgent._decode_header_value(value)
+        if not decoded:
+            return ""
+        name, address = parseaddr(decoded)
+        return address or decoded
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _extract_body(message: Message) -> str:
+        if message.is_multipart():
+            for part in message.walk():
+                if part.is_multipart():
+                    continue
+                if part.get_content_disposition() == "attachment":
+                    continue
+                if part.get_content_type() == "text/plain":
+                    text = InboxAgent._decode_payload(part)
+                    if text:
+                        return text
+            # Fallback to first non-attachment part
+            for part in message.walk():
+                if part.is_multipart():
+                    continue
+                if part.get_content_disposition() == "attachment":
+                    continue
+                text = InboxAgent._decode_payload(part)
+                if text:
+                    return text
+            return ""
+        return InboxAgent._decode_payload(message)
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _decode_payload(part: Message) -> str:
+        payload = part.get_payload(decode=True)
+        if payload is None:
+            if isinstance(part.get_payload(), str):
+                return part.get_payload()
+            return ""
+        charset = part.get_content_charset() or "utf-8"
+        try:
+            return payload.decode(charset, errors="replace")
+        except (LookupError, UnicodeDecodeError):
+            return payload.decode("utf-8", errors="replace")
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _extract_headers(message: Message) -> Dict[str, str]:
+        headers: Dict[str, str] = {}
+        for key, value in message.items():
+            headers[key] = InboxAgent._decode_header_value(value)
+        return headers
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _parse_received_at(message: Message) -> Optional[datetime]:
+        date_header = message.get("Date")
+        if not date_header:
+            return None
+        try:
+            return parsedate_to_datetime(date_header)
+        except (TypeError, ValueError, IndexError):
+            return None
 
     # ------------------------------------------------------------------
     async def poll_once(self) -> int:

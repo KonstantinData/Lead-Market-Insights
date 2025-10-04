@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from email.message import EmailMessage
 from types import SimpleNamespace
 from typing import Optional
 from unittest.mock import AsyncMock
@@ -204,3 +205,87 @@ async def test_start_polling_loop_skips_when_disabled() -> None:
     with pytest.raises(asyncio.CancelledError):
         await task
     agent.fetch_new_messages.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_poll_once_fetches_from_imap(monkeypatch: pytest.MonkeyPatch) -> None:
+    email_message = EmailMessage()
+    email_message["Subject"] = "Audit ID: fetch-123"
+    email_message["From"] = "Lead Bot <bot@example.com>"
+    email_message["To"] = "ops@example.com"
+    email_message["Date"] = "Mon, 01 Jan 2024 10:00:00 +0000"
+    email_message["X-Leadmi-Audit-Id"] = "fetch-123"
+    email_message.set_content("Please review dossier.")
+    raw_message = email_message.as_bytes()
+
+    class FakeIMAP:
+        instances: list["FakeIMAP"] = []
+
+        def __init__(self, host: str, port: int) -> None:
+            self.host = host
+            self.port = port
+            self.login_args: Optional[tuple[str, str]] = None
+            self.selected: Optional[str] = None
+            self.fetch_calls: list[tuple[bytes, str]] = []
+            self.store_calls: list[tuple[bytes, str, str]] = []
+            self.logged_out = False
+            FakeIMAP.instances.append(self)
+
+        def login(self, username: str, password: str):  # type: ignore[override]
+            self.login_args = (username, password)
+            return "OK", []
+
+        def select(self, mailbox: str):  # type: ignore[override]
+            self.selected = mailbox
+            return "OK", [b"1"]
+
+        def search(self, charset: Optional[str], *criteria: str):  # type: ignore[override]
+            return "OK", [b"1"]
+
+        def fetch(self, message_id: bytes, query: str):  # type: ignore[override]
+            self.fetch_calls.append((message_id, query))
+            header = b'1 (UID 555 RFC822 {123})'
+            return "OK", [(header, raw_message)]
+
+        def store(self, message_id: bytes, command: str, flags: str):  # type: ignore[override]
+            self.store_calls.append((message_id, command, flags))
+            return "OK", []
+
+        def logout(self):  # type: ignore[override]
+            self.logged_out = True
+            return "BYE", []
+
+    monkeypatch.setattr("polling.inbox_agent.imaplib.IMAP4_SSL", FakeIMAP)
+    monkeypatch.setattr("polling.inbox_agent.imaplib.IMAP4", FakeIMAP)
+
+    config = {
+        "imap_host": "imap.example.com",
+        "imap_username": "user",
+        "imap_password": "pass",
+        "imap_mailbox": "INBOX",
+        "imap_use_ssl": True,
+    }
+
+    agent = InboxAgent(config=config, poll_interval=0)
+    handler = AsyncMock()
+    agent.register_handler(handler)
+
+    processed = await agent.poll_once()
+
+    assert processed == 1
+    assert FakeIMAP.instances, "Fake IMAP server not instantiated"
+    fake_server = FakeIMAP.instances[0]
+    assert fake_server.login_args == ("user", "pass")
+    assert fake_server.selected == "INBOX"
+    assert fake_server.store_calls == [(b"1", "+FLAGS", "(\\Seen)")]
+    assert fake_server.logged_out is True
+
+    call = handler.await_args
+    message_arg, audit_id = call.args
+    assert audit_id == "fetch-123"
+    assert message_arg.id == "555"
+    assert message_arg.subject == "Audit ID: fetch-123"
+    assert message_arg.sender == "bot@example.com"
+    assert "Please review dossier" in message_arg.body
+    assert message_arg.headers["X-Leadmi-Audit-Id"] == "fetch-123"
+    assert message_arg.received_at is not None

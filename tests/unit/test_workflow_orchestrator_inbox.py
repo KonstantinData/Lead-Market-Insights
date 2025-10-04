@@ -147,6 +147,14 @@ async def test_on_pending_skips_without_inbox(orchestrator: WorkflowOrchestrator
     assert "audit-2" not in orchestrator._pending_audits
 
 
+def test_on_pending_skips_when_resolved(orchestrator: WorkflowOrchestrator) -> None:
+    orchestrator._resolved_audits.add("audit-existing")
+
+    orchestrator._on_pending_audit("missing_info", "audit-existing", {"event_id": "evt"})
+
+    assert "audit-existing" not in orchestrator._pending_audits
+
+
 @pytest.mark.asyncio
 async def test_handle_missing_info_reply_continues_workflow(
     orchestrator: WorkflowOrchestrator,
@@ -190,6 +198,28 @@ async def test_handle_reply_without_audit_id_is_ignored(
     await orchestrator._handle_inbox_reply(message, None)
 
     assert orchestrator.master_agent.continue_after_missing_info.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_handle_reply_for_resolved_audit_is_ignored(
+    orchestrator: WorkflowOrchestrator,
+) -> None:
+    orchestrator._pending_audits["audit-resolved"] = {
+        "kind": "missing_info",
+        "context": {},
+        "resolved": True,
+    }
+
+    message = InboxMessage(
+        id="msg-resolved",
+        subject="Re: Done",
+        sender="organizer@example.com",
+        body="company_domain: example.com",
+    )
+
+    await orchestrator._handle_inbox_reply(message, "audit-resolved")
+
+    assert "audit-resolved" not in orchestrator._pending_audits
 
 
 @pytest.mark.asyncio
@@ -251,6 +281,34 @@ async def test_handle_reply_applies_mask(orchestrator: WorkflowOrchestrator) -> 
 
 
 @pytest.mark.asyncio
+async def test_handle_reply_logs_mask_failure(
+    orchestrator: WorkflowOrchestrator, caplog: pytest.LogCaptureFixture
+) -> None:
+    orchestrator._on_pending_audit(
+        "missing_info",
+        "audit-mask",
+        {"event_id": "evt-mask", "event": {}, "info": {}},
+    )
+
+    def _mask(_value: Any) -> Any:
+        raise RuntimeError("mask failure")
+
+    orchestrator.master_agent._mask_for_logging = _mask  # type: ignore[attr-defined]
+
+    message = InboxMessage(
+        id="msg-mask",
+        subject="Info",
+        sender="organizer@example.com",
+        body="field: value",
+    )
+
+    with caplog.at_level("ERROR"):
+        await orchestrator._handle_inbox_reply(message, "audit-mask")
+
+    assert any("mask inbox payload" in record.message for record in caplog.records)
+
+
+@pytest.mark.asyncio
 async def test_handle_reply_master_missing_marks_resolved(
     orchestrator: WorkflowOrchestrator,
 ) -> None:
@@ -273,3 +331,54 @@ async def test_handle_reply_master_missing_marks_resolved(
 
     assert "audit-none" in orchestrator._resolved_audits
     assert "audit-none" not in orchestrator._pending_audits
+
+
+@pytest.mark.asyncio
+async def test_handle_reply_records_failure(orchestrator: WorkflowOrchestrator) -> None:
+    orchestrator._on_pending_audit(
+        "missing_info",
+        "audit-record",
+        {"event_id": "evt-record", "event": {}, "info": {}},
+    )
+
+    def _raise_record(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("write failure")
+
+    orchestrator.master_agent.audit_log.record = _raise_record  # type: ignore[attr-defined]
+
+    message = InboxMessage(
+        id="msg-record",
+        subject="Re: Info",
+        sender="organizer@example.com",
+        body="field: value",
+    )
+
+    await orchestrator._handle_inbox_reply(message, "audit-record")
+
+    assert "audit-record" in orchestrator._resolved_audits
+
+
+@pytest.mark.asyncio
+async def test_handle_reply_cancel_failure(orchestrator: WorkflowOrchestrator) -> None:
+    orchestrator._on_pending_audit(
+        "missing_info",
+        "audit-cancel",
+        {"event_id": "evt-cancel", "event": {}, "info": {}},
+    )
+
+    class ExplodingReminder:
+        def cancel_for_audit(self, audit_id: str) -> None:
+            raise RuntimeError("boom")
+
+    orchestrator.master_agent.human_agent.reminder_escalation = ExplodingReminder()  # type: ignore[assignment]
+
+    message = InboxMessage(
+        id="msg-cancel",
+        subject="Re: Info",
+        sender="organizer@example.com",
+        body="field: value",
+    )
+
+    await orchestrator._handle_inbox_reply(message, "audit-cancel")
+
+    assert "audit-cancel" in orchestrator._resolved_audits

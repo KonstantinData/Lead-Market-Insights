@@ -143,6 +143,46 @@ async def test_missing_info_continuation_registers_pending(monkeypatch: pytest.M
 
 
 @pytest.mark.asyncio
+async def test_missing_info_pending_handler_failure_is_logged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    follow_up = {
+        "status": "pending",
+        "audit_id": "audit-3",
+        "info": {"company_name": "Acme", "company_domain": ""},
+    }
+    human = DummyHumanAgent(follow_up)
+    agent = _build_agent(human)
+
+    class _FakeLogger:
+        def __init__(self) -> None:
+            self.errors: list[tuple[str, tuple[Any, ...]]] = []
+
+        def exception(self, message: str, *args: Any, **kwargs: Any) -> None:
+            self.errors.append((message, args))
+
+    fake_logger = _FakeLogger()
+    monkeypatch.setattr("agents.master_workflow_agent.logger", fake_logger)
+
+    def _on_pending(kind: str, audit_id: str, context: Dict[str, Any]) -> None:
+        raise RuntimeError("registration failed")
+
+    agent.on_pending_audit = _on_pending
+    monkeypatch.setattr(agent, "_process_crm_dispatch", lambda *args, **kwargs: None)
+
+    context = {
+        "event": {"id": "evt-3"},
+        "info": {"company_name": "Acme"},
+        "event_id": "evt-3",
+    }
+
+    result = await agent.continue_after_missing_info("audit-1", {}, context)
+
+    assert result is None
+    assert fake_logger.errors and "Failed to register" in fake_logger.errors[0][0]
+
+
+@pytest.mark.asyncio
 async def test_missing_info_continuation_marks_incomplete(monkeypatch: pytest.MonkeyPatch) -> None:
     follow_up = {
         "status": "incomplete",

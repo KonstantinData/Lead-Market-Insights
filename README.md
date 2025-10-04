@@ -228,7 +228,7 @@ Automated tests under [`tests/test_pii_masking.py`](tests/test_pii_masking.py) a
 
 ## Human-in-the-loop interactions
 
-Human feedback is requested through the `HumanInLoopAgent`, which can work with a pluggable communication backend (email, Slack, etc.) or fall back to simulated responses. The [`human_in_the_loop/`](human_in_the_loop/README.md) directory documents patterns for custom manual review steps.
+Human feedback is requested through the `HumanInLoopAgent`, which can work with a pluggable communication backend (email, Slack, etc.). Missing-information flows remain deterministic for local demos, but dossier confirmations now require a configured backend—if one is absent the agent raises an explicit error rather than simulating a decision. The [`human_in_the_loop/`](human_in_the_loop/README.md) directory documents patterns for custom manual review steps.
 
 ## Further reading
 

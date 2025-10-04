@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from agents.factory import create_agent
+from agents.human_in_loop_agent import DossierConfirmationBackendUnavailable
 
 # Ensure default agent implementations register themselves with the factory.
 from agents import (  # noqa: F401  # pylint: disable=unused-import
@@ -436,9 +437,15 @@ class MasterWorkflowAgent:
                 with observe_operation(
                     "hitl_dossier", {"event.id": str(event_id)} if event_id else None
                 ):
-                    response = self.human_agent.request_dossier_confirmation(
-                        event, info
-                    )
+                    try:
+                        response = self.human_agent.request_dossier_confirmation(
+                            event, info
+                        )
+                    except DossierConfirmationBackendUnavailable as exc:
+                        self._handle_missing_dossier_backend(
+                            event_result, event_id, str(exc)
+                        )
+                        continue
                 event_result["hitl_dossier"] = response
                 audit_id = response.get("audit_id")
                 status = self._resolve_dossier_status(response)
@@ -490,9 +497,15 @@ class MasterWorkflowAgent:
                 with observe_operation(
                     "hitl_dossier", {"event.id": str(event_id)} if event_id else None
                 ):
-                    response = self.human_agent.request_dossier_confirmation(
-                        event, info
-                    )
+                    try:
+                        response = self.human_agent.request_dossier_confirmation(
+                            event, info
+                        )
+                    except DossierConfirmationBackendUnavailable as exc:
+                        self._handle_missing_dossier_backend(
+                            event_result, event_id, str(exc)
+                        )
+                        continue
                 event_result["hitl_dossier"] = response
                 audit_id = response.get("audit_id")
                 status = self._resolve_dossier_status(response)
@@ -1222,6 +1235,25 @@ class MasterWorkflowAgent:
         if decision is False:
             return "declined"
         return "pending"
+
+    def _handle_missing_dossier_backend(
+        self,
+        event_result: Dict[str, Any],
+        event_id: Optional[Any],
+        error_message: str,
+    ) -> None:
+        logger.error(
+            "Dossier confirmation backend unavailable for event %s: %s",
+            event_id,
+            error_message,
+        )
+        event_result["hitl_dossier"] = {
+            "dossier_required": None,
+            "status": "skipped",
+            "details": {"error": error_message},
+        }
+        event_result["status"] = "dossier_backend_unavailable"
+        record_hitl_outcome("dossier", "skipped")
 
     def _log_dossier_pending(
         self,

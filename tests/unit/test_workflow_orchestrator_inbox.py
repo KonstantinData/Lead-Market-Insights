@@ -169,13 +169,15 @@ async def test_handle_missing_info_reply_continues_workflow(
         id="msg-1",
         subject="Re: Request",
         sender="organizer@example.com",
-        body="company_domain: acme.com",
+        body="Web Domain: acme.com",
     )
 
     await orchestrator._handle_inbox_reply(message, "audit-1")
 
     master = orchestrator.master_agent
     assert master.continue_after_missing_info.await_count == 1
+    await_args = master.continue_after_missing_info.await_args
+    assert await_args.args[1] == {"web_domain": "acme.com"}
     assert master.human_agent.reminder_escalation.cancelled == ["audit-1"]
     assert master.audit_log.records and master.audit_log.records[0]["stage"] == "response"
     assert "audit-1" in orchestrator._resolved_audits
@@ -214,12 +216,49 @@ async def test_handle_reply_for_resolved_audit_is_ignored(
         id="msg-resolved",
         subject="Re: Done",
         sender="organizer@example.com",
-        body="company_domain: example.com",
+        body="web_domain: example.com",
     )
 
     await orchestrator._handle_inbox_reply(message, "audit-resolved")
 
     assert "audit-resolved" not in orchestrator._pending_audits
+
+
+@pytest.mark.asyncio
+async def test_duplicate_reply_skipped_when_already_handled(
+    orchestrator: WorkflowOrchestrator,
+) -> None:
+    orchestrator._on_pending_audit(
+        "missing_info",
+        "audit-dup",
+        {"event_id": "evt-dup", "event": {}, "info": {}},
+    )
+
+    message = InboxMessage(
+        id="msg-dup",
+        subject="Re: Info",
+        sender="organizer@example.com",
+        body="Company Name: Acme\nWeb Domain: acme.com",
+    )
+
+    await orchestrator._handle_inbox_reply(message, "audit-dup")
+
+    master = orchestrator.master_agent
+    recorded = len(master.audit_log.records)
+
+    # Simulate the audit being re-added before a new reply arrives
+    orchestrator._pending_audits["audit-dup"] = {
+        "kind": "missing_info",
+        "context": {},
+        "resolved": False,
+    }
+    orchestrator._resolved_audits.discard("audit-dup")
+    master.continue_after_missing_info.reset_mock()
+
+    await orchestrator._handle_inbox_reply(message, "audit-dup")
+
+    assert master.continue_after_missing_info.await_count == 0
+    assert len(master.audit_log.records) == recorded
 
 
 @pytest.mark.asyncio

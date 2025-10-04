@@ -265,7 +265,10 @@ async def test_orchestrator_records_research_artifacts_and_email_details(
                         "run_id": similar_snapshot["run_id"],
                         "event_id": similar_snapshot["event_id"],
                         "results": similar_snapshot["results"],
-                        "artifact_path": "stub/similar_companies_level1.json",
+                        "artifact_path": (
+                            "stub/similar_companies_level1/"
+                            "run-123/similar_companies_level1_evt-456.json"
+                        ),
                     },
                 },
             },
@@ -321,6 +324,9 @@ async def test_orchestrator_records_research_artifacts_and_email_details(
     similar_payload = entry["research"]["similar_companies_level1"]["payload"]
     assert len(similar_payload["results"]) == 2
     assert similar_payload["results"][0]["id"] == "1"
+    artifact_path = similar_payload["artifact_path"]
+    assert artifact_path.endswith("similar_companies_level1_evt-456.json")
+    assert "/run-123/" in artifact_path.replace("\\", "/")
 
     final_email = master_agent.results[0]["final_email"]
     assert final_email["attachments"] == ["stub/dossier.pdf"]

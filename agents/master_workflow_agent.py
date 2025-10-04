@@ -128,7 +128,7 @@ class MasterWorkflowAgent:
         self.log_file_path: Path = self.run_directory / "polling_trigger.log"
         self.log_filename: str = str(self.log_file_path)
         self.audit_log: Optional[AuditLog] = None
-        self.on_pending_audit: Optional[Callable[[str, str, Dict[str, Any]], None]] = None
+        self.on_pending_audit: Optional[Callable[[str, str, dict], None]] = None
 
         self.llm_confidence_thresholds: Dict[str, float] = {}
         self.llm_cost_caps: Dict[str, float] = {}
@@ -376,30 +376,16 @@ class MasterWorkflowAgent:
                         "hitl_missing_info",
                         {"event.id": str(event_id)} if event_id else None,
                     ):
-                        filled = self.human_agent.request_info(event, extracted)
+                        filled = self.request_info(
+                            event,
+                            extracted,
+                            event_id=event_id,
+                        )
                     audit_id = filled.get("audit_id")
                     status = filled.get("status")
                     if status == "pending":
                         record_hitl_outcome("missing_info", "pending")
                         event_result["status"] = "missing_info_pending"
-                        if callable(self.on_pending_audit) and audit_id:
-                            context = {
-                                "event": event,
-                                "info": extracted.get("info", {}) or {},
-                                "requested_fields": filled.get(
-                                    "requested_fields"
-                                )
-                                or self._infer_requested_fields(extracted.get("info")),
-                                "run_id": self.run_id,
-                                "event_id": event_id,
-                            }
-                            try:
-                                self.on_pending_audit("missing_info", audit_id, context)
-                            except Exception:
-                                logger.exception(
-                                    "Failed to register pending audit handler for %s",
-                                    audit_id,
-                                )
                     elif filled.get("is_complete"):
                         logger.info(
                             "Missing info provided for event %s [audit_id=%s]",
@@ -438,8 +424,10 @@ class MasterWorkflowAgent:
                     "hitl_dossier", {"event.id": str(event_id)} if event_id else None
                 ):
                     try:
-                        response = self.human_agent.request_dossier_confirmation(
-                            event, info
+                        response = self.request_dossier_confirmation(
+                            event,
+                            info,
+                            event_id=event_id,
                         )
                     except DossierConfirmationBackendUnavailable as exc:
                         self._handle_missing_dossier_backend(
@@ -453,20 +441,6 @@ class MasterWorkflowAgent:
                     self._log_dossier_pending(event_id, audit_id, response)
                     record_hitl_outcome("dossier", "pending")
                     event_result["status"] = "dossier_pending"
-                    if callable(self.on_pending_audit) and audit_id:
-                        context = {
-                            "event": event,
-                            "info": info,
-                            "run_id": self.run_id,
-                            "event_id": event_id,
-                        }
-                        try:
-                            self.on_pending_audit("dossier", audit_id, context)
-                        except Exception:
-                            logger.exception(
-                                "Failed to register dossier pending audit handler for %s",
-                                audit_id,
-                            )
                 elif response.get("dossier_required") or status == "approved":
                     logger.info(
                         "Organizer approved dossier for event %s [audit_id=%s]: %s",
@@ -498,8 +472,10 @@ class MasterWorkflowAgent:
                     "hitl_dossier", {"event.id": str(event_id)} if event_id else None
                 ):
                     try:
-                        response = self.human_agent.request_dossier_confirmation(
-                            event, info
+                        response = self.request_dossier_confirmation(
+                            event,
+                            info,
+                            event_id=event_id,
                         )
                     except DossierConfirmationBackendUnavailable as exc:
                         self._handle_missing_dossier_backend(
@@ -513,20 +489,6 @@ class MasterWorkflowAgent:
                     self._log_dossier_pending(event_id, audit_id, response)
                     record_hitl_outcome("dossier", "pending")
                     event_result["status"] = "dossier_pending"
-                    if callable(self.on_pending_audit) and audit_id:
-                        context = {
-                            "event": event,
-                            "info": info,
-                            "run_id": self.run_id,
-                            "event_id": event_id,
-                        }
-                        try:
-                            self.on_pending_audit("dossier", audit_id, context)
-                        except Exception:
-                            logger.exception(
-                                "Failed to register dossier pending audit handler for %s",
-                                audit_id,
-                            )
                 elif response.get("dossier_required") or status == "approved":
                     logger.info(
                         "Organizer approved dossier for event %s [audit_id=%s]: %s",
@@ -539,32 +501,16 @@ class MasterWorkflowAgent:
                         "hitl_missing_info",
                         {"event.id": str(event_id)} if event_id else None,
                     ):
-                        filled = self.human_agent.request_info(event, extracted)
+                        filled = self.request_info(
+                            event,
+                            extracted,
+                            event_id=event_id,
+                        )
                     fill_audit_id = filled.get("audit_id")
                     fill_status = filled.get("status")
                     if fill_status == "pending":
                         record_hitl_outcome("missing_info", "pending")
                         event_result["status"] = "missing_info_pending"
-                        if callable(self.on_pending_audit) and fill_audit_id:
-                            follow_context = {
-                                "event": event,
-                                "info": filled.get("info", {}) or info,
-                                "requested_fields": filled.get(
-                                    "requested_fields"
-                                )
-                                or self._infer_requested_fields(filled.get("info")),
-                                "run_id": self.run_id,
-                                "event_id": event_id,
-                            }
-                            try:
-                                self.on_pending_audit(
-                                    "missing_info", fill_audit_id, follow_context
-                                )
-                            except Exception:
-                                logger.exception(
-                                    "Failed to register pending audit handler for %s",
-                                    fill_audit_id,
-                                )
                     elif filled.get("is_complete"):
                         logger.info(
                             "Missing info provided for event %s [audit_id=%s]",
@@ -710,12 +656,11 @@ class MasterWorkflowAgent:
         with observe_operation(
             "hitl_missing_info", {"event.id": str(event_id)} if event_id else None
         ):
-            follow_up = self.human_agent.request_info(event, extracted)
-
-        new_audit_id = follow_up.get("audit_id")
-        requested_fields = follow_up.get("requested_fields") or self._infer_requested_fields(
-            follow_up.get("info")
-        )
+            follow_up = self.request_info(
+                event,
+                extracted,
+                event_id=event_id,
+            )
 
         if follow_up.get("is_complete"):
             self._record_missing_info_completion(event_id)
@@ -735,18 +680,6 @@ class MasterWorkflowAgent:
         status = follow_up.get("status")
         if status == "pending":
             record_hitl_outcome("missing_info", "pending")
-            if callable(self.on_pending_audit) and new_audit_id:
-                follow_context = dict(context)
-                follow_context["info"] = follow_up.get("info", {}) or base_info
-                follow_context["requested_fields"] = requested_fields
-                follow_context["run_id"] = self.run_id
-                try:
-                    self.on_pending_audit("missing_info", new_audit_id, follow_context)
-                except Exception:
-                    logger.exception(
-                        "Failed to register follow-up pending audit handler for %s",
-                        new_audit_id,
-                    )
             return None
 
         record_hitl_outcome("missing_info", "incomplete")
@@ -786,12 +719,11 @@ class MasterWorkflowAgent:
         with observe_operation(
             "hitl_missing_info", {"event.id": str(event_id)} if event_id else None
         ):
-            follow_up = self.human_agent.request_info(event, extracted)
-
-        new_audit_id = follow_up.get("audit_id")
-        requested_fields = follow_up.get("requested_fields") or self._infer_requested_fields(
-            follow_up.get("info")
-        )
+            follow_up = self.request_info(
+                event,
+                extracted,
+                event_id=event_id,
+            )
 
         if follow_up.get("is_complete"):
             self._record_missing_info_completion(event_id)
@@ -811,22 +743,78 @@ class MasterWorkflowAgent:
         status = follow_up.get("status")
         if status == "pending":
             record_hitl_outcome("missing_info", "pending")
-            if callable(self.on_pending_audit) and new_audit_id:
-                follow_context = dict(context)
-                follow_context["info"] = follow_up.get("info", {}) or info
-                follow_context["requested_fields"] = requested_fields
-                follow_context["run_id"] = self.run_id
-                try:
-                    self.on_pending_audit("missing_info", new_audit_id, follow_context)
-                except Exception:
-                    logger.exception(
-                        "Failed to register follow-up pending audit handler for %s",
-                        new_audit_id,
-                    )
             return None
 
         record_hitl_outcome("missing_info", "incomplete")
         return None
+
+    def request_info(
+        self,
+        event: Dict[str, Any],
+        extracted: Dict[str, Any],
+        *,
+        event_id: Optional[Any] = None,
+        run_id: Optional[str] = None,
+        requested_fields: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        result = self.human_agent.request_info(event, extracted)
+        status = result.get("status")
+        audit_id = result.get("audit_id")
+        if (
+            status == "pending"
+            and audit_id
+            and callable(self.on_pending_audit)
+        ):
+            try:
+                fields = requested_fields or result.get("requested_fields")
+                if not fields:
+                    fields = self._infer_requested_fields(result.get("info"))
+                context = {
+                    "event": event,
+                    "info": result.get("info", {})
+                    or extracted.get("info", {})
+                    or {},
+                    "requested_fields": fields or [],
+                    "run_id": run_id or self.run_id,
+                    "event_id": event_id,
+                }
+                self.on_pending_audit("missing_info", audit_id, context)
+            except Exception:
+                logger.exception(
+                    "Failed to register pending audit handler for %s", audit_id
+                )
+        return result
+
+    def request_dossier_confirmation(
+        self,
+        event: Dict[str, Any],
+        info: Dict[str, Any],
+        *,
+        event_id: Optional[Any] = None,
+        run_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        result = self.human_agent.request_dossier_confirmation(event, info)
+        status = self._resolve_dossier_status(result)
+        audit_id = result.get("audit_id")
+        if (
+            status == "pending"
+            and audit_id
+            and callable(self.on_pending_audit)
+        ):
+            try:
+                context = {
+                    "event": event,
+                    "info": info,
+                    "run_id": run_id or self.run_id,
+                    "event_id": event_id,
+                }
+                self.on_pending_audit("dossier", audit_id, context)
+            except Exception:
+                logger.exception(
+                    "Failed to register dossier pending audit handler for %s",
+                    audit_id,
+                )
+        return result
 
     def _has_research_inputs(self, info: Dict[str, Any]) -> bool:
         return bool(info.get("company_name")) and bool(info.get("company_domain"))

@@ -139,6 +139,15 @@ async def test_on_pending_records_context(orchestrator: WorkflowOrchestrator) ->
 
 
 @pytest.mark.asyncio
+async def test_on_pending_skips_without_inbox(orchestrator: WorkflowOrchestrator) -> None:
+    orchestrator.inbox_agent = None
+
+    orchestrator._on_pending_audit("missing_info", "audit-2", {"event_id": "evt"})
+
+    assert "audit-2" not in orchestrator._pending_audits
+
+
+@pytest.mark.asyncio
 async def test_handle_missing_info_reply_continues_workflow(
     orchestrator: WorkflowOrchestrator,
 ) -> None:
@@ -165,6 +174,22 @@ async def test_handle_missing_info_reply_continues_workflow(
 
     await orchestrator._handle_inbox_reply(message, "audit-1")
     assert master.continue_after_missing_info.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_handle_reply_without_audit_id_is_ignored(
+    orchestrator: WorkflowOrchestrator,
+) -> None:
+    message = InboxMessage(
+        id="msg-no-audit",
+        subject="Re: Request",
+        sender="organizer@example.com",
+        body="ignored",
+    )
+
+    await orchestrator._handle_inbox_reply(message, None)
+
+    assert orchestrator.master_agent.continue_after_missing_info.await_count == 0
 
 
 @pytest.mark.asyncio
@@ -223,3 +248,28 @@ async def test_handle_reply_applies_mask(orchestrator: WorkflowOrchestrator) -> 
     record = orchestrator.master_agent.audit_log.records[-1]
     assert record["payload"] == {"masked": True}
     assert record["responder"] == "masked"
+
+
+@pytest.mark.asyncio
+async def test_handle_reply_master_missing_marks_resolved(
+    orchestrator: WorkflowOrchestrator,
+) -> None:
+    orchestrator._on_pending_audit(
+        "missing_info",
+        "audit-none",
+        {"event_id": "evt-5", "event": {}, "info": {}},
+    )
+
+    orchestrator.master_agent = None
+
+    message = InboxMessage(
+        id="msg-5",
+        subject="Re: Missing Info",
+        sender="organizer@example.com",
+        body="details",
+    )
+
+    await orchestrator._handle_inbox_reply(message, "audit-none")
+
+    assert "audit-none" in orchestrator._resolved_audits
+    assert "audit-none" not in orchestrator._pending_audits

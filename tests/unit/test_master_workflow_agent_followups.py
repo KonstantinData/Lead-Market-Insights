@@ -143,6 +143,65 @@ async def test_missing_info_continuation_registers_pending(monkeypatch: pytest.M
 
 
 @pytest.mark.asyncio
+async def test_missing_info_continuation_marks_incomplete(monkeypatch: pytest.MonkeyPatch) -> None:
+    follow_up = {
+        "status": "incomplete",
+        "audit_id": "audit-ignored",
+        "info": {"company_domain": ""},
+    }
+    human = DummyHumanAgent(follow_up)
+    agent = _build_agent(human)
+
+    monkeypatch.setattr(agent, "_process_crm_dispatch", lambda *args, **kwargs: None)
+
+    context = {
+        "event": {"id": "evt-3"},
+        "info": {"company_name": "Acme"},
+        "event_id": "evt-3",
+    }
+
+    result = await agent.continue_after_missing_info("audit-1", {}, context)
+
+    assert result is None
+    assert len(human.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_missing_info_pending_handler_errors_are_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    follow_up = {
+        "status": "pending",
+        "audit_id": "audit-error",
+        "info": {"company_domain": ""},
+    }
+    human = DummyHumanAgent(follow_up)
+    agent = _build_agent(human)
+
+    def _failing_handler(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("boom")
+
+    agent.on_pending_audit = _failing_handler
+
+    class _Logger:
+        def exception(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+    monkeypatch.setattr("agents.master_workflow_agent.logger", _Logger())
+    monkeypatch.setattr(agent, "_process_crm_dispatch", lambda *args, **kwargs: None)
+
+    context = {
+        "event": {"id": "evt-err"},
+        "info": {"company_name": "Acme"},
+        "event_id": "evt-err",
+    }
+
+    result = await agent.continue_after_missing_info("audit-err", {}, context)
+
+    assert result is None
+
+
+@pytest.mark.asyncio
 async def test_missing_info_follow_up_completes(monkeypatch: pytest.MonkeyPatch) -> None:
     follow_up = {
         "status": "pending",
@@ -273,6 +332,32 @@ async def test_dossier_continuation_requests_follow_up(monkeypatch: pytest.Monke
     assert len(human.requests) == 1
     assert pending_calls and pending_calls[0][1] == "audit-3"
     assert pending_calls[0][2]["info"]["company_name"] == "Acme"
+
+
+@pytest.mark.asyncio
+async def test_dossier_continuation_incomplete_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    follow_up = {
+        "status": "needs_more",
+        "audit_id": "audit-ignored",
+        "info": {"company_domain": ""},
+    }
+    human = DummyHumanAgent(follow_up)
+    agent = _build_agent(human)
+
+    monkeypatch.setattr(agent, "_process_crm_dispatch", lambda *args, **kwargs: None)
+
+    context = {
+        "event": {"id": "evt-8"},
+        "info": {"company_name": "Acme"},
+        "event_id": "evt-8",
+    }
+
+    result = await agent.continue_after_dossier_decision("audit-1", "Approved", context)
+
+    assert result is None
+    assert len(human.requests) == 1
 
 
 @pytest.mark.asyncio

@@ -144,13 +144,28 @@ class InboxAgent:
         return dispatched
 
     # ------------------------------------------------------------------
-    async def start_polling_loop(self) -> None:
-        """Continuously poll the inbox until cancelled."""
+    async def start_polling_loop(
+        self, *, interval_seconds: Optional[float] = None
+    ) -> None:
+        """Continuously poll the inbox until cancelled.
+
+        Parameters
+        ----------
+        interval_seconds:
+            Optional override for the polling interval. When omitted, the
+            instance's configured ``poll_interval`` is used.
+        """
 
         try:
             while True:
                 await self.poll_once()
-                await asyncio.sleep(self.poll_interval)
+                delay = self.poll_interval
+                if interval_seconds is not None:
+                    try:
+                        delay = max(float(interval_seconds), 0.0)
+                    except (TypeError, ValueError):
+                        delay = self.poll_interval
+                await asyncio.sleep(delay)
         except asyncio.CancelledError:
             logger.info("Inbox polling loop cancelled.")
             raise

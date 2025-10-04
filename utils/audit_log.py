@@ -133,3 +133,17 @@ class AuditLog:
         """Return all audit log entries as a list."""
 
         return list(self.iter_entries())
+
+    def has_response(self, audit_id: str) -> bool:
+        """Return ``True`` when a response entry exists for *audit_id*."""
+
+        if not audit_id:
+            return False
+
+        for entry in self.iter_entries():
+            if (
+                entry.get("audit_id") == audit_id
+                and entry.get("stage") == "response"
+            ):
+                return True
+        return False

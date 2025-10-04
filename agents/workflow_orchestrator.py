@@ -25,6 +25,11 @@ from typing import (
 
 from agents.alert_agent import AlertAgent, AlertSeverity
 from agents.master_workflow_agent import MasterWorkflowAgent
+from human_in_the_loop.reply_parsers import (
+    parse_dossier_reply,
+    parse_missing_info_reply,
+)
+from polling.inbox_agent import InboxAgent, InboxMessage
 from config.config import settings
 from utils.observability import (
     configure_observability,
@@ -80,6 +85,13 @@ class WorkflowOrchestrator:
 
         configure_observability()
 
+        self.inbox_agent = self._create_inbox_agent()
+        self._inbox_polling_task: Optional[asyncio.Task[Any]] = None
+        self._pending_audits: Dict[str, Dict[str, Any]] = {}
+        self._resolved_audits: Set[str] = set()
+        if self.inbox_agent:
+            self.inbox_agent.register_handler(self._handle_inbox_reply)
+
         try:
             self.master_agent = master_agent or MasterWorkflowAgent(
                 communication_backend=communication_backend
@@ -89,6 +101,8 @@ class WorkflowOrchestrator:
             closer = getattr(self.master_agent, "aclose", None)
             if callable(closer):
                 self._register_async_cleanup("master_agent", closer)
+            if hasattr(self.master_agent, "on_pending_audit"):
+                self.master_agent.on_pending_audit = self._on_pending_audit
         except EnvironmentError as exc:
             logger.error("Failed to initialise MasterWorkflowAgent: %s", exc)
             self.master_agent = None
@@ -107,6 +121,31 @@ class WorkflowOrchestrator:
     def _register_sync_cleanup(self, label: str, closer: Callable[[], None]) -> None:
         self._sync_cleanups.append((label, closer))
 
+    def _create_inbox_agent(self) -> Optional[InboxAgent]:
+        enabled = getattr(settings, "hitl_inbox_enabled", None)
+        if enabled is False:
+            return None
+
+        config = getattr(settings, "hitl_inbox_config", None) or settings
+        kwargs: Dict[str, Any] = {"config": config}
+        poll_seconds = getattr(settings, "hitl_inbox_poll_seconds", None)
+        if poll_seconds not in (None, ""):
+            try:
+                interval = max(float(poll_seconds), 0.0)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Invalid hitl inbox poll interval %r; falling back to default",
+                    poll_seconds,
+                )
+            else:
+                kwargs["poll_interval"] = interval
+
+        try:
+            return InboxAgent(**kwargs)
+        except Exception:
+            logger.exception("Failed to create InboxAgent with provided settings")
+            return None
+
     def _ensure_shutdown_primitives(self) -> tuple[asyncio.Lock, asyncio.Event]:
         if self._shutdown_lock is None or self._shutdown_event is None:
             try:
@@ -122,6 +161,195 @@ class WorkflowOrchestrator:
                 self._shutdown_event = asyncio.Event()
 
         return self._shutdown_lock, self._shutdown_event
+
+    def _start_inbox_polling(self) -> None:
+        if not self.inbox_agent:
+            return
+        if self._inbox_polling_task and not self._inbox_polling_task.done():
+            return
+
+        poll_seconds = getattr(settings, "hitl_inbox_poll_seconds", None)
+        interval: Optional[float] = None
+        if poll_seconds not in (None, ""):
+            try:
+                interval = max(float(poll_seconds), 0.0)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Invalid hitl inbox poll interval %r; using agent default",
+                    poll_seconds,
+                )
+                interval = None
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.debug("Inbox polling requires an active event loop; skipping start.")
+            return
+
+        task = loop.create_task(
+            self.inbox_agent.start_polling_loop(interval_seconds=interval)
+        )
+        self._inbox_polling_task = self.track_background_task(task)
+
+        def _clear(_: asyncio.Task[Any]) -> None:
+            if self._inbox_polling_task is task:
+                self._inbox_polling_task = None
+
+        task.add_done_callback(_clear)
+
+    def _on_pending_audit(self, kind: str, audit_id: str, context: Dict[str, Any]) -> None:
+        if not audit_id:
+            return
+        if not self.inbox_agent:
+            logger.debug(
+                "Received pending audit %s but inbox agent unavailable; skipping registration",
+                audit_id,
+            )
+            return
+        if self._is_audit_resolved(audit_id):
+            return
+
+        pending_context = dict(context or {})
+        pending_context.setdefault("run_id", self.run_id)
+        self._pending_audits[audit_id] = {
+            "kind": kind,
+            "context": pending_context,
+            "created_at": time.time(),
+            "resolved": False,
+        }
+
+        logger.info("Registered inbox handler for audit %s (%s)", audit_id, kind)
+        self._start_inbox_polling()
+
+    async def _handle_inbox_reply(
+        self, message: InboxMessage, detected_audit_id: Optional[str]
+    ) -> None:
+        audit_id = detected_audit_id or ""
+        if not audit_id:
+            return
+        record = self._pending_audits.get(audit_id)
+        if not record:
+            if self._is_audit_resolved(audit_id):
+                logger.debug("Ignoring reply for resolved audit %s", audit_id)
+            return
+        if record.get("resolved") or self._is_audit_resolved(audit_id):
+            self._pending_audits.pop(audit_id, None)
+            return
+
+        kind = record.get("kind", "")
+        context = record.get("context", {})
+        normalised = self._normalise_inbox_message(kind, message)
+        self._record_audit_response(kind, audit_id, context, message, normalised)
+        self._cancel_reminders(audit_id)
+
+        try:
+            if not self.master_agent:
+                logger.warning("Master agent unavailable for audit %s continuation", audit_id)
+                return
+            if kind == "missing_info":
+                continuation = getattr(
+                    self.master_agent, "continue_after_missing_info", None
+                )
+                if callable(continuation):
+                    await continuation(audit_id, normalised.get("fields") or {}, context)
+            elif kind == "dossier":
+                continuation = getattr(
+                    self.master_agent, "continue_after_dossier_decision", None
+                )
+                if callable(continuation):
+                    await continuation(audit_id, normalised.get("decision"), context)
+        except Exception:
+            logger.exception("Failed to continue workflow for audit %s", audit_id)
+        finally:
+            record["resolved"] = True
+            self._pending_audits.pop(audit_id, None)
+            self._resolved_audits.add(audit_id)
+
+    def _normalise_inbox_message(
+        self, kind: str, message: InboxMessage
+    ) -> Dict[str, Any]:
+        subject = message.subject or ""
+        body = message.body or ""
+        if kind == "missing_info":
+            return parse_missing_info_reply(subject, body)
+        if kind == "dossier":
+            return parse_dossier_reply(subject, body)
+        return {"outcome": "received"}
+
+    def _record_audit_response(
+        self,
+        kind: str,
+        audit_id: str,
+        context: Dict[str, Any],
+        message: InboxMessage,
+        normalised: Dict[str, Any],
+    ) -> None:
+        if not self.master_agent or not getattr(self.master_agent, "audit_log", None):
+            return
+
+        audit_log = self.master_agent.audit_log
+        if audit_log is None:
+            return
+
+        event = context.get("event") or {}
+        event_id = context.get("event_id") or event.get("id")
+        preview = (message.body or "").strip()
+        if len(preview) > 500:
+            preview = preview[:500] + "…"
+        payload: Dict[str, Any] = {
+            "subject": message.subject,
+            "from": message.sender,
+            "body_preview": preview,
+            "normalized": normalised,
+        }
+
+        mask = getattr(self.master_agent, "_mask_for_logging", None)
+        responder = message.sender or "organizer"
+        if callable(mask):
+            try:
+                payload = mask(payload)
+                responder = mask(responder)
+            except Exception:
+                logger.exception("Failed to mask inbox payload for audit %s", audit_id)
+
+        request_type = "missing_info" if kind == "missing_info" else "dossier_confirmation"
+        outcome = normalised.get("outcome") or "received"
+        try:
+            audit_log.record(
+                event_id=str(event_id) if event_id is not None else None,
+                request_type=request_type,
+                stage="response",
+                responder=str(responder),
+                outcome=outcome,
+                payload=payload,
+                audit_id=audit_id,
+            )
+        except Exception:
+            logger.exception("Failed to record audit response for %s", audit_id)
+
+    def _cancel_reminders(self, audit_id: str) -> None:
+        if not self.master_agent:
+            return
+        human_agent = getattr(self.master_agent, "human_agent", None)
+        reminder = getattr(human_agent, "reminder_escalation", None)
+        cancel = getattr(reminder, "cancel_for_audit", None)
+        if callable(cancel):
+            try:
+                cancel(audit_id)
+            except Exception:
+                logger.exception("Failed to cancel reminders for audit %s", audit_id)
+
+    def _is_audit_resolved(self, audit_id: str) -> bool:
+        if audit_id in self._resolved_audits:
+            return True
+        if not self.master_agent or not getattr(self.master_agent, "audit_log", None):
+            return False
+        audit_log = self.master_agent.audit_log
+        has_response = getattr(audit_log, "has_response", None)
+        if callable(has_response) and has_response(audit_id):
+            self._resolved_audits.add(audit_id)
+            return True
+        return False
 
     def track_background_task(self, task: asyncio.Task[Any]) -> asyncio.Task[Any]:
         if task.done():
@@ -284,6 +512,9 @@ class WorkflowOrchestrator:
         start_time = time.perf_counter()
         self._current_run_started_at = start_time
 
+        if self.inbox_agent:
+            self._start_inbox_polling()
+
         try:
             with workflow_run(run_id=run_id) as context:
                 run_context = context
@@ -296,6 +527,8 @@ class WorkflowOrchestrator:
                     context.mark_status("skipped")
                 else:
                     try:
+                        if hasattr(self.master_agent, "on_pending_audit"):
+                            self.master_agent.on_pending_audit = self._on_pending_audit
                         if hasattr(self.master_agent, "attach_run"):
                             self.master_agent.attach_run(
                                 context.run_id, self.master_agent.workflow_log_manager

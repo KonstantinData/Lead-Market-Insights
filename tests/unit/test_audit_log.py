@@ -86,3 +86,20 @@ def test_record_uses_provided_audit_id(tmp_path: Path) -> None:
     entries = audit_log.load_entries()
 
     assert entries[0]["audit_id"] == "existing"
+
+
+def test_has_response_detects_logged_reply(tmp_path: Path) -> None:
+    log_path = tmp_path / "audit.jsonl"
+    audit_log = AuditLog(log_path)
+
+    audit_log.record(
+        event_id="evt-3",
+        request_type="dossier_confirmation",
+        stage="response",
+        responder="human",
+        outcome="approved",
+        audit_id="audit-123",
+    )
+
+    assert audit_log.has_response("audit-123") is True
+    assert audit_log.has_response("missing") is False

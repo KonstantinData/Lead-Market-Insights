@@ -150,6 +150,19 @@ class ReminderEscalation:
         for task in tasks:
             task.cancel()
 
+    def cancel_for_audit(self, audit_id: str) -> None:
+        """Cancel reminders associated with *audit_id*.
+
+        The current implementation does not track reminders per audit and will
+        therefore cancel all pending tasks. The signature is provided so that
+        callers can uniformly request cancellation without needing to know the
+        underlying storage model. Future enhancements can scope cancellation to
+        specific audit identifiers.
+        """
+
+        _ = audit_id  # Placeholder until reminders are tracked per audit.
+        self.cancel_pending()
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

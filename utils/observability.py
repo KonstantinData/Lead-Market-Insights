@@ -139,6 +139,29 @@ class RunContext:
         self.completed = True
 
 
+def _detect_existing_tracer_provider() -> Optional[Any]:
+    if trace is None:
+        return None
+    try:
+        return trace.get_tracer_provider()
+    except Exception:  # pragma: no cover - defensive guard for stubbed trace modules
+        return None
+
+
+def _is_reusable_provider(provider: Optional[Any]) -> bool:
+    if provider is None:
+        return False
+    provider_cls = provider.__class__
+    module = getattr(provider_cls, "__module__", "")
+    name = getattr(provider_cls, "__name__", "")
+    if module.startswith("opentelemetry.trace") and name in {
+        "ProxyTracerProvider",
+        "DefaultTracerProvider",
+    }:
+        return False
+    return True
+
+
 def configure_observability(
     *,
     span_exporter: Optional[SpanExporter] = None,
@@ -165,7 +188,17 @@ def configure_observability(
 
     resource = Resource.create({"service.name": service_name}) if Resource else None
 
-    _tracer_provider = TracerProvider(resource=resource) if TracerProvider else None
+    provider_reused = False
+    provider: Optional[Any] = None
+    if not force:
+        provider = _detect_existing_tracer_provider()
+        if _is_reusable_provider(provider):
+            provider_reused = True
+
+    if not provider_reused:
+        provider = TracerProvider(resource=resource) if TracerProvider else None
+
+    _tracer_provider = provider
 
     processor = span_processor
     exporter = span_exporter
@@ -177,10 +210,14 @@ def configure_observability(
             exporter = None
     if processor is None and exporter is not None and BatchSpanProcessor is not None:
         processor = BatchSpanProcessor(exporter)
-    if processor is not None and _tracer_provider is not None:
+    if (
+        processor is not None
+        and _tracer_provider is not None
+        and hasattr(_tracer_provider, "add_span_processor")
+    ):
         _tracer_provider.add_span_processor(processor)
 
-    if trace is not None and _tracer_provider is not None:
+    if not provider_reused and trace is not None and _tracer_provider is not None:
         trace.set_tracer_provider(_tracer_provider)
 
     reader = metric_reader

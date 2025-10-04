@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import importlib
 from typing import Any, Dict, Iterable
 
 import json
+from unittest import mock
+
 import pytest
 
 try:
@@ -15,11 +18,27 @@ from agents.interfaces import BaseResearchAgent
 from agents.master_workflow_agent import MasterWorkflowAgent
 from agents.workflow_orchestrator import WorkflowOrchestrator
 from config.config import settings
-from utils import observability
+from utils import observability, telemetry
 from utils.observability import current_run_id_var, generate_run_id
 
 
 pytestmark = pytest.mark.asyncio
+
+
+async def test_configure_observability_reuses_existing_tracer():
+    importlib.reload(observability)
+
+    telemetry.setup_telemetry(force=True)
+
+    with mock.patch.object(
+        observability.trace, "set_tracer_provider", wraps=observability.trace.set_tracer_provider
+    ) as mocked_set_tp:
+        observability.configure_observability()
+
+    assert mocked_set_tp.call_count == 0
+    assert observability._tracer_provider is observability.trace.get_tracer_provider()
+
+    importlib.reload(observability)
 
 
 class DummyEventAgent:

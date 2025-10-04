@@ -42,6 +42,7 @@ from utils.observability import (
     record_trigger_match,
 )
 from utils.negative_cache import NegativeEventCache
+from utils.processed_event_cache import ProcessedEventCache
 from utils.pii import mask_pii
 from utils.trigger_loader import load_trigger_words
 from utils.workflow_steps import workflow_step_recorder  # NEU
@@ -122,6 +123,10 @@ class MasterWorkflowAgent:
             self.storage_agent.base_dir / "state" / "negative_cache.json"
         )
         self._negative_cache: Optional[NegativeEventCache] = None
+        self._processed_cache_path = (
+            self.storage_agent.base_dir / "state" / "processed_events.json"
+        )
+        self._processed_event_cache: Optional[ProcessedEventCache] = None
 
         self.run_id: str = ""
         self.run_directory: Path = self.storage_agent.base_dir
@@ -225,6 +230,10 @@ class MasterWorkflowAgent:
                 rule_hash=self._rule_hash,
                 now=time.time(),
             )
+        if self._processed_event_cache is None:
+            self._processed_event_cache = ProcessedEventCache.load(
+                self._processed_cache_path
+            )
         events = await self.event_agent.poll()
         for event in events:
             masked_event = self._mask_for_logging(event)
@@ -238,6 +247,18 @@ class MasterWorkflowAgent:
                 "status": "received",
             }
             processed_results.append(event_result)
+
+            if self._processed_event_cache and self._processed_event_cache.is_processed(
+                event
+            ):
+                logger.info(
+                    "Prefilter skip (processed_cache) event_id=%s", event_id
+                )
+                workflow_step_recorder.record_step(
+                    self.run_id, event_id, "prefilter.processed_cache"
+                )
+                event_result["status"] = "skipped_processed_event"
+                continue
 
             # Step: start
             workflow_step_recorder.record_step(self.run_id, event_id, "start")
@@ -1117,6 +1138,9 @@ class MasterWorkflowAgent:
         event_result["crm_dispatched"] = True
         event_result["crm_payload"] = crm_payload
 
+        if self._processed_event_cache:
+            self._processed_event_cache.mark_processed(event)
+
     def finalize_run_logs(self) -> None:
         log_size = 0
         if self.log_file_path.exists():
@@ -1146,6 +1170,8 @@ class MasterWorkflowAgent:
 
         if self._negative_cache:
             self._negative_cache.flush()
+        if self._processed_event_cache:
+            self._processed_event_cache.flush()
 
         if hasattr(self.human_agent, "shutdown"):
             try:

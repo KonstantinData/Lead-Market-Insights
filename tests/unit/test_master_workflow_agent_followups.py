@@ -71,7 +71,14 @@ async def test_missing_info_continuation_dispatches_when_complete(monkeypatch: p
     agent = _build_agent(human)
     dispatch_calls: list[Dict[str, Any]] = []
 
-    async def _fake_dispatch(event: Dict[str, Any], info: Dict[str, Any], result: Dict[str, Any], event_id: str, *, force_internal: bool) -> None:
+    async def _fake_dispatch(
+        event: Dict[str, Any],
+        info: Dict[str, Any],
+        result: Dict[str, Any],
+        event_id: str,
+        *,
+        force_internal: bool,
+    ) -> None:
         dispatch_calls.append(
             {
                 "event": event,
@@ -148,7 +155,14 @@ async def test_missing_info_follow_up_completes(monkeypatch: pytest.MonkeyPatch)
     completion_calls: list[Optional[str]] = []
     dispatch_calls: list[Dict[str, Any]] = []
 
-    async def _fake_dispatch(event: Dict[str, Any], info: Dict[str, Any], result: Dict[str, Any], event_id: str, *, force_internal: bool) -> None:
+    async def _fake_dispatch(
+        event: Dict[str, Any],
+        info: Dict[str, Any],
+        result: Dict[str, Any],
+        event_id: str,
+        *,
+        force_internal: bool,
+    ) -> None:
         dispatch_calls.append(
             {
                 "event": event,
@@ -198,7 +212,14 @@ async def test_dossier_continuation_dispatches_when_complete(monkeypatch: pytest
     agent = _build_agent(human)
     dispatch_calls: list[Dict[str, Any]] = []
 
-    async def _fake_dispatch(event: Dict[str, Any], info: Dict[str, Any], result: Dict[str, Any], event_id: str, *, force_internal: bool) -> None:
+    async def _fake_dispatch(
+        event: Dict[str, Any],
+        info: Dict[str, Any],
+        result: Dict[str, Any],
+        event_id: str,
+        *,
+        force_internal: bool,
+    ) -> None:
         dispatch_calls.append(
             {
                 "event": event,
@@ -266,7 +287,14 @@ async def test_dossier_follow_up_completion(monkeypatch: pytest.MonkeyPatch) -> 
     agent = _build_agent(human)
     dispatch_calls: list[Dict[str, Any]] = []
 
-    async def _fake_dispatch(event: Dict[str, Any], info: Dict[str, Any], result: Dict[str, Any], event_id: str, *, force_internal: bool) -> None:
+    async def _fake_dispatch(
+        event: Dict[str, Any],
+        info: Dict[str, Any],
+        result: Dict[str, Any],
+        event_id: str,
+        *,
+        force_internal: bool,
+    ) -> None:
         dispatch_calls.append(
             {
                 "event": event,

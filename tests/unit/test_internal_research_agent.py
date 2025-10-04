@@ -200,6 +200,81 @@ def test_build_crm_portal_link_accepts_full_url(agent):
     assert link == "https://crm.example.com/report"
 
 
+def test_normalise_payload_populates_optional_aliases(agent):
+    payload = {
+        "company": "ACME Corp",
+        "domain": "acme.example",
+        "email": "owner@example.com",
+        "company_industry_group": "Technology Services",
+        "company_industry": "Information Technology",
+        "company_description": "Provider of sample solutions.",
+    }
+
+    agent._normalise_payload(payload)
+
+    assert payload["company_name"] == "ACME Corp"
+    assert payload["company_domain"] == "acme.example"
+    assert payload["creator_email"] == "owner@example.com"
+    assert payload["industry_group"] == "Technology Services"
+    assert payload["industry"] == "Information Technology"
+    assert payload["description"] == "Provider of sample solutions."
+
+
+def test_normalise_payload_supports_additional_aliases(agent):
+    payload = {
+        "company_name": "Globex",
+        "company_domain": "globex.test",
+        "company_sector": "Manufacturing",
+        "company_overview": "Leading producer of widgets.",
+    }
+
+    agent._normalise_payload(payload)
+
+    assert payload["industry"] == "Manufacturing"
+    assert payload["description"] == "Leading producer of widgets."
+
+
+def test_validate_required_fields_with_aliases(agent):
+    payload = {
+        "company_name": "Initech",
+        "company_domain": "initech.io",
+        "company_industry_group": "Business Services",
+        "company_sector": "Software",
+        "company_overview": "Enterprise software solutions.",
+    }
+
+    agent._normalise_payload(payload)
+    missing_required, missing_optional = agent._validate_required_fields(
+        payload, "unit-test"
+    )
+
+    assert not missing_required
+    assert not missing_optional
+
+
+def test_build_crm_matching_payload_includes_normalised_fields(agent):
+    payload = {
+        "company_name": "Hooli",
+        "company_domain": "hooli.com",
+        "company_industry_group": "Technology",
+        "company_industry": "Software",
+        "company_description": "Innovative technology conglomerate.",
+    }
+
+    agent._normalise_payload(payload)
+    crm_payload = agent._build_crm_matching_payload(payload)
+
+    assert crm_payload == [
+        {
+            "company_name": "Hooli",
+            "company_domain": "hooli.com",
+            "industry_group": "Technology",
+            "industry": "Software",
+            "description": "Innovative technology conglomerate.",
+        }
+    ]
+
+
 @pytest.mark.asyncio
 async def test_run_handles_missing_fields_without_lookup(agent, monkeypatch):
     agent._dispatch_missing_field_reminder = AsyncMock(return_value=True)

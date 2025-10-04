@@ -145,3 +145,101 @@ def test_custom_whitelist(monkeypatch):
 
     assert "custom_field" in settings.pii_field_whitelist
     assert "anotherfield" in settings.pii_field_whitelist
+
+
+def test_email_and_hitl_settings_from_env(monkeypatch):
+    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
+    monkeypatch.setenv("GOOGLE_CALENDAR_ID", "calendar@example.com")
+    env_values = {
+        "SMTP_HOST": "smtp.example.com",
+        "SMTP_PORT": "2525",
+        "SMTP_USER": "mailer",
+        "SMTP_PASS": "secret",
+        "SMTP_SENDER": "alerts@example.com",
+        "SMTP_SECURE": "0",
+        "IMAP_HOST": "imap.example.com",
+        "IMAP_PORT": "1993",
+        "IMAP_USER": "imap-user",
+        "IMAP_PASS": "imap-pass",
+        "IMAP_MAILBOX": "support",
+        "IMAP_SSL": "false",
+        "HITL_ADMIN_EMAIL": "admin@example.com",
+        "HITL_ESCALATION_EMAIL": "escalations@example.com",
+        "HITL_ADMIN_REMINDER_HOURS": "4, 12, 24",
+    }
+    for key, value in env_values.items():
+        monkeypatch.setenv(key, value)
+
+    settings = reload_settings()
+
+    assert settings.smtp_host == "smtp.example.com"
+    assert settings.smtp_port == 2525
+    assert settings.smtp_user == "mailer"
+    assert settings.smtp_password == "secret"
+    assert settings.smtp_sender == "alerts@example.com"
+    assert settings.smtp_secure is False
+
+    assert settings.imap_host == "imap.example.com"
+    assert settings.imap_port == 1993
+    assert settings.imap_user == "imap-user"
+    assert settings.imap_password == "imap-pass"
+    assert settings.imap_mailbox == "support"
+    assert settings.imap_ssl is False
+
+    assert settings.hitl_admin_email == "admin@example.com"
+    assert settings.hitl_escalation_email == "escalations@example.com"
+    assert settings.hitl_admin_reminder_hours == (4, 12, 24)
+
+
+def test_email_and_hitl_defaults(monkeypatch):
+    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
+    monkeypatch.setenv("GOOGLE_CALENDAR_ID", "calendar@example.com")
+    for key in [
+        "SMTP_HOST",
+        "SMTP_PORT",
+        "SMTP_USER",
+        "SMTP_PASS",
+        "SMTP_SENDER",
+        "SMTP_FROM",
+        "SMTP_SECURE",
+        "IMAP_HOST",
+        "IMAP_PORT",
+        "IMAP_USER",
+        "IMAP_PASS",
+        "IMAP_MAILBOX",
+        "IMAP_FOLDER",
+        "IMAP_SSL",
+        "HITL_ADMIN_EMAIL",
+        "HITL_ESCALATION_EMAIL",
+        "HITL_ADMIN_REMINDER_HOURS",
+    ]:
+        monkeypatch.delenv(key, raising=False)
+
+    settings = reload_settings()
+
+    assert settings.smtp_host is None
+    assert settings.smtp_port == 465
+    assert settings.smtp_user is None
+    assert settings.smtp_password is None
+    assert settings.smtp_sender is None
+    assert settings.smtp_secure is True
+
+    assert settings.imap_host is None
+    assert settings.imap_port == 993
+    assert settings.imap_user is None
+    assert settings.imap_password is None
+    assert settings.imap_mailbox == "INBOX"
+    assert settings.imap_ssl is True
+
+    assert settings.hitl_admin_email is None
+    assert settings.hitl_escalation_email is None
+    assert settings.hitl_admin_reminder_hours == (24, 48)
+
+
+def test_invalid_hitl_admin_reminder_hours(monkeypatch):
+    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
+    monkeypatch.setenv("GOOGLE_CALENDAR_ID", "calendar@example.com")
+    monkeypatch.setenv("HITL_ADMIN_REMINDER_HOURS", "four")
+
+    with pytest.raises(ValueError):
+        reload_settings()

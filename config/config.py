@@ -490,55 +490,76 @@ class Settings:
 
         self.smtp_host: Optional[str] = _get_env_var("SMTP_HOST")
         self.smtp_port: int = _get_int_env("SMTP_PORT", 465)
-        self.smtp_user: Optional[str] = _get_env_var("SMTP_USER")
-        self.smtp_password: Optional[str] = _get_env_var("SMTP_PASS")
+        self.smtp_username: Optional[str] = _get_env_var(
+            "SMTP_USERNAME", aliases=("SMTP_USER",)
+        )
+        self.smtp_password: Optional[str] = _get_env_var(
+            "SMTP_PASSWORD", aliases=("SMTP_PASS",)
+        )
         smtp_sender = _get_env_var("SMTP_SENDER") or _get_env_var("SMTP_FROM")
-        if not smtp_sender and self.smtp_user:
-            smtp_sender = self.smtp_user
+        if not smtp_sender and self.smtp_username:
+            smtp_sender = self.smtp_username
         self.smtp_sender: Optional[str] = smtp_sender
         self.smtp_secure: bool = _get_bool_env("SMTP_SECURE", True)
 
+        # Backwards compatibility aliases
+        self.smtp_user = self.smtp_username
+
         self.imap_host: Optional[str] = _get_env_var("IMAP_HOST")
         self.imap_port: int = _get_int_env("IMAP_PORT", 993)
-        self.imap_user: Optional[str] = _get_env_var("IMAP_USER")
-        self.imap_password: Optional[str] = _get_env_var("IMAP_PASS")
+        self.imap_username: Optional[str] = _get_env_var(
+            "IMAP_USERNAME", aliases=("IMAP_USER",)
+        )
+        self.imap_password: Optional[str] = _get_env_var(
+            "IMAP_PASSWORD", aliases=("IMAP_PASS",)
+        )
         self.imap_mailbox: str = (
             _get_env_var("IMAP_MAILBOX")
             or _get_env_var("IMAP_FOLDER")
             or "INBOX"
         )
-        self.imap_ssl: bool = _get_bool_env("IMAP_SSL", True)
+        self.imap_use_ssl: bool = _get_bool_env(
+            "IMAP_USE_SSL", _get_bool_env("IMAP_SSL", True)
+        )
+
+        # Backwards compatibility aliases
+        self.imap_user = self.imap_username
+        self.imap_ssl = self.imap_use_ssl
 
     def _load_hitl_settings(self) -> None:
         """Load human-in-the-loop reminder configuration."""
 
+        self.hitl_inbox_poll_seconds: float = _get_float_env(
+            "HITL_INBOX_POLL_SECONDS", 60.0
+        )
+        self.hitl_timezone: str = _get_env_var("HITL_TIMEZONE") or "Europe/Berlin"
         self.hitl_admin_email: Optional[str] = _get_env_var("HITL_ADMIN_EMAIL")
         self.hitl_escalation_email: Optional[str] = _get_env_var(
             "HITL_ESCALATION_EMAIL"
         )
-        self.hitl_admin_reminder_hours: Tuple[int, ...] = self._parse_hitl_hours(
+        self.hitl_admin_reminder_hours: Tuple[float, ...] = self._parse_hitl_hours(
             _get_env_var("HITL_ADMIN_REMINDER_HOURS"),
-            default=(24, 48),
+            default=(24.0,),
         )
 
     def _parse_hitl_hours(
-        self, value: Optional[str], *, default: Tuple[int, ...]
-    ) -> Tuple[int, ...]:
+        self, value: Optional[str], *, default: Tuple[float, ...]
+    ) -> Tuple[float, ...]:
         """Return reminder hours parsed from a comma-separated string."""
 
         if not value:
             return default
 
-        hours: list[int] = []
+        hours: list[float] = []
         for part in value.split(","):
             chunk = part.strip()
             if not chunk:
                 continue
             try:
-                hours.append(int(chunk))
+                hours.append(float(chunk))
             except ValueError as exc:
                 raise ValueError(
-                    "HITL_ADMIN_REMINDER_HOURS must be a comma-separated list of integers."
+                    "HITL_ADMIN_REMINDER_HOURS must be numeric (comma-separated)."
                 ) from exc
 
         if not hours:

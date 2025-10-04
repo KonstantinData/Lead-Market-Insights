@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -219,11 +218,15 @@ class InternalResearchAgent(BaseResearchAgent):
         self.logger.propagate = False
 
     def _build_email_agent_from_env(self) -> Optional[EmailAgent]:
-        host = os.getenv("SMTP_HOST")
-        port = os.getenv("SMTP_PORT")
-        username = os.getenv("SMTP_USER")
-        password = os.getenv("SMTP_PASS")
-        sender = os.getenv("SMTP_SENDER") or os.getenv("SMTP_FROM") or username
+        config = getattr(self, "config", settings)
+        host = getattr(config, "smtp_host", None)
+        port = getattr(config, "smtp_port", None)
+        username = (
+            getattr(config, "smtp_username", None)
+            or getattr(config, "smtp_user", None)
+        )
+        password = getattr(config, "smtp_password", None)
+        sender = getattr(config, "smtp_sender", None) or username
 
         if not (host and port and username and password and sender):
             self.logger.info(
@@ -233,9 +236,9 @@ class InternalResearchAgent(BaseResearchAgent):
 
         try:
             port_number = int(port)
-        except ValueError:
+        except (TypeError, ValueError):
             self.logger.warning(
-                "Invalid SMTP_PORT value '%s'; skipping email setup.", port
+                "Invalid SMTP port value %r; skipping email setup.", port
             )
             return None
 

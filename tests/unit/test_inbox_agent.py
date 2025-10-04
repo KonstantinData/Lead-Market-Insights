@@ -194,14 +194,13 @@ async def test_start_polling_loop_handles_cancellation() -> None:
 @pytest.mark.asyncio
 async def test_start_polling_loop_skips_when_disabled() -> None:
     agent = InboxAgent(config={}, poll_interval=0.01)
-    agent.fetch_new_messages = AsyncMock(return_value=[InboxMessage(id="skip", subject="", sender="", headers={})])  # type: ignore[attr-defined]
+    agent.fetch_new_messages = AsyncMock(
+        return_value=[InboxMessage(id="skip", subject="", sender="", headers={})]
+    )  # type: ignore[attr-defined]
 
     task = asyncio.create_task(agent.start_polling_loop())
     await asyncio.sleep(0.05)
     task.cancel()
-
     with pytest.raises(asyncio.CancelledError):
         await task
-
     agent.fetch_new_messages.assert_not_awaited()
-

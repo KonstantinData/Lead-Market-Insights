@@ -250,12 +250,41 @@ class InternalResearchAgent(BaseResearchAgent):
         return dict(payload or {})
 
     def _normalise_payload(self, payload: MutableMapping[str, Any]) -> None:
-        if payload.get("company") and not payload.get("company_name"):
-            payload["company_name"] = payload["company"]
-        if payload.get("domain") and not payload.get("company_domain"):
-            payload["company_domain"] = payload["domain"]
-        if not payload.get("creator_email"):
-            payload["creator_email"] = payload.get("email")
+        alias_map = {
+            "company_name": ("company",),
+            "company_domain": ("domain",),
+            "creator_email": ("email",),
+            "industry_group": (
+                "company_industry_group",
+                "companyIndustryGroup",
+                "industry_group_name",
+                "industryGroup",
+            ),
+            "industry": (
+                "company_industry",
+                "companyIndustry",
+                "industry_name",
+                "industryName",
+                "company_sector",
+                "sector",
+            ),
+            "description": (
+                "company_description",
+                "companyDescription",
+                "company_overview",
+                "companyOverview",
+                "overview",
+            ),
+        }
+
+        for canonical_key, aliases in alias_map.items():
+            if payload.get(canonical_key):
+                continue
+            for alias in aliases:
+                value = payload.get(alias)
+                if value not in (None, ""):
+                    payload[canonical_key] = value
+                    break
 
     def _resolve_run_id(
         self, trigger: Mapping[str, Any], payload: Mapping[str, Any]
@@ -449,13 +478,16 @@ class InternalResearchAgent(BaseResearchAgent):
         if not company_name and not company_domain:
             return []
 
+        optional_details = {
+            field: payload.get(field)
+            for field in self.DEFAULT_OPTIONAL_FIELDS
+        }
+
         return [
             {
                 "company_name": company_name,
                 "company_domain": company_domain,
-                "industry_group": payload.get("industry_group"),
-                "industry": payload.get("industry"),
-                "description": payload.get("description"),
+                **optional_details,
             }
         ]
 

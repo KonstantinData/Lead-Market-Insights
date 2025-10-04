@@ -27,3 +27,18 @@ centralised configuration for these components.
 
 > **Note:** All services consume these variables via `config.settings`. Production
 code must avoid direct calls to `os.getenv` for the settings above.
+
+## Automatic Continuations via InboxAgent
+
+When a HITL follow-up is requested, the workflow orchestrator records the audit
+context and registers `_handle_inbox_reply` with the inbox polling agent so that
+future replies can be processed automatically. The handler normalises organiser
+responses using the parser utilities (`parse_missing_info_key_values` and
+`parse_dossier_decision`) and persists a masked audit-log entry before invoking
+the corresponding continuation on `MasterWorkflowAgent`. Any active reminder or
+escalation tasks owned by the human agent are cancelled at this point to avoid
+duplicate nudges. The continuation merges the reply payload with the stored
+event context, determines whether the research handoff is complete, and either
+dispatches the CRM package or registers a new pending audit for additional
+information. This flow ensures that a single organiser reply clears outstanding
+reminders and drives the workflow forward without additional manual triage.

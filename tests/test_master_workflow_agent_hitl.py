@@ -63,7 +63,7 @@ class DummyExtractionAgent:
         return self._response
 
 
-def _prepare_agent(backend: DummyBackend) -> MasterWorkflowAgent:
+def _prepare_agent(backend: Optional[DummyBackend]) -> MasterWorkflowAgent:
     event = {
         "id": "event-123",
         "summary": "Soft trigger meeting",
@@ -136,6 +136,19 @@ async def test_soft_trigger_dossier_request_declined_status_only() -> None:
 
     assert agent._send_calls == []
     assert len(backend.requests) == 1
+
+
+async def test_soft_trigger_dossier_request_missing_backend_skips() -> None:
+    agent = _prepare_agent(None)
+
+    results = await agent.process_all_events()
+
+    assert len(results) == 1
+    outcome = results[0]
+    assert outcome["status"] == "dossier_backend_unavailable"
+    assert outcome["hitl_dossier"]["status"] == "skipped"
+    assert outcome["hitl_dossier"]["dossier_required"] is None
+    assert agent._send_calls == []
 
 
 async def test_audit_log_records_dossier_acceptance(tmp_path) -> None:

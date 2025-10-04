@@ -4,7 +4,10 @@ from typing import Any, Dict
 
 import pytest
 
-from agents.human_in_loop_agent import HumanInLoopAgent
+from agents.human_in_loop_agent import (
+    DossierConfirmationBackendUnavailable,
+    HumanInLoopAgent,
+)
 from logs.workflow_log_manager import WorkflowLogManager
 
 
@@ -83,3 +86,16 @@ async def test_pending_confirmation_triggers_reminders(tmp_path) -> None:
     assert "hitl_dossier_reminder_scheduled" in workflow_text
 
     agent.shutdown()
+
+
+def test_dossier_confirmation_without_backend_raises() -> None:
+    agent = HumanInLoopAgent(communication_backend=None)
+    event = {
+        "id": "evt-2",
+        "summary": "No backend", 
+        "organizer": {"email": "organizer@example.com"},
+    }
+    info = {"company_name": "Example Corp"}
+
+    with pytest.raises(DossierConfirmationBackendUnavailable):
+        agent.request_dossier_confirmation(event, info)

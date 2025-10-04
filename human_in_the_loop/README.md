@@ -17,5 +17,6 @@ these concepts with additional orchestration logic and pluggable communication b
 * Integrate with messaging platforms (email, Slack, ticketing systems) by injecting
   backend clients that expose clear confirmation methods.
 * Record human responses in the logging layer for auditability.
-* Keep HITL flows deterministic in tests by providing mocked backends or simulated
-  responses.
+* Keep HITL flows deterministic in tests by providing mocked backends. Dossier
+  confirmation paths no longer simulate approvals—tests should inject explicit
+  responses via the backend interface.

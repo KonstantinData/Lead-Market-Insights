@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 import pytest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 from agents.master_workflow_agent import MasterWorkflowAgent
 from agents.workflow_orchestrator import WorkflowOrchestrator
@@ -79,6 +79,14 @@ class DummyInboxAgent:
         self.handlers.append(handler)
 
 
+class _ImmediateInboxAgent:
+    def __init__(self) -> None:
+        self.handler: Optional[Any] = None
+
+    def register_handler(self, handler: Any) -> None:
+        self.handler = handler
+
+
 def _build_master(human: DummyHuman) -> MasterWorkflowAgent:
     master = MasterWorkflowAgent.__new__(MasterWorkflowAgent)
     master.run_id = "run-e2e"
@@ -115,6 +123,57 @@ def _pending_context(info: Dict[str, Any]) -> Dict[str, Any]:
         "info": info,
         "event_id": "evt-123",
     }
+
+
+@pytest.mark.asyncio
+async def test_hitl_pending_reply_continues_workflow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inbox = _ImmediateInboxAgent()
+    monkeypatch.setattr(
+        WorkflowOrchestrator,
+        "_create_inbox_agent",
+        lambda self: inbox,
+    )
+
+    human_agent = MagicMock()
+    human_agent.reminder_escalation = MagicMock()
+    human_agent.reminder_escalation.cancel_for_audit = MagicMock()
+
+    class _StubMaster:
+        def __init__(self) -> None:
+            self.log_filename = "stub.log"
+            self.storage_agent = None
+            self.human_agent = human_agent
+            self.audit_log = MagicMock()
+            self.audit_log.record = MagicMock()
+            self.audit_log.has_response = MagicMock(return_value=False)
+            self.on_pending_audit = None
+            self.continue_after_missing_info = AsyncMock()
+
+    master = _StubMaster()
+    orchestrator = WorkflowOrchestrator(run_id="run-test", master_agent=master)
+    orchestrator._start_inbox_polling = lambda: None
+
+    assert inbox.handler is not None
+
+    orchestrator.on_pending("missing_info", "A123", {"run_id": "R1"})
+
+    message = InboxMessage(
+        id="msg-test",
+        subject="Re: Missing Info",
+        sender="organizer@example.com",
+        body="company_name: TestCo\nweb_domain: test.co",
+    )
+
+    await inbox.handler(message, "A123")
+
+    human_agent.reminder_escalation.cancel_for_audit.assert_called_once_with("A123")
+    master.continue_after_missing_info.assert_awaited_once()
+    args = master.continue_after_missing_info.await_args.args
+    assert args[0] == "A123"
+    assert args[1] == {"company_name": "TestCo", "web_domain": "test.co"}
+    assert args[2]["run_id"] == "R1"
 
 
 @pytest.mark.asyncio

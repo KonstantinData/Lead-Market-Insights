@@ -758,26 +758,40 @@ class MasterWorkflowAgent:
         requested_fields: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         result = self.human_agent.request_info(event, extracted)
-        status = result.get("status")
-        audit_id = result.get("audit_id")
-        if (
-            status == "pending"
-            and audit_id
-            and callable(self.on_pending_audit)
-        ):
+        status = result.get("status") if isinstance(result, dict) else None
+        if status is None and hasattr(result, "get"):
+            status = result.get("status")
+        if status is None and hasattr(result, "status"):
+            status = getattr(result, "status")
+        audit_id = None
+        if isinstance(result, dict):
+            audit_id = result.get("audit_id")
+        if not audit_id and hasattr(result, "get"):
+            audit_id = result.get("audit_id")
+        if not audit_id and hasattr(result, "audit_id"):
+            audit_id = getattr(result, "audit_id")
+
+        if status == "pending" and audit_id and self.on_pending_audit:
+            info_payload: Dict[str, Any] = {}
+            if isinstance(result, dict):
+                info_payload = dict(result.get("info", {}) or {})
+            if not info_payload:
+                info_payload = dict(extracted.get("info", {}) or {})
+            fields: Optional[List[str]] = requested_fields
+            if fields is None and isinstance(result, dict):
+                raw_fields = result.get("requested_fields")
+                if isinstance(raw_fields, list):
+                    fields = raw_fields
+            if fields is None:
+                fields = self._infer_requested_fields(info_payload)
+            context = {
+                "event": event,
+                "info": info_payload,
+                "requested_fields": fields or [],
+                "run_id": run_id or self.run_id,
+                "event_id": event_id,
+            }
             try:
-                fields = requested_fields or result.get("requested_fields")
-                if not fields:
-                    fields = self._infer_requested_fields(result.get("info"))
-                context = {
-                    "event": event,
-                    "info": result.get("info", {})
-                    or extracted.get("info", {})
-                    or {},
-                    "requested_fields": fields or [],
-                    "run_id": run_id or self.run_id,
-                    "event_id": event_id,
-                }
                 self.on_pending_audit("missing_info", audit_id, context)
             except Exception:
                 logger.exception(
@@ -795,19 +809,22 @@ class MasterWorkflowAgent:
     ) -> Dict[str, Any]:
         result = self.human_agent.request_dossier_confirmation(event, info)
         status = self._resolve_dossier_status(result)
-        audit_id = result.get("audit_id")
-        if (
-            status == "pending"
-            and audit_id
-            and callable(self.on_pending_audit)
-        ):
+        audit_id = None
+        if isinstance(result, dict):
+            audit_id = result.get("audit_id")
+        if not audit_id and hasattr(result, "get"):
+            audit_id = result.get("audit_id")
+        if not audit_id and hasattr(result, "audit_id"):
+            audit_id = getattr(result, "audit_id")
+
+        if status == "pending" and audit_id and self.on_pending_audit:
+            context = {
+                "event": event,
+                "info": dict(info or {}),
+                "run_id": run_id or self.run_id,
+                "event_id": event_id,
+            }
             try:
-                context = {
-                    "event": event,
-                    "info": info,
-                    "run_id": run_id or self.run_id,
-                    "event_id": event_id,
-                }
                 self.on_pending_audit("dossier", audit_id, context)
             except Exception:
                 logger.exception(

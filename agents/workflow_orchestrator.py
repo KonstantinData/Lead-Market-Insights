@@ -104,7 +104,7 @@ class WorkflowOrchestrator:
             if callable(closer):
                 self._register_async_cleanup("master_agent", closer)
             if hasattr(self.master_agent, "on_pending_audit"):
-                self.master_agent.on_pending_audit = self._on_pending_audit
+                self.master_agent.on_pending_audit = self.on_pending
         except EnvironmentError as exc:
             logger.error("Failed to initialise MasterWorkflowAgent: %s", exc)
             self.master_agent = None
@@ -114,6 +114,18 @@ class WorkflowOrchestrator:
             self._handle_exception(
                 exc, handled=True, context={"phase": "initialisation"}
             )
+
+    @property
+    def audit_log(self) -> Optional[Any]:
+        if not self.master_agent:
+            return None
+        return getattr(self.master_agent, "audit_log", None)
+
+    @property
+    def human_in_loop(self) -> Optional[Any]:
+        if not self.master_agent:
+            return None
+        return getattr(self.master_agent, "human_agent", None)
 
     def _register_async_cleanup(
         self, label: str, closer: Callable[[], Awaitable[None]]
@@ -199,20 +211,35 @@ class WorkflowOrchestrator:
 
         task.add_done_callback(_clear)
 
-    def _on_pending_audit(self, kind: str, audit_id: str, context: Dict[str, Any]) -> None:
+    def _on_pending_audit(
+        self, kind: str, audit_id: str, context: Dict[str, Any]
+    ) -> None:
+        """Backward-compatible entry point for registering pending audits."""
+
+        self.on_pending(kind, audit_id, context)
+
+    def on_pending(self, kind: str, audit_id: str, context: Dict[str, Any]) -> None:
+        """Register reply handler for pending HITL audits."""
+
         if not audit_id:
             return
-        if not self.inbox_agent:
+
+        inbox = self.inbox_agent
+        if inbox is None:
             logger.debug(
                 "Received pending audit %s but inbox agent unavailable; skipping registration",
                 audit_id,
             )
             return
+
+        if audit_id in self._resolved_audits:
+            return
+
         if self._is_audit_resolved(audit_id):
             return
 
         pending_context = dict(context or {})
-        pending_context.setdefault("run_id", self.run_id)
+        pending_context.setdefault("run_id", pending_context.get("run_id") or self.run_id)
         self._pending_audits[audit_id] = {
             "kind": kind,
             "context": pending_context,
@@ -293,10 +320,7 @@ class WorkflowOrchestrator:
         message: InboxMessage,
         normalised: Dict[str, Any],
     ) -> None:
-        if not self.master_agent or not getattr(self.master_agent, "audit_log", None):
-            return
-
-        audit_log = self.master_agent.audit_log
+        audit_log = self.audit_log
         if audit_log is None:
             return
 
@@ -351,9 +375,9 @@ class WorkflowOrchestrator:
     def _is_audit_resolved(self, audit_id: str) -> bool:
         if audit_id in self._resolved_audits:
             return True
-        if not self.master_agent or not getattr(self.master_agent, "audit_log", None):
+        audit_log = self.audit_log
+        if audit_log is None:
             return False
-        audit_log = self.master_agent.audit_log
         has_response = getattr(audit_log, "has_response", None)
         if callable(has_response) and has_response(audit_id):
             self._resolved_audits.add(audit_id)
@@ -537,7 +561,7 @@ class WorkflowOrchestrator:
                 else:
                     try:
                         if hasattr(self.master_agent, "on_pending_audit"):
-                            self.master_agent.on_pending_audit = self._on_pending_audit
+                            self.master_agent.on_pending_audit = self.on_pending
                         if hasattr(self.master_agent, "attach_run"):
                             self.master_agent.attach_run(
                                 context.run_id, self.master_agent.workflow_log_manager

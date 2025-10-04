@@ -78,13 +78,130 @@ async def test_list_events_async_uses_authorized_request(mocker, base_credential
     mocked_response = DummyResponse({"items": [{"id": "1"}]})
     integration._calendar_http.get = mocker.AsyncMock(return_value=mocked_response)
 
+    frozen_now = datetime(2024, 1, 10, 12, 30, tzinfo=timezone.utc)
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is None:
+                return cls(
+                    frozen_now.year,
+                    frozen_now.month,
+                    frozen_now.day,
+                    frozen_now.hour,
+                    frozen_now.minute,
+                    frozen_now.second,
+                    frozen_now.microsecond,
+                )
+            base = frozen_now.astimezone(tz)
+            return cls(
+                base.year,
+                base.month,
+                base.day,
+                base.hour,
+                base.minute,
+                base.second,
+                base.microsecond,
+                tzinfo=base.tzinfo,
+            )
+
+    mocker.patch("integration.google_calendar_integration.datetime", FixedDateTime)
+    integration.cal_lookback_days = 2
+    integration.cal_lookahead_days = 7
+
     events = await integration.list_events_async(max_results=5)
 
     integration._calendar_http.get.assert_awaited_once()
     call_kwargs = integration._calendar_http.get.call_args.kwargs
     assert call_kwargs["params"]["maxResults"] == 5
+    expected_min = (frozen_now - timedelta(days=integration.cal_lookback_days)).isoformat()
+    expected_max = (frozen_now + timedelta(days=integration.cal_lookahead_days)).isoformat()
+    assert call_kwargs["params"]["timeMin"] == expected_min
+    assert call_kwargs["params"]["timeMax"] == expected_max
     assert call_kwargs["headers"]["Authorization"] == "Bearer existing"
     assert events == [{"id": "1"}]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_list_events_async_uses_default_time_range(mocker, base_credentials):
+    integration = GoogleCalendarIntegration(credentials=base_credentials)
+
+    mocker.patch.object(integration, "_ensure_access_token_async")
+    integration._list_events_async = mocker.AsyncMock(return_value=[])
+
+    frozen_now = datetime(2024, 2, 15, 9, 0, tzinfo=timezone.utc)
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is None:
+                return cls(
+                    frozen_now.year,
+                    frozen_now.month,
+                    frozen_now.day,
+                    frozen_now.hour,
+                    frozen_now.minute,
+                    frozen_now.second,
+                    frozen_now.microsecond,
+                )
+            base = frozen_now.astimezone(tz)
+            return cls(
+                base.year,
+                base.month,
+                base.day,
+                base.hour,
+                base.minute,
+                base.second,
+                base.microsecond,
+                tzinfo=base.tzinfo,
+            )
+
+    mocker.patch("integration.google_calendar_integration.datetime", FixedDateTime)
+    integration.cal_lookback_days = 3
+    integration.cal_lookahead_days = 4
+
+    await integration.list_events_async()
+
+    expected_min = frozen_now - timedelta(days=integration.cal_lookback_days)
+    expected_max = frozen_now + timedelta(days=integration.cal_lookahead_days)
+
+    integration._list_events_async.assert_awaited_once_with(
+        start_time=expected_min,
+        end_time=expected_max,
+        max_results=20,
+        query=None,
+        single_events=True,
+        order_by="startTime",
+    )
+
+
+@pytest.mark.anyio("asyncio")
+async def test_list_events_async_prefers_explicit_arguments(mocker, base_credentials):
+    integration = GoogleCalendarIntegration(credentials=base_credentials)
+
+    mocker.patch.object(integration, "_ensure_access_token_async")
+    integration._list_events_async = mocker.AsyncMock(return_value=[])
+
+    explicit_min = datetime(2024, 3, 1, 8, 0, tzinfo=timezone.utc)
+    explicit_max = datetime(2024, 3, 5, 18, 0, tzinfo=timezone.utc)
+
+    await integration.list_events_async(
+        time_min=explicit_min,
+        time_max=explicit_max,
+        max_results=10,
+        query="search",
+        single_events=False,
+        order_by="updated",
+    )
+
+    integration._list_events_async.assert_awaited_once_with(
+        start_time=explicit_min,
+        end_time=explicit_max,
+        max_results=10,
+        query="search",
+        single_events=False,
+        order_by="updated",
+    )
 
 
 @pytest.mark.anyio("asyncio")

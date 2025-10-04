@@ -196,8 +196,12 @@ class GoogleCalendarIntegration:
     ) -> List[dict]:
         await self._ensure_access_token_async()
 
+        now_utc = datetime.now(timezone.utc)
         if time_min is None:
-            time_min = datetime.now(timezone.utc)
+            time_min = now_utc - timedelta(days=self.cal_lookback_days)
+
+        if time_max is None:
+            time_max = now_utc + timedelta(days=self.cal_lookahead_days)
 
         return await self._list_events_async(
             start_time=time_min,

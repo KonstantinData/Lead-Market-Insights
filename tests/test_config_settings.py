@@ -153,16 +153,18 @@ def test_email_and_hitl_settings_from_env(monkeypatch):
     env_values = {
         "SMTP_HOST": "smtp.example.com",
         "SMTP_PORT": "2525",
-        "SMTP_USER": "mailer",
-        "SMTP_PASS": "secret",
+        "SMTP_USERNAME": "mailer",
+        "SMTP_PASSWORD": "secret",
         "SMTP_SENDER": "alerts@example.com",
         "SMTP_SECURE": "0",
         "IMAP_HOST": "imap.example.com",
         "IMAP_PORT": "1993",
-        "IMAP_USER": "imap-user",
-        "IMAP_PASS": "imap-pass",
+        "IMAP_USERNAME": "imap-user",
+        "IMAP_PASSWORD": "imap-pass",
         "IMAP_MAILBOX": "support",
-        "IMAP_SSL": "false",
+        "IMAP_USE_SSL": "false",
+        "HITL_INBOX_POLL_SECONDS": "42.5",
+        "HITL_TIMEZONE": "UTC",
         "HITL_ADMIN_EMAIL": "admin@example.com",
         "HITL_ESCALATION_EMAIL": "escalations@example.com",
         "HITL_ADMIN_REMINDER_HOURS": "4, 12, 24",
@@ -174,6 +176,7 @@ def test_email_and_hitl_settings_from_env(monkeypatch):
 
     assert settings.smtp_host == "smtp.example.com"
     assert settings.smtp_port == 2525
+    assert settings.smtp_username == "mailer"
     assert settings.smtp_user == "mailer"
     assert settings.smtp_password == "secret"
     assert settings.smtp_sender == "alerts@example.com"
@@ -181,14 +184,18 @@ def test_email_and_hitl_settings_from_env(monkeypatch):
 
     assert settings.imap_host == "imap.example.com"
     assert settings.imap_port == 1993
+    assert settings.imap_username == "imap-user"
     assert settings.imap_user == "imap-user"
     assert settings.imap_password == "imap-pass"
     assert settings.imap_mailbox == "support"
+    assert settings.imap_use_ssl is False
     assert settings.imap_ssl is False
 
+    assert settings.hitl_inbox_poll_seconds == pytest.approx(42.5)
+    assert settings.hitl_timezone == "UTC"
     assert settings.hitl_admin_email == "admin@example.com"
     assert settings.hitl_escalation_email == "escalations@example.com"
-    assert settings.hitl_admin_reminder_hours == (4, 12, 24)
+    assert settings.hitl_admin_reminder_hours == (4.0, 12.0, 24.0)
 
 
 def test_email_and_hitl_defaults(monkeypatch):
@@ -197,21 +204,24 @@ def test_email_and_hitl_defaults(monkeypatch):
     for key in [
         "SMTP_HOST",
         "SMTP_PORT",
-        "SMTP_USER",
-        "SMTP_PASS",
+        "SMTP_USERNAME",
+        "SMTP_PASSWORD",
         "SMTP_SENDER",
         "SMTP_FROM",
         "SMTP_SECURE",
         "IMAP_HOST",
         "IMAP_PORT",
-        "IMAP_USER",
-        "IMAP_PASS",
+        "IMAP_USERNAME",
+        "IMAP_PASSWORD",
         "IMAP_MAILBOX",
         "IMAP_FOLDER",
         "IMAP_SSL",
+        "IMAP_USE_SSL",
         "HITL_ADMIN_EMAIL",
         "HITL_ESCALATION_EMAIL",
         "HITL_ADMIN_REMINDER_HOURS",
+        "HITL_INBOX_POLL_SECONDS",
+        "HITL_TIMEZONE",
     ]:
         monkeypatch.delenv(key, raising=False)
 
@@ -219,6 +229,7 @@ def test_email_and_hitl_defaults(monkeypatch):
 
     assert settings.smtp_host is None
     assert settings.smtp_port == 465
+    assert settings.smtp_username is None
     assert settings.smtp_user is None
     assert settings.smtp_password is None
     assert settings.smtp_sender is None
@@ -226,14 +237,18 @@ def test_email_and_hitl_defaults(monkeypatch):
 
     assert settings.imap_host is None
     assert settings.imap_port == 993
+    assert settings.imap_username is None
     assert settings.imap_user is None
     assert settings.imap_password is None
     assert settings.imap_mailbox == "INBOX"
+    assert settings.imap_use_ssl is True
     assert settings.imap_ssl is True
 
+    assert settings.hitl_inbox_poll_seconds == pytest.approx(60.0)
+    assert settings.hitl_timezone == "Europe/Berlin"
     assert settings.hitl_admin_email is None
     assert settings.hitl_escalation_email is None
-    assert settings.hitl_admin_reminder_hours == (24, 48)
+    assert settings.hitl_admin_reminder_hours == (24.0,)
 
 
 def test_invalid_hitl_admin_reminder_hours(monkeypatch):

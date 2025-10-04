@@ -185,7 +185,7 @@ class InboxAgent:
         """Return whether IMAP configuration is available."""
 
         host = self._config_value("imap_host")
-        user = self._config_value("imap_user")
+        user = self._config_value("imap_username") or self._config_value("imap_user")
         password = self._config_value("imap_password")
         return bool(host and user and password)
 

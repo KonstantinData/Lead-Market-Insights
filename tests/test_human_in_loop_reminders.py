@@ -92,7 +92,7 @@ def test_dossier_confirmation_without_backend_raises() -> None:
     agent = HumanInLoopAgent(communication_backend=None)
     event = {
         "id": "evt-2",
-        "summary": "No backend", 
+        "summary": "No backend",
         "organizer": {"email": "organizer@example.com"},
     }
     info = {"company_name": "Example Corp"}

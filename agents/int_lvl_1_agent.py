@@ -97,10 +97,10 @@ class IntLvl1SimilarCompaniesAgent(BaseResearchAgent):
 
         self._result_limit = max(1, result_limit or self.DEFAULT_RESULT_LIMIT)
 
-        self._artifact_path = Path(config.research_artifact_dir) / (
-            "similar_companies_level1.json"
+        self._artifact_root = Path(config.research_artifact_dir) / (
+            "similar_companies_level1"
         )
-        self._artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        self._artifact_root.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
     # BaseResearchAgent API
@@ -135,7 +135,11 @@ class IntLvl1SimilarCompaniesAgent(BaseResearchAgent):
             "results": limited_results,
         }
 
-        self._persist_artifact(artifact_payload)
+        artifact_path = self._persist_artifact(
+            artifact_payload,
+            run_id=run_id or None,
+            event_id=event_id or None,
+        )
 
         return {
             "source": "similar_companies_level1",
@@ -146,7 +150,7 @@ class IntLvl1SimilarCompaniesAgent(BaseResearchAgent):
                 "run_id": run_id or None,
                 "event_id": event_id or None,
                 "results": limited_results,
-                "artifact_path": str(self._artifact_path),
+                "artifact_path": artifact_path.as_posix(),
             },
         }
 
@@ -306,9 +310,46 @@ class IntLvl1SimilarCompaniesAgent(BaseResearchAgent):
         denominator = max(len(target_set), 1)
         return len(overlap) / denominator
 
-    def _persist_artifact(self, payload: Mapping[str, Any]) -> None:
+    def _persist_artifact(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        run_id: Optional[str],
+        event_id: Optional[str],
+    ) -> Path:
+        run_identifier = self._normalise_identifier(run_id)
+        if not run_identifier:
+            run_identifier = self._timestamp_token(prefix="run")
+
+        run_dir = self._artifact_root / run_identifier
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        event_identifier = self._normalise_identifier(event_id)
+        if not event_identifier:
+            event_identifier = self._timestamp_token(prefix="event")
+
+        filename = f"similar_companies_level1_{event_identifier}.json"
+        artifact_path = run_dir / filename
+
         serialised = json.dumps(payload, indent=2, ensure_ascii=False)
-        self._artifact_path.write_text(serialised, encoding="utf-8")
+        artifact_path.write_text(serialised, encoding="utf-8")
+
+        return artifact_path
+
+    @staticmethod
+    def _normalise_identifier(value: Optional[str]) -> str:
+        if not value:
+            return ""
+
+        allowed = {"-", "_"}
+        sanitised = "".join(
+            character for character in value if character.isalnum() or character in allowed
+        )
+        return sanitised.strip("._")
+
+    @staticmethod
+    def _timestamp_token(*, prefix: str) -> str:
+        return f"{prefix}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')}"
 
 
 __all__ = ["IntLvl1SimilarCompaniesAgent"]

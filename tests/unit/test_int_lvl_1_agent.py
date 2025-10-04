@@ -140,7 +140,14 @@ async def test_ranked_results_are_limited_and_persisted(
     assert payload["company_name"] == "Example Analytics"
     assert payload["run_id"] == "run-123"
     assert payload["event_id"] == "evt-456"
-    assert payload["artifact_path"] == str(tmp_path / "similar_companies_level1.json")
+
+    expected_path = (
+        tmp_path
+        / "similar_companies_level1"
+        / "run-123"
+        / "similar_companies_level1_evt-456.json"
+    )
+    assert payload["artifact_path"] == expected_path.as_posix()
 
     ranked = payload["results"]
     assert len(ranked) == 2
@@ -153,6 +160,62 @@ async def test_ranked_results_are_limited_and_persisted(
     assert artifact_path.exists()
     saved = json.loads(artifact_path.read_text(encoding="utf-8"))
     assert saved["results"] == ranked
+
+
+async def test_artifacts_are_namespaced_per_run(
+    tmp_path: Path, trigger_factory
+) -> None:
+    integration = _StubIntegration([
+        _candidate("1", "Example Analytics", description="Predictive analytics"),
+    ])
+    agent = IntLvl1SimilarCompaniesAgent(
+        config=_Config(tmp_path),
+        hubspot_integration=integration,
+        result_limit=1,
+    )
+
+    trigger_one = trigger_factory(run_id="run-abc", event_id="evt-1")
+    trigger_two = trigger_factory(run_id="run-def", event_id="evt-2")
+
+    result_one = await agent.run(trigger_one)
+    result_two = await agent.run(trigger_two)
+
+    path_one = Path(result_one["payload"]["artifact_path"])
+    path_two = Path(result_two["payload"]["artifact_path"])
+
+    assert path_one.parent.name == "run-abc"
+    assert path_two.parent.name == "run-def"
+    assert path_one.exists()
+    assert path_two.exists()
+    assert path_one != path_two
+
+
+async def test_multiple_events_in_same_run_do_not_overwrite(tmp_path: Path) -> None:
+    integration = _StubIntegration([
+        _candidate("1", "Example Analytics", description="Predictive analytics"),
+    ])
+    agent = IntLvl1SimilarCompaniesAgent(
+        config=_Config(tmp_path),
+        hubspot_integration=integration,
+        result_limit=1,
+    )
+
+    base_trigger = {
+        "run_id": "run-xyz",
+        "event_id": "evt-1",
+        "payload": {"company_name": "Example Analytics"},
+    }
+
+    result_first = await agent.run(base_trigger)
+    result_second = await agent.run({**base_trigger, "event_id": "evt-2"})
+
+    path_first = Path(result_first["payload"]["artifact_path"])
+    path_second = Path(result_second["payload"]["artifact_path"])
+
+    assert path_first.exists()
+    assert path_second.exists()
+    assert path_first.parent == path_second.parent
+    assert path_first.name != path_second.name
 
 
 async def test_deterministic_ordering_when_scores_equal(tmp_path: Path) -> None:

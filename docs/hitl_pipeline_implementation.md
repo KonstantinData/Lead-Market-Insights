@@ -29,3 +29,25 @@ pipeline.
 When extending the pipeline ensure new components read from `config.settings`
 instead of `os.getenv` so that tests and alternative configuration sources remain
 consistent.
+
+## Automatic Continuations via InboxAgent
+
+The workflow orchestrator installs `_handle_inbox_reply` as an inbox handler so
+that organiser responses automatically drive the pending audit lifecycle. When a
+follow-up is scheduled the orchestrator stores the audit context, including the
+original event payload and requested fields, and waits for the inbox callback.
+Incoming messages are normalised via `parse_missing_info_key_values` or
+`parse_dossier_decision`, masked for logging, and then written to the audit log
+before any business logic executes. The handler cancels outstanding reminder and
+escalation tasks by delegating to the human agent’s `ReminderEscalation`
+instance, guaranteeing that a successful reply stops recurring emails.
+
+`MasterWorkflowAgent` continuations receive the merged event information and the
+normalised reply payload. Missing-info replies that now contain the necessary
+keys result in an immediate CRM dispatch with the enriched dataset; otherwise
+the human agent is consulted again and any new pending audit registrations are
+forwarded back to the orchestrator. Dossier approvals behave similarly: complete
+payloads trigger CRM dispatch, incomplete data falls back to the missing-info
+flow, and negative replies short-circuit without further action. This handshake
+captures audit history, clears reminders, and advances the workflow with a
+single organiser email.

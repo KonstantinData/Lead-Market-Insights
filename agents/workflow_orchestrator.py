@@ -227,158 +227,19 @@ class WorkflowOrchestrator:
         inbox = self.inbox_agent
         if inbox is None:
             logger.debug(
-                "Received pending audit %s but inbox agent unavailable; falling back to legacy handler",
+                "Received pending audit %s but inbox agent unavailable; skipping registration",
                 audit_id,
             )
-            self._legacy_on_pending_audit(kind, audit_id, context)
             return
 
         if audit_id in self._resolved_audits:
             return
 
-        audit_log = self.audit_log
-        has_response = getattr(audit_log, "has_response", None)
-        if callable(has_response) and has_response(audit_id):
-            self._resolved_audits.add(audit_id)
-            return
-
-        register_reply = getattr(inbox, "register_reply_handler", None)
-        if not callable(register_reply):
-            logger.debug(
-                "Inbox agent lacks reply handler registration; using legacy pending audit workflow for %s",
-                audit_id,
-            )
-            self._legacy_on_pending_audit(kind, audit_id, context)
-            return
-
-        pending_context = dict(context or {})
-        pending_context.setdefault("run_id", pending_context.get("run_id") or self.run_id)
-        self._pending_audits[audit_id] = {
-            "kind": kind,
-            "context": pending_context,
-            "created_at": time.time(),
-            "resolved": False,
-        }
-
-        def handle_reply(message: InboxMessage) -> None:
-            if audit_id in self._resolved_audits:
-                return
-            if audit_id in self._handled_audit_replies:
-                logger.debug("Duplicate inbox reply detected for audit %s", audit_id)
-                return
-
-            self._handled_audit_replies.add(audit_id)
-
-            normalizer = getattr(inbox, "normalize_message", None)
-            normalized: Dict[str, Any]
-            try:
-                candidate = normalizer(message) if callable(normalizer) else None
-            except Exception:
-                logger.exception("Failed to normalise inbox message for audit %s", audit_id)
-                candidate = None
-
-            if isinstance(candidate, dict):
-                normalized = candidate
-            else:
-                normalized = self._normalise_inbox_message(kind, message)
-
-            self._record_audit_response(
-                kind,
-                audit_id,
-                pending_context,
-                message,
-                normalized,
-            )
-            self._cancel_reminders(audit_id)
-
-            async def _continue() -> None:
-                try:
-                    if not self.master_agent:
-                        logger.warning(
-                            "Master agent unavailable for audit %s continuation",
-                            audit_id,
-                        )
-                        return
-
-                    if kind == "missing_info":
-                        continuation = getattr(
-                            self.master_agent,
-                            "continue_after_missing_info",
-                            None,
-                        )
-                        if callable(continuation):
-                            await continuation(
-                                audit_id,
-                                normalized.get("fields") or {},
-                                pending_context,
-                            )
-                    elif kind == "dossier":
-                        continuation = getattr(
-                            self.master_agent,
-                            "continue_after_dossier_decision",
-                            None,
-                        )
-                        if callable(continuation):
-                            await continuation(
-                                audit_id,
-                                normalized.get("decision"),
-                                pending_context,
-                            )
-                except Exception:
-                    logger.exception(
-                        "Failed to continue workflow for audit %s", audit_id
-                    )
-                finally:
-                    record = self._pending_audits.get(audit_id)
-                    if record is not None:
-                        record["resolved"] = True
-                    self._pending_audits.pop(audit_id, None)
-                    self._resolved_audits.add(audit_id)
-
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                logger.warning(
-                    "No running event loop available to continue audit %s", audit_id
-                )
-                record = self._pending_audits.get(audit_id)
-                if record is not None:
-                    record["resolved"] = True
-                self._pending_audits.pop(audit_id, None)
-                self._resolved_audits.add(audit_id)
-                return
-
-            task = loop.create_task(_continue())
-            self.track_background_task(task)
-
-        try:
-            register_reply(audit_id, handle_reply)
-        except Exception:
-            logger.exception(
-                "Failed to register inbox reply handler for audit %s", audit_id
-            )
-            self._legacy_on_pending_audit(kind, audit_id, context)
-            return
-
-        logger.info("Registered inbox handler for audit %s (%s)", audit_id, kind)
-        self._start_inbox_polling()
-
-    def _legacy_on_pending_audit(
-        self, kind: str, audit_id: str, context: Dict[str, Any]
-    ) -> None:
-        if not audit_id:
-            return
-        if not self.inbox_agent:
-            logger.debug(
-                "Received pending audit %s but inbox agent unavailable; skipping registration",
-                audit_id,
-            )
-            return
         if self._is_audit_resolved(audit_id):
             return
 
         pending_context = dict(context or {})
-        pending_context.setdefault("run_id", self.run_id)
+        pending_context.setdefault("run_id", pending_context.get("run_id") or self.run_id)
         self._pending_audits[audit_id] = {
             "kind": kind,
             "context": pending_context,

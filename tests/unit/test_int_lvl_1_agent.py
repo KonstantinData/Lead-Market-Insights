@@ -151,10 +151,11 @@ async def test_ranked_results_are_limited_and_persisted(
 
     ranked = payload["results"]
     assert len(ranked) == 2
-    assert ranked[0]["id"] == "1"
-    assert ranked[0]["matching_fields"] == ["description", "name", "product", "segment"]
-    assert ranked[1]["id"] == "2"
-    assert ranked[1]["matching_fields"] == ["description", "product"]
+    assert ranked[0]["id"] == "2"
+    assert ranked[0]["matching_fields"] == ["description", "product"]
+    assert ranked[1]["id"] == "3"
+    assert ranked[1]["matching_fields"] == ["segment"]
+    assert all(item["name"] != "Example Analytics" for item in ranked)
 
     artifact_path = Path(payload["artifact_path"])
     assert artifact_path.exists()
@@ -259,7 +260,7 @@ async def test_candidates_without_valid_properties_are_ignored(tmp_path: Path) -
         [
             {"id": "invalid", "properties": None},
             {"id": "blank", "properties": {}},
-            _candidate("valid", "Example Analytics", description="Analytics"),
+            _candidate("valid", "Valid Analytics", description="Analytics"),
         ]
     )
 
@@ -273,6 +274,33 @@ async def test_candidates_without_valid_properties_are_ignored(tmp_path: Path) -
     results = (await agent.run(trigger))["payload"]["results"]
 
     assert [item["id"] for item in results] == ["valid"]
+
+
+async def test_candidate_with_same_name_and_different_domain_retained(
+    tmp_path: Path,
+) -> None:
+    integration = _StubIntegration(
+        [
+            _candidate("1", "Example Analytics", domain="analytics.example"),
+        ]
+    )
+
+    agent = IntLvl1SimilarCompaniesAgent(
+        config=_Config(tmp_path),
+        hubspot_integration=integration,
+        result_limit=5,
+    )
+
+    trigger = {
+        "payload": {
+            "company_name": "Example Analytics",
+            "domain": "example.com",
+        }
+    }
+
+    results = (await agent.run(trigger))["payload"]["results"]
+
+    assert [item["id"] for item in results] == ["1"]
 
 
 async def test_similar_companies_schema_snapshot(

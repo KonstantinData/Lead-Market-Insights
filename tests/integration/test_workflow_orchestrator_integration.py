@@ -323,7 +323,7 @@ async def test_orchestrator_records_research_artifacts_and_email_details(
 
     similar_payload = entry["research"]["similar_companies_level1"]["payload"]
     assert len(similar_payload["results"]) == 2
-    assert similar_payload["results"][0]["id"] == "1"
+    assert [result["id"] for result in similar_payload["results"]] == ["2", "3"]
     artifact_path = similar_payload["artifact_path"]
     assert artifact_path.endswith("similar_companies_level1_evt-456.json")
     assert "/run-123/" in artifact_path.replace("\\", "/")

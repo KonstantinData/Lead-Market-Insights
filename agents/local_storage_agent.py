@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Dict, Optional
 
 
@@ -100,8 +103,20 @@ class LocalStorageAgent:
         existing = [item for item in existing if item.get("run_id") != run_id]
         existing.append(entry)
 
-        with self._index_file.open("w", encoding="utf-8") as handle:
+        with NamedTemporaryFile(
+            "w", encoding="utf-8", dir=self.base_dir, delete=False
+        ) as handle:
+            temp_path = Path(handle.name)
             json.dump(existing, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+
+        try:
+            temp_path.replace(self._index_file)
+        except Exception:
+            with suppress(FileNotFoundError):
+                temp_path.unlink()
+            raise
 
         self.logger.info("Recorded run %s in index with log %s", run_id, log_reference)
 

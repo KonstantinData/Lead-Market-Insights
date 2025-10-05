@@ -52,9 +52,11 @@ _logger = logging.getLogger(__name__)
 _TRACER_NAME = "agentic.workflow"
 _SERVICE_NAME = "agentic-intelligence-workflow"
 
-current_run_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "workflow_run_id", default=""
-)
+_existing_run_id_var = globals().get("current_run_id_var")
+if isinstance(_existing_run_id_var, contextvars.ContextVar):
+    current_run_id_var = _existing_run_id_var  # type: ignore[assignment]
+else:
+    current_run_id_var = contextvars.ContextVar("workflow_run_id", default="")
 
 _tracer_provider: Optional[Any] = None
 _meter_provider: Optional[Any] = None
@@ -67,8 +69,23 @@ _latency_histogram = None
 _cost_spend_counter = None
 _cost_event_counter = None
 
-_log_record_factory_installed = False
-_original_log_record_factory = logging.getLogRecordFactory()
+_current_log_record_factory = logging.getLogRecordFactory()
+_wrapped_log_factory = getattr(_current_log_record_factory, "__wrapped_factory__", None)
+
+if callable(_wrapped_log_factory):
+
+    def _rehydrated_record_factory(*args, **kwargs):  # type: ignore[override]
+        record = _wrapped_log_factory(*args, **kwargs)
+        record.run_id = get_current_run_id()
+        return record
+
+    setattr(_rehydrated_record_factory, "__wrapped_factory__", _wrapped_log_factory)
+    logging.setLogRecordFactory(_rehydrated_record_factory)
+    _log_record_factory_installed = True
+    _original_log_record_factory = _wrapped_log_factory  # type: ignore[assignment]
+else:
+    _log_record_factory_installed = False
+    _original_log_record_factory = _current_log_record_factory
 
 
 class _NoopSpan:
@@ -139,6 +156,29 @@ class RunContext:
         self.completed = True
 
 
+def _detect_existing_tracer_provider() -> Optional[Any]:
+    if trace is None:
+        return None
+    try:
+        return trace.get_tracer_provider()
+    except Exception:  # pragma: no cover - defensive guard for stubbed trace modules
+        return None
+
+
+def _is_reusable_provider(provider: Optional[Any]) -> bool:
+    if provider is None:
+        return False
+    provider_cls = provider.__class__
+    module = getattr(provider_cls, "__module__", "")
+    name = getattr(provider_cls, "__name__", "")
+    if module.startswith("opentelemetry.trace") and name in {
+        "ProxyTracerProvider",
+        "DefaultTracerProvider",
+    }:
+        return False
+    return True
+
+
 def configure_observability(
     *,
     span_exporter: Optional[SpanExporter] = None,
@@ -165,7 +205,17 @@ def configure_observability(
 
     resource = Resource.create({"service.name": service_name}) if Resource else None
 
-    _tracer_provider = TracerProvider(resource=resource) if TracerProvider else None
+    provider_reused = False
+    provider: Optional[Any] = None
+    if not force:
+        provider = _detect_existing_tracer_provider()
+        if _is_reusable_provider(provider):
+            provider_reused = True
+
+    if not provider_reused:
+        provider = TracerProvider(resource=resource) if TracerProvider else None
+
+    _tracer_provider = provider
 
     processor = span_processor
     exporter = span_exporter
@@ -177,10 +227,14 @@ def configure_observability(
             exporter = None
     if processor is None and exporter is not None and BatchSpanProcessor is not None:
         processor = BatchSpanProcessor(exporter)
-    if processor is not None and _tracer_provider is not None:
+    if (
+        processor is not None
+        and _tracer_provider is not None
+        and hasattr(_tracer_provider, "add_span_processor")
+    ):
         _tracer_provider.add_span_processor(processor)
 
-    if trace is not None and _tracer_provider is not None:
+    if not provider_reused and trace is not None and _tracer_provider is not None:
         trace.set_tracer_provider(_tracer_provider)
 
     reader = metric_reader
@@ -486,15 +540,24 @@ def _reset_instruments() -> None:
 
 
 def _install_log_record_factory() -> None:
-    global _log_record_factory_installed
+    global _log_record_factory_installed, _original_log_record_factory
 
     if _log_record_factory_installed:
         return
 
+    current_factory = logging.getLogRecordFactory()
+    base_factory = getattr(current_factory, "__wrapped_factory__", None)
+    if not callable(base_factory):
+        base_factory = current_factory
+
+    _original_log_record_factory = base_factory  # type: ignore[assignment]
+
     def record_factory(*args, **kwargs):  # type: ignore[override]
-        record = _original_log_record_factory(*args, **kwargs)
+        record = base_factory(*args, **kwargs)
         record.run_id = get_current_run_id()
         return record
+
+    setattr(record_factory, "__wrapped_factory__", base_factory)
 
     logging.setLogRecordFactory(record_factory)
     _log_record_factory_installed = True

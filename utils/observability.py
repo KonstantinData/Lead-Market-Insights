@@ -15,9 +15,11 @@ from typing import Any, Dict, Iterable, Optional
 try:  # pragma: no cover - optional dependency import
     from opentelemetry import metrics, trace
     from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
-        OTLPMetricExporter,
+        OTLPMetricExporter as _GrpcMetricExporter,
     )
-    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+        OTLPSpanExporter as _GrpcSpanExporter,
+    )
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.metrics.export import (
         InMemoryMetricReader,
@@ -37,7 +39,7 @@ try:  # pragma: no cover - optional dependency import
     _OTEL_AVAILABLE = True
 except ImportError:  # pragma: no cover - graceful degradation when OTEL is absent
     metrics = trace = None  # type: ignore[assignment]
-    OTLPMetricExporter = OTLPSpanExporter = None  # type: ignore[assignment]
+    _GrpcMetricExporter = _GrpcSpanExporter = None  # type: ignore[assignment]
     MeterProvider = MetricReader = PeriodicExportingMetricReader = None  # type: ignore[assignment]
     InMemoryMetricReader = None  # type: ignore[assignment]
     Resource = None  # type: ignore[assignment]
@@ -191,6 +193,129 @@ def _is_reusable_provider(provider: Optional[Any]) -> bool:
     return True
 
 
+def _provider_has_span_processors(provider: Optional[Any]) -> bool:
+    if provider is None:
+        return False
+    active_processor = None
+    if hasattr(provider, "get_active_span_processor"):
+        try:
+            active_processor = provider.get_active_span_processor()
+        except Exception:  # pragma: no cover - defensive guard
+            active_processor = None
+    if active_processor is None:
+        active_processor = getattr(provider, "_active_span_processor", None)
+    if active_processor is not None:
+        children = getattr(active_processor, "_span_processors", None) or getattr(
+            active_processor, "span_processors", None
+        )
+        if children:
+            return True
+        if hasattr(active_processor, "on_end"):
+            return True
+    for attr in ("_span_processors", "span_processors"):
+        processors = getattr(provider, attr, None)
+        if processors:
+            return True
+    return False
+
+
+def _create_otlp_span_exporter(protocol: str) -> Optional[Any]:
+    protocol = protocol.strip().lower()
+    if protocol.startswith("http"):
+        try:
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+                OTLPSpanExporter as _HttpSpanExporter,
+            )
+        except ImportError:  # pragma: no cover - optional dependency import
+            _logger.warning(
+                "OTLP HTTP span exporter requested but module is unavailable"
+            )
+            return None
+        try:
+            return _HttpSpanExporter()
+        except Exception as exc:  # pragma: no cover - exporter misconfiguration
+            _logger.warning("Failed to initialise OTLP HTTP span exporter: %s", exc)
+            return None
+    if _GrpcSpanExporter is None:
+        return None
+    try:
+        return _GrpcSpanExporter()
+    except Exception as exc:  # pragma: no cover - exporter misconfiguration
+        _logger.warning("Failed to initialise OTLP gRPC span exporter: %s", exc)
+        return None
+
+
+def _detect_existing_meter_provider() -> Optional[Any]:
+    if metrics is None:
+        return None
+    try:
+        return metrics.get_meter_provider()
+    except Exception:  # pragma: no cover - defensive guard
+        return None
+
+
+def _is_reusable_meter_provider(provider: Optional[Any]) -> bool:
+    if provider is None:
+        return False
+    provider_cls = provider.__class__
+    module = getattr(provider_cls, "__module__", "")
+    name = getattr(provider_cls, "__name__", "")
+    if module.startswith("opentelemetry.metrics") and name in {
+        "ProxyMeterProvider",
+        "DefaultMeterProvider",
+        "NoOpMeterProvider",
+    }:
+        return False
+    return True
+
+
+def _meter_provider_has_readers(provider: Optional[Any]) -> bool:
+    if provider is None:
+        return False
+    for attr in ("_metric_readers", "_registered_metric_readers", "metric_readers"):
+        readers = getattr(provider, attr, None)
+        if readers:
+            return True
+    return False
+
+
+def _create_otlp_metric_reader(protocol: str) -> Optional[MetricReader]:
+    protocol = protocol.strip().lower()
+    exporter = None
+    if protocol.startswith("http"):
+        try:
+            from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
+                OTLPMetricExporter as _HttpMetricExporter,
+            )
+        except ImportError:  # pragma: no cover - optional dependency import
+            _logger.warning(
+                "OTLP HTTP metric exporter requested but module is unavailable"
+            )
+            return None
+        try:
+            exporter = _HttpMetricExporter()
+        except Exception as exc:  # pragma: no cover - exporter misconfiguration
+            _logger.warning("Failed to initialise OTLP HTTP metric exporter: %s", exc)
+            return None
+    else:
+        if _GrpcMetricExporter is None:
+            return None
+        try:
+            exporter = _GrpcMetricExporter()
+        except Exception as exc:  # pragma: no cover - exporter misconfiguration
+            _logger.warning(
+                "Failed to initialise OTLP gRPC metric exporter: %s", exc
+            )
+            return None
+    if exporter is None or PeriodicExportingMetricReader is None:
+        return None
+    try:
+        return PeriodicExportingMetricReader(exporter)
+    except Exception as exc:  # pragma: no cover - exporter misconfiguration
+        _logger.warning("Failed to initialise OTLP metric reader: %s", exc)
+        return None
+
+
 def configure_observability(
     *,
     span_exporter: Optional[SpanExporter] = None,
@@ -224,6 +349,7 @@ def configure_observability(
         return
 
     resource = Resource.create({"service.name": service_name}) if Resource else None
+    protocol = os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL", "").strip().lower()
 
     provider_reused = False
     provider: Optional[Any] = None
@@ -239,12 +365,14 @@ def configure_observability(
 
     processor = span_processor
     exporter = span_exporter
-    if processor is None and exporter is None and OTLPSpanExporter is not None:
-        try:
-            exporter = OTLPSpanExporter()
-        except Exception as exc:  # pragma: no cover - exporter misconfiguration
-            _logger.warning("Failed to initialise OTLP span exporter: %s", exc)
-            exporter = None
+    provider_has_processors = _provider_has_span_processors(_tracer_provider)
+    if (
+        processor is None
+        and exporter is None
+        and not provider_reused
+        and not provider_has_processors
+    ):
+        exporter = _create_otlp_span_exporter(protocol)
     if processor is None and exporter is not None and BatchSpanProcessor is not None:
         processor = BatchSpanProcessor(exporter)
     if (
@@ -257,22 +385,35 @@ def configure_observability(
     if not provider_reused and trace is not None and _tracer_provider is not None:
         trace.set_tracer_provider(_tracer_provider)
 
+    meter_provider_reused = False
+    existing_meter_provider: Optional[Any] = None
+    if not force:
+        existing_meter_provider = _detect_existing_meter_provider()
+        if _is_reusable_meter_provider(existing_meter_provider):
+            meter_provider_reused = True
+
     reader = metric_reader
-    if not metrics_disabled and reader is None and OTLPMetricExporter is not None:
-        try:
-            metric_exporter = OTLPMetricExporter()
-            reader = PeriodicExportingMetricReader(metric_exporter)
-        except Exception as exc:  # pragma: no cover - exporter misconfiguration
-            _logger.warning("Failed to initialise OTLP metric exporter: %s", exc)
-            reader = None
+    meter_provider_has_readers = _meter_provider_has_readers(existing_meter_provider)
+    if (
+        not metrics_disabled
+        and reader is None
+        and not meter_provider_reused
+        and not meter_provider_has_readers
+    ):
+        reader = _create_otlp_metric_reader(protocol)
 
     if MeterProvider is not None and not metrics_disabled:
-        if reader is not None:
-            _meter_provider = MeterProvider(resource=resource, metric_readers=[reader])
+        if meter_provider_reused and existing_meter_provider is not None:
+            _meter_provider = existing_meter_provider
         else:
-            _meter_provider = MeterProvider(resource=resource)
-        if metrics is not None and _meter_provider is not None:
-            metrics.set_meter_provider(_meter_provider)
+            if reader is not None:
+                _meter_provider = MeterProvider(
+                    resource=resource, metric_readers=[reader]
+                )
+            else:
+                _meter_provider = MeterProvider(resource=resource)
+            if metrics is not None and _meter_provider is not None:
+                metrics.set_meter_provider(_meter_provider)
     else:
         _meter_provider = None
 

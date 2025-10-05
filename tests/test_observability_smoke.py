@@ -41,6 +41,25 @@ async def test_configure_observability_reuses_existing_tracer():
     importlib.reload(observability)
 
 
+async def test_configure_observability_avoids_extra_grpc_exporters(monkeypatch):
+    importlib.reload(telemetry)
+    importlib.reload(observability)
+
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
+    telemetry.setup_telemetry(otlp_endpoint="http://localhost:4318", force=True)
+
+    with mock.patch.object(observability, "_GrpcSpanExporter") as grpc_span_ctor, mock.patch.object(
+        observability, "_GrpcMetricExporter"
+    ) as grpc_metric_ctor:
+        observability.configure_observability()
+
+    grpc_span_ctor.assert_not_called()
+    grpc_metric_ctor.assert_not_called()
+
+    importlib.reload(observability)
+    importlib.reload(telemetry)
+
+
 async def test_configure_observability_metrics_disabled(monkeypatch):
     importlib.reload(observability)
 

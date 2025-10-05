@@ -1,4 +1,6 @@
 import json
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 from unittest.mock import MagicMock
 
 import pytest
@@ -84,3 +86,46 @@ def test_load_failure_state_handles_invalid_json(storage_agent):
         "Failure state file %s was invalid JSON. Resetting state.",
         storage_agent._failure_state_file,
     )
+
+
+def test_record_run_writes_index_atomically(storage_agent, monkeypatch):
+    run_dir = storage_agent.create_run_directory("run-atomic")
+    log_path = run_dir / "audit_log.jsonl"
+    log_path.write_text("{}", encoding="utf-8")
+
+    replace_calls: list[tuple[Path, Path]] = []
+    path_cls = type(storage_agent._index_file)
+    original_replace = path_cls.replace
+
+    def tracking_replace(self, target):
+        # Ensure the temporary file already contains valid JSON before swap.
+        json.loads(Path(self).read_text(encoding="utf-8"))
+        replace_calls.append((Path(self), Path(target)))
+        return original_replace(self, target)
+
+    monkeypatch.setattr(path_cls, "replace", tracking_replace)
+
+    storage_agent.record_run("run-atomic", log_path)
+
+    assert replace_calls, "Expected Path.replace to be used for atomic swap"
+    temp_path, target_path = replace_calls[-1]
+    assert target_path == storage_agent._index_file
+    assert temp_path != storage_agent._index_file
+
+    data = json.loads(storage_agent._index_file.read_text(encoding="utf-8"))
+    assert any(item["run_id"] == "run-atomic" for item in data)
+
+
+def test_record_run_ignores_temporary_files(storage_agent):
+    run_dir = storage_agent.create_run_directory("run-tmp")
+    log_path = run_dir / "audit_log.jsonl"
+    log_path.write_text("{}", encoding="utf-8")
+
+    with NamedTemporaryFile(
+        "w", encoding="utf-8", dir=storage_agent.base_dir, delete=False
+    ) as leftover:
+        leftover.write("not-json")
+
+    storage_agent.record_run("run-tmp", log_path)
+
+    storage_agent.logger.warning.assert_not_called()

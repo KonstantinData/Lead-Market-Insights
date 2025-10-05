@@ -6,7 +6,6 @@ the run id before instantiation to guarantee consistent telemetry correlation.
 """
 
 import asyncio
-import json
 import logging
 import signal
 import time

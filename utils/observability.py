@@ -52,9 +52,11 @@ _logger = logging.getLogger(__name__)
 _TRACER_NAME = "agentic.workflow"
 _SERVICE_NAME = "agentic-intelligence-workflow"
 
-current_run_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "workflow_run_id", default=""
-)
+_existing_run_id_var = globals().get("current_run_id_var")
+if isinstance(_existing_run_id_var, contextvars.ContextVar):
+    current_run_id_var = _existing_run_id_var  # type: ignore[assignment]
+else:
+    current_run_id_var = contextvars.ContextVar("workflow_run_id", default="")
 
 _tracer_provider: Optional[Any] = None
 _meter_provider: Optional[Any] = None
@@ -67,8 +69,23 @@ _latency_histogram = None
 _cost_spend_counter = None
 _cost_event_counter = None
 
-_log_record_factory_installed = False
-_original_log_record_factory = logging.getLogRecordFactory()
+_current_log_record_factory = logging.getLogRecordFactory()
+_wrapped_log_factory = getattr(_current_log_record_factory, "__wrapped_factory__", None)
+
+if callable(_wrapped_log_factory):
+
+    def _rehydrated_record_factory(*args, **kwargs):  # type: ignore[override]
+        record = _wrapped_log_factory(*args, **kwargs)
+        record.run_id = get_current_run_id()
+        return record
+
+    setattr(_rehydrated_record_factory, "__wrapped_factory__", _wrapped_log_factory)
+    logging.setLogRecordFactory(_rehydrated_record_factory)
+    _log_record_factory_installed = True
+    _original_log_record_factory = _wrapped_log_factory  # type: ignore[assignment]
+else:
+    _log_record_factory_installed = False
+    _original_log_record_factory = _current_log_record_factory
 
 
 class _NoopSpan:
@@ -523,15 +540,24 @@ def _reset_instruments() -> None:
 
 
 def _install_log_record_factory() -> None:
-    global _log_record_factory_installed
+    global _log_record_factory_installed, _original_log_record_factory
 
     if _log_record_factory_installed:
         return
 
+    current_factory = logging.getLogRecordFactory()
+    base_factory = getattr(current_factory, "__wrapped_factory__", None)
+    if not callable(base_factory):
+        base_factory = current_factory
+
+    _original_log_record_factory = base_factory  # type: ignore[assignment]
+
     def record_factory(*args, **kwargs):  # type: ignore[override]
-        record = _original_log_record_factory(*args, **kwargs)
+        record = base_factory(*args, **kwargs)
         record.run_id = get_current_run_id()
         return record
+
+    setattr(record_factory, "__wrapped_factory__", base_factory)
 
     logging.setLogRecordFactory(record_factory)
     _log_record_factory_installed = True

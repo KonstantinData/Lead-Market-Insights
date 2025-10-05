@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from utils.persistence import atomic_write_json
+
 logger = logging.getLogger(__name__)
 
 
@@ -186,9 +188,7 @@ class NegativeEventCache:
                 "version": NEG_CACHE_VERSION,
                 "entries": self.entries,
             }
-            self.path.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+            atomic_write_json(self.path, payload)
             self.dirty = False
         except Exception:
             logger.warning(

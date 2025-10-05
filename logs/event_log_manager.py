@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from utils.persistence import atomic_write_json
+
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
 
@@ -38,8 +40,7 @@ class EventLogManager:
         payload["last_updated"] = datetime.now(timezone.utc).isoformat()
 
         event_file = self._event_file(event_id)
-        with event_file.open("w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
+        atomic_write_json(event_file, payload)
 
         if self.logger:
             self.logger.info("Event log written: %s", event_file)

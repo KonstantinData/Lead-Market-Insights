@@ -234,7 +234,7 @@ async def test_orchestrator_records_research_artifacts_and_email_details(
             "extraction": {
                 "info": {
                     "company_name": "Example Corp",
-                    "web_domain": "example.com",
+                    "web_domain": "example.ai",
                 },
                 "is_complete": True,
             },

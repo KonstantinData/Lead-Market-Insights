@@ -71,20 +71,22 @@ async def test_run_serializes_output_and_persists_artifact(
     result = await agent.run(trigger)
 
     dossier = result["payload"]
-    assert list(dossier.keys()) == list(DossierResearchAgent.OUTPUT_FIELD_ORDER)
+    expected_order = list(DossierResearchAgent.OUTPUT_FIELD_ORDER) + ["status"]
+    assert list(dossier.keys()) == expected_order
     assert dossier["report_type"] == "Company Detail Research"
     assert dossier["run_id"] == trigger["run_id"]
     assert dossier["event_id"] == trigger["event_id"]
     assert list(dossier["company"].keys()) == list(
         DossierResearchAgent.COMPANY_FIELD_ORDER
     )
+    assert result["status"] == dossier["status"] == "completed"
 
     artifact_path = Path(result["artifact_path"])
     assert artifact_path.exists()
     expected_dir = Path(agent.output_dir) / trigger["run_id"]
     assert artifact_path.parent == expected_dir
     saved_payload = json.loads(artifact_path.read_text(encoding="utf-8"))
-    assert list(saved_payload.keys()) == list(DossierResearchAgent.OUTPUT_FIELD_ORDER)
+    assert list(saved_payload.keys()) == expected_order
 
 
 @pytest.mark.parametrize(
@@ -134,6 +136,22 @@ async def test_summary_falls_back_to_description(
 
     assert dossier["summary"] == "Provided summary"
     assert dossier["company"]["description"] == " Provided summary "
+
+
+async def test_insufficient_context_status(agent: DossierResearchAgent, trigger_factory) -> None:
+    trigger = trigger_factory(
+        payload={
+            "summary": "",
+            "sources": [],
+            "insights": [],
+        }
+    )
+
+    result = await agent.run(trigger)
+    payload = result["payload"]
+
+    assert payload["status"] == "insufficient_context"
+    assert result["status"] == "insufficient_context"
 
 
 async def test_missing_required_fields_raise_value_error(

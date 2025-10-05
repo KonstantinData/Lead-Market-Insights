@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -26,6 +25,7 @@ from config.config import settings
 from logs.workflow_log_manager import WorkflowLogManager
 from reminders.reminder_escalation import ReminderEscalation
 from utils.datetime_formatting import format_report_datetime
+from utils.persistence import atomic_write_json
 
 NormalizedPayload = Dict[str, Any]
 
@@ -466,8 +466,7 @@ class InternalResearchAgent(BaseResearchAgent):
         run_dir = self.research_artifact_dir / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         artifact_path = run_dir / filename
-        with artifact_path.open("w", encoding="utf-8") as handle:
-            json.dump(data, handle, ensure_ascii=False, indent=2)
+        atomic_write_json(artifact_path, data)
         return artifact_path.as_posix()
 
     def _build_crm_matching_payload(

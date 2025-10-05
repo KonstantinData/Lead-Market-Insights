@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from utils.persistence import ProcessedEventsState, atomic_write_json
+
 logger = logging.getLogger(__name__)
 
 
@@ -127,9 +129,7 @@ class ProcessedEventCache:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             payload = {"entries": self.entries}
-            self.path.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+            atomic_write_json(self.path, payload, model=ProcessedEventsState)
             self.dirty = False
         except Exception:
             logger.warning(

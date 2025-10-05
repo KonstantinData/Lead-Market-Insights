@@ -39,7 +39,7 @@ async def test_hard_trigger_with_complete_info_dispatches_without_unhandled_stat
     None
 ):
     event = {"id": "event-001", "summary": "Hard trigger meeting"}
-    info = {"company_name": "Example Corp", "company_domain": "example.com"}
+    info = {"company_name": "Example Corp", "company_domain": "example.ai"}
 
     agent = MasterWorkflowAgent(
         event_agent=DummyEventAgent([event]),

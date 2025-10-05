@@ -69,7 +69,7 @@ def _prepare_agent(backend: Optional[DummyBackend]) -> MasterWorkflowAgent:
         "summary": "Soft trigger meeting",
         "organizer": {"email": "organizer@example.com", "displayName": "Org"},
     }
-    info = {"company_name": "Example Corp", "web_domain": "example.com"}
+    info = {"company_name": "Example Corp", "web_domain": "example.ai"}
 
     agent = MasterWorkflowAgent(
         communication_backend=backend,

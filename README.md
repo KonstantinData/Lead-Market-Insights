@@ -85,6 +85,18 @@ The research pipeline activates after extraction has produced a minimally viable
 
 Each stage logs its own progress with the workflow `run_id`, allowing teams to audit the full pipeline across logs, artefacts, and OpenTelemetry traces.
 
+### Extraction validation and persistence guardrails
+
+The workflow now enforces an explicit validation gate on extracted company data before any research or CRM dispatch runs. Domains that resolve to placeholders such as `example.com`, `localhost`, or malformed internal hostnames are rejected with a structured `invalid_domain` error captured inside the run summary. When research succeeds, the similar-company and dossier agents attach semantic statuses (`no_candidates`, `insufficient_context`, or `completed`) so downstream systems can distinguish empty payloads from successful lookups.
+
+All stateful JSON artefacts (processed events cache, run indices, research summaries, and run-level research exports) are persisted via atomic `os.replace` writes backed by Pydantic validation. This removes the intermittent "invalid JSON" warnings and guarantees that partially written files cannot corrupt the cache even if the process crashes between writes.
+
+These changes fully address the three immediate guardrails requested after the latest run:
+
+1. **Placeholder/invalid domain block** – `MasterWorkflowAgent` now raises a structured error before CRM dispatch and dossier generation when extraction returns a disallowed or malformed domain.
+2. **Semantic empty-result signalling** – `similar_companies_level1` reports `status="no_candidates"` for empty results and `DossierResearchAgent` emits `status="insufficient_context"` when no summary or sources are produced.
+3. **Atomic, schema-validated persistence** – all JSON writes for caches, indices, and research artefacts flow through the shared `atomic_write_json` helper to prevent corrupt state files.
+
 ### Existing dossier branch logic
 
 When an organiser or company already has a vetted dossier, the internal research agent reuses the latest artefacts instead of performing a fresh crawl. The decision tree is:

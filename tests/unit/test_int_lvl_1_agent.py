@@ -137,9 +137,12 @@ async def test_ranked_results_are_limited_and_persisted(
     result = await tmp_agent.run(trigger)
 
     payload = result["payload"]
+    assert result["status"] == "completed"
+    assert payload["status"] == "completed"
     assert payload["company_name"] == "Example Analytics"
     assert payload["run_id"] == "run-123"
     assert payload["event_id"] == "evt-456"
+    assert payload["result_count"] == 2
 
     expected_path = (
         tmp_path
@@ -160,6 +163,8 @@ async def test_ranked_results_are_limited_and_persisted(
     artifact_path = Path(payload["artifact_path"])
     assert artifact_path.exists()
     saved = json.loads(artifact_path.read_text(encoding="utf-8"))
+    assert saved["status"] == "completed"
+    assert saved["result_count"] == 2
     assert saved["results"] == ranked
 
 
@@ -274,6 +279,30 @@ async def test_candidates_without_valid_properties_are_ignored(tmp_path: Path) -
     results = (await agent.run(trigger))["payload"]["results"]
 
     assert [item["id"] for item in results] == ["valid"]
+
+
+async def test_empty_results_set_no_candidates_status(tmp_path: Path) -> None:
+    agent = IntLvl1SimilarCompaniesAgent(
+        config=_Config(tmp_path),
+        hubspot_integration=_StubIntegration([]),
+        result_limit=3,
+    )
+
+    trigger = {
+        "payload": {"company_name": "Example Analytics", "description": "Analytics"}
+    }
+
+    result = await agent.run(trigger)
+    payload = result["payload"]
+
+    assert result["status"] == "no_candidates"
+    assert payload["status"] == "no_candidates"
+    assert payload["result_count"] == 0
+
+    artifact_path = Path(payload["artifact_path"])
+    saved = json.loads(artifact_path.read_text(encoding="utf-8"))
+    assert saved["status"] == "no_candidates"
+    assert saved["result_count"] == 0
 
 
 async def test_candidate_with_same_name_and_different_domain_retained(

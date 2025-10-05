@@ -175,6 +175,15 @@ class IntLvl1SimilarCompaniesAgent(BaseResearchAgent):
             payload.get("company_name") or payload.get("name") or ""
         )
         context["company_name_normalised"] = normalize_text(context["company_name"])
+
+        domain = (
+            payload.get("domain")
+            or payload.get("company_domain")
+            or payload.get("website")
+            or payload.get("company_website")
+        )
+        context["domain"] = domain or ""
+        context["domain_normalised"] = normalize_text(domain)
         for criteria_field in self._match_config.fields:
             raw_value = payload.get(criteria_field) or payload.get(
                 f"company_{criteria_field}"
@@ -232,6 +241,18 @@ class IntLvl1SimilarCompaniesAgent(BaseResearchAgent):
         if not normalised_name:
             return None
 
+        target_name = target_context.get("company_name_normalised", "")
+        candidate_domain_value = properties.get("domain") or properties.get("website")
+        candidate_domain_normalised = normalize_text(candidate_domain_value)
+        target_domain = target_context.get("domain_normalised", "")
+
+        if target_name and normalised_name == target_name:
+            if target_domain and candidate_domain_normalised:
+                if candidate_domain_normalised == target_domain:
+                    return None
+            else:
+                return None
+
         match_score, matched_fields = self._calculate_score(
             properties, target_context, normalised_name
         )
@@ -241,7 +262,7 @@ class IntLvl1SimilarCompaniesAgent(BaseResearchAgent):
             normalize_text(candidate.get("id")),
         )
 
-        domain = properties.get("domain") or properties.get("website") or ""
+        domain = candidate_domain_value or ""
 
         return {
             "id": candidate.get("id"),

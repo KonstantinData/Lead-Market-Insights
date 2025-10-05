@@ -5,25 +5,6 @@
   "generated_at": "01.01.2024 13:00 CET",
   "results": [
     {
-      "id": "1",
-      "name": "Example Analytics",
-      "domain": "example.com",
-      "score": 10.0,
-      "matching_fields": [
-        "description",
-        "name",
-        "product",
-        "segment"
-      ],
-      "properties": {
-        "name": "Example Analytics",
-        "segment": "Enterprise",
-        "product": "Insight Platform",
-        "description": "Predictive analytics tools for marketing departments.",
-        "domain": "example.com"
-      }
-    },
-    {
       "id": "2",
       "name": "Example Insights",
       "domain": "insights.example",
@@ -38,6 +19,22 @@
         "product": "Insight Platform",
         "description": "Analytics for marketing and sales teams.",
         "domain": "insights.example"
+      }
+    },
+    {
+      "id": "3",
+      "name": "Example Services",
+      "domain": "services.example",
+      "score": 3.0,
+      "matching_fields": [
+        "segment"
+      ],
+      "properties": {
+        "name": "Example Services",
+        "segment": "Enterprise",
+        "product": "Support Suite",
+        "description": "Customer success tooling.",
+        "domain": "services.example"
       }
     }
   ]

@@ -196,16 +196,16 @@ Traces are exported with spans for the overall run (`workflow.run`) and each sub
 
 ### Deployment guidance
 
-Telemetry exporters default to the OTLP/gRPC protocol and honour the standard OpenTelemetry environment variables. The lightweight bootstrap in `main.py` only enables telemetry when one of `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, or `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` is defined. To stream metrics and traces to a local collector:
+Telemetry exporters default to the OTLP/gRPC protocol and honour the standard OpenTelemetry environment variables. The lightweight bootstrap in `main.py` only enables telemetry when one of `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, or `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` is defined. To stream traces to the local OpenTelemetry Collector that is bundled with this repository, start the docker-compose stack (the collector reads the config in [`observability/otel/collector-config.yml`](observability/otel/collector-config.yml)):
 
 ```bash
-docker run --rm -p 4317:4317 -p 4318:4318 otel/opentelemetry-collector:latest
+docker compose up otel-collector
 ```
 
-Then start the orchestrator with the OTLP endpoint configured (the collector listens on `4317` by default):
+The application container already exports traces to the Collector via HTTP (`/v1/traces`) using the default port `4318`. When running the orchestrator or other local scripts outside of Docker, point `OTEL_EXPORTER_OTLP_ENDPOINT` at the collector service:
 
 ```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 python -m agents.workflow_orchestrator
 ```
 

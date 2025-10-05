@@ -1,40 +1,19 @@
-version: "3.9"
+receivers:
+  otlp:
+    protocols:
+      http:
+      grpc:
 
-services:
-  leadmi:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: leadmi
-    depends_on:
-      - otel-collector
-    environment:
-      - APP_ENV=local  # Notes: same env var for app & telemetry
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./log_storage:/app/log_storage
-    restart: always
+processors:
+  batch: {}
 
-  otel-collector:
-    image: otel/opentelemetry-collector:0.136.0
-    container_name: otel-collector
-    environment:
-      - APP_ENV=local  # Notes: used in otel-config.yaml -> deployment.environment
-    command: ["--config", "/etc/otel/config.yaml"]
-    volumes:
-      - ./otel-config.yaml:/etc/otel/config.yaml:ro
-    ports:
-      - "4317:4317"  # gRPC OTLP
-      - "4318:4318"  # HTTP OTLP
-      - "13133:13133" # Health endpoint
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:13133/healthz"]
-      interval: 15s
-      retries: 3
-    restart: unless-stopped
+exporters:
+  logging:
+    loglevel: info
 
-networks:
-  default:
-    name: leadmi-network
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [logging]

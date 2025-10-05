@@ -41,6 +41,22 @@ async def test_configure_observability_reuses_existing_tracer():
     importlib.reload(observability)
 
 
+async def test_configure_observability_metrics_disabled(monkeypatch):
+    importlib.reload(observability)
+
+    monkeypatch.setenv("OTEL_METRICS_EXPORTER", "none")
+
+    with mock.patch.object(observability, "_reset_instruments") as reset_mock:
+        observability.configure_observability(force=True)
+
+    assert reset_mock.call_count == 0
+    assert observability._meter_provider is None
+    assert observability._run_counter is None
+    assert observability._latency_histogram is None
+
+    importlib.reload(observability)
+
+
 class DummyEventAgent:
     def __init__(self, events: Iterable[Dict[str, Any]]):
         self._events = list(events)

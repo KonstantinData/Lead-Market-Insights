@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import contextvars
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -109,6 +110,17 @@ class _NoopSpan:
 Span = OtelSpan
 
 
+_METRICS_DISABLED_VALUES = {
+    "none",
+    "no",
+    "false",
+    "off",
+    "0",
+    "disable",
+    "disabled",
+}
+
+
 @dataclass
 class RunContext:
     """Runtime context for a workflow run."""
@@ -196,10 +208,18 @@ def configure_observability(
 
     _install_log_record_factory()
 
+    metrics_disabled = False
+    metrics_env_value = os.getenv("OTEL_METRICS_EXPORTER")
+    if metrics_env_value is not None:
+        metrics_disabled = metrics_env_value.strip().lower() in _METRICS_DISABLED_VALUES
+
     if not _OTEL_AVAILABLE:
         _tracer_provider = None
         _meter_provider = None
-        _reset_instruments()
+        if metrics_disabled:
+            _clear_instruments()
+        else:
+            _reset_instruments()
         _configured = True
         return
 
@@ -238,7 +258,7 @@ def configure_observability(
         trace.set_tracer_provider(_tracer_provider)
 
     reader = metric_reader
-    if reader is None and OTLPMetricExporter is not None:
+    if not metrics_disabled and reader is None and OTLPMetricExporter is not None:
         try:
             metric_exporter = OTLPMetricExporter()
             reader = PeriodicExportingMetricReader(metric_exporter)
@@ -246,7 +266,7 @@ def configure_observability(
             _logger.warning("Failed to initialise OTLP metric exporter: %s", exc)
             reader = None
 
-    if MeterProvider is not None:
+    if MeterProvider is not None and not metrics_disabled:
         if reader is not None:
             _meter_provider = MeterProvider(resource=resource, metric_readers=[reader])
         else:
@@ -256,7 +276,10 @@ def configure_observability(
     else:
         _meter_provider = None
 
-    _reset_instruments()
+    if metrics_disabled:
+        _clear_instruments()
+    else:
+        _reset_instruments()
 
     _configured = True
 
@@ -500,6 +523,18 @@ def _record_operation_latency(
     if attributes:
         metric_attributes.update(attributes)
     _latency_histogram.record(duration_ms, attributes=metric_attributes)
+
+
+def _clear_instruments() -> None:
+    global _run_counter, _trigger_counter, _hitl_counter, _latency_histogram
+    global _cost_spend_counter, _cost_event_counter
+
+    _run_counter = None
+    _trigger_counter = None
+    _hitl_counter = None
+    _latency_histogram = None
+    _cost_spend_counter = None
+    _cost_event_counter = None
 
 
 def _reset_instruments() -> None:

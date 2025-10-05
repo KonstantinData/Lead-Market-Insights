@@ -101,7 +101,7 @@ def stub_agent_registry(isolated_agent_registry):
             return {
                 "info": {
                     "company_name": "Example Co",
-                    "web_domain": "example.com",
+                    "web_domain": "example.ai",
                 },
                 "is_complete": True,
                 "confidence": 0.9,

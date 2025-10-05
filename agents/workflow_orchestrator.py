@@ -6,7 +6,6 @@ the run id before instantiation to guarantee consistent telemetry correlation.
 """
 
 import asyncio
-import json
 import logging
 import signal
 import time
@@ -37,6 +36,7 @@ from utils.observability import (
     flush_telemetry,
     workflow_run,
 )
+from utils.persistence import atomic_write_json
 from utils.reporting import convert_research_artifacts_to_pdfs
 from utils.workflow_steps import workflow_step_recorder  # NEU
 
@@ -631,10 +631,7 @@ class WorkflowOrchestrator:
                 sanitized_entry["pdf_artifacts"] = pdf_artifacts
             sanitized.append(sanitized_entry)
 
-        summary_path.write_text(
-            json.dumps(sanitized, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        atomic_write_json(summary_path, sanitized)
         logger.info(
             "Stored research summary for run %s at %s",
             run_id,

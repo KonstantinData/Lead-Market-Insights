@@ -6,7 +6,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Mapping, MutableMapping, Optional
 
 from agents.factory import create_agent
 from agents.human_in_loop_agent import DossierConfirmationBackendUnavailable
@@ -45,6 +45,13 @@ from utils.negative_cache import NegativeEventCache
 from utils.processed_event_cache import ProcessedEventCache
 from utils.pii import mask_pii
 from utils.trigger_loader import load_trigger_words
+from utils.validation import (
+    InvalidExtractionError,
+    finalize_dossier,
+    normalize_domain,
+    normalize_similar_companies,
+    validate_extraction_or_raise,
+)
 from utils.workflow_steps import workflow_step_recorder  # NEU
 
 logger = logging.getLogger("MasterWorkflowAgent")
@@ -359,8 +366,17 @@ class MasterWorkflowAgent:
             internal_status = None
             internal_result = None
 
+            has_research_inputs = self._has_research_inputs(normalised_info)
+            if has_research_inputs:
+                try:
+                    self._validate_extraction_inputs(
+                        normalised_info, event_result, event_id
+                    )
+                except InvalidExtractionError:
+                    continue
+
             # Verhindere doppelten internen Research bei Hard Trigger + vollständigen Daten:
-            if self._has_research_inputs(normalised_info) and not (
+            if has_research_inputs and not (
                 is_complete and trigger_result.get("type") == "hard"
             ):
                 internal_result = await self._run_internal_research(
@@ -857,6 +873,57 @@ class MasterWorkflowAgent:
     def _has_research_inputs(self, info: Dict[str, Any]) -> bool:
         return bool(info.get("company_name")) and bool(info.get("company_domain"))
 
+    def _validate_extraction_inputs(
+        self,
+        info: Mapping[str, Any],
+        event_result: Dict[str, Any],
+        event_id: Optional[Any],
+    ) -> None:
+        try:
+            validate_extraction_or_raise(info)
+        except InvalidExtractionError as exc:
+            domain = normalize_domain(
+                info.get("company_domain")
+                or info.get("web_domain")
+                or info.get("domain")
+            )
+            event_result.setdefault("research_errors", []).append(
+                {
+                    "type": "invalid_domain",
+                    "event_id": event_id,
+                    "domain": domain or None,
+                    "message": str(exc),
+                }
+            )
+            event_result["status"] = "invalid_extraction_inputs"
+            logger.warning(
+                "Extraction validation failed for event %s: %s", event_id, exc
+            )
+            raise
+
+    def _guard_before_crm_dispatch(self, research_store: MutableMapping[str, Any]) -> None:
+        for key in ("similar_companies", "similar_companies_level1"):
+            result = research_store.get(key)
+            if not isinstance(result, MutableMapping):
+                continue
+            payload = result.get("payload")
+            if isinstance(payload, MutableMapping):
+                normalised_payload = normalize_similar_companies(payload)
+                result["payload"] = normalised_payload
+                result["status"] = normalised_payload.get(
+                    "status", result.get("status")
+                )
+
+        dossier_result = research_store.get("dossier_research")
+        if isinstance(dossier_result, MutableMapping):
+            payload = dossier_result.get("payload")
+            if isinstance(payload, MutableMapping):
+                normalised_payload = finalize_dossier(payload)
+                dossier_result["payload"] = normalised_payload
+                dossier_result["status"] = normalised_payload.get(
+                    "status", dossier_result.get("status")
+                )
+
     def _build_research_trigger(
         self,
         event: Dict[str, Any],
@@ -1093,6 +1160,11 @@ class MasterWorkflowAgent:
             event_result["status"] = "missing_research_inputs"
             return
 
+        try:
+            self._validate_extraction_inputs(prepared_info, event_result, event_id)
+        except InvalidExtractionError:
+            return
+
         internal_result = await self._run_internal_research(
             event_result,
             event,
@@ -1116,6 +1188,10 @@ class MasterWorkflowAgent:
             event_id,
             requires_dossier=requires_dossier,
         )
+
+        research_store = event_result.get("research")
+        if isinstance(research_store, MutableMapping):
+            self._guard_before_crm_dispatch(research_store)
 
         crm_payload = dict(prepared_info)
         if event_result.get("research"):

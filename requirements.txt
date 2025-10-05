@@ -24,6 +24,7 @@ tenacity>=9.0,<10.0
 # YAML/JSON utilities
 PyYAML>=6.0,<7.0              # For config or template files
 orjson>=3.9,<4.0              # Fast JSON (optional, for performance)
+pydantic>=2.7,<3.0            # Schema validation for persisted state
 
 # Data manipulation
 pandas>=2.2,<3.0              # For any advanced data processing, reporting, or enrichment

@@ -37,5 +37,7 @@
         "domain": "services.example"
       }
     }
-  ]
+  ],
+  "status": "completed",
+  "result_count": 2
 }

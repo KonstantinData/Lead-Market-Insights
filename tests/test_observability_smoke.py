@@ -115,7 +115,7 @@ class DummyHumanAgent:
     ) -> Dict[str, Any]:
         extracted.setdefault("info", {})
         extracted["info"]["company_name"] = "Example Corp"
-        extracted["info"]["web_domain"] = "example.com"
+        extracted["info"]["web_domain"] = "example.ai"
         extracted["is_complete"] = True
         extracted["audit_id"] = "audit-info"
         return extracted

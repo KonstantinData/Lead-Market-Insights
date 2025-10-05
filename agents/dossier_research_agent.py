@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from collections import OrderedDict
 from datetime import datetime, timezone
@@ -14,6 +13,8 @@ from agents.factory import register_agent
 from agents.interfaces import BaseResearchAgent
 from config.config import settings
 from utils.datetime_formatting import format_report_datetime
+from utils.persistence import atomic_write_json
+from utils.validation import finalize_dossier
 
 
 class DossierResearchAgent(BaseResearchAgent):
@@ -67,13 +68,17 @@ class DossierResearchAgent(BaseResearchAgent):
         run_id = self._resolve_run_id(trigger, payload)
         event_id = self._resolve_event_id(trigger, payload, run_id)
 
-        dossier_payload = self._build_dossier_payload(payload, run_id, event_id)
+        dossier_payload = finalize_dossier(
+            self._build_dossier_payload(payload, run_id, event_id)
+        )
         artifact_path = self._persist_output(run_id, event_id, dossier_payload)
+
+        status = dossier_payload.get("status", "completed")
 
         return OrderedDict(
             (
                 ("source", "dossier_research"),
-                ("status", "completed"),
+                ("status", status),
                 ("agent", "dossier_research"),
                 ("artifact_path", str(artifact_path)),
                 ("payload", dossier_payload),
@@ -196,10 +201,7 @@ class DossierResearchAgent(BaseResearchAgent):
 
         filename = f"{event_id}_company_detail_research.json"
         artifact_path = run_dir / filename
-        artifact_path.write_text(
-            json.dumps(dossier_payload, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        atomic_write_json(artifact_path, dossier_payload)
         return artifact_path
 
 

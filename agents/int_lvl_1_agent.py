@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -22,9 +21,11 @@ from typing import (
 from agents.factory import register_agent
 from agents.interfaces import BaseResearchAgent
 from config.config import settings
-from utils.datetime_formatting import format_report_datetime
 from integration.hubspot_integration import HubSpotIntegration
+from utils.datetime_formatting import format_report_datetime
+from utils.persistence import atomic_write_json
 from utils.text_normalization import normalize_text
+from utils.validation import normalize_similar_companies
 
 
 def _tokenize(text: str) -> List[str]:
@@ -127,13 +128,15 @@ class IntLvl1SimilarCompaniesAgent(BaseResearchAgent):
         ranked_results = self._rank_candidates(candidates, target_context)
 
         limited_results = ranked_results[: self._result_limit]
-        artifact_payload = {
-            "company_name": target_context["company_name"],
-            "run_id": run_id or None,
-            "event_id": event_id or None,
-            "generated_at": format_report_datetime(datetime.now(timezone.utc)),
-            "results": limited_results,
-        }
+        artifact_payload = normalize_similar_companies(
+            {
+                "company_name": target_context["company_name"],
+                "run_id": run_id or None,
+                "event_id": event_id or None,
+                "generated_at": format_report_datetime(datetime.now(timezone.utc)),
+                "results": limited_results,
+            }
+        )
 
         artifact_path = self._persist_artifact(
             artifact_payload,
@@ -141,17 +144,15 @@ class IntLvl1SimilarCompaniesAgent(BaseResearchAgent):
             event_id=event_id or None,
         )
 
+        result_payload = dict(artifact_payload)
+        result_payload["artifact_path"] = artifact_path.as_posix()
+        status = result_payload.get("status", "completed")
+
         return {
             "source": "similar_companies_level1",
-            "status": "completed",
+            "status": status,
             "agent": "similar_companies_level1",
-            "payload": {
-                "company_name": target_context["company_name"],
-                "run_id": run_id or None,
-                "event_id": event_id or None,
-                "results": limited_results,
-                "artifact_path": artifact_path.as_posix(),
-            },
+            "payload": result_payload,
         }
 
     # ------------------------------------------------------------------
@@ -352,8 +353,7 @@ class IntLvl1SimilarCompaniesAgent(BaseResearchAgent):
         filename = f"similar_companies_level1_{event_identifier}.json"
         artifact_path = run_dir / filename
 
-        serialised = json.dumps(payload, indent=2, ensure_ascii=False)
-        artifact_path.write_text(serialised, encoding="utf-8")
+        atomic_write_json(artifact_path, payload)
 
         return artifact_path
 

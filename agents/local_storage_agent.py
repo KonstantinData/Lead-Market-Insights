@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import Dict, Optional
+
+from utils.persistence import RunsIndexEntry, atomic_write_json
 
 
 Metadata = Dict[str, object]
@@ -99,24 +98,10 @@ class LocalStorageAgent:
                 )
                 existing = []
 
-        # Replace previous entries for the same run_id to keep the index tidy.
         existing = [item for item in existing if item.get("run_id") != run_id]
         existing.append(entry)
 
-        with NamedTemporaryFile(
-            "w", encoding="utf-8", dir=self.base_dir, delete=False
-        ) as handle:
-            temp_path = Path(handle.name)
-            json.dump(existing, handle, ensure_ascii=False, indent=2)
-            handle.flush()
-            os.fsync(handle.fileno())
-
-        try:
-            temp_path.replace(self._index_file)
-        except Exception:
-            with suppress(FileNotFoundError):
-                temp_path.unlink()
-            raise
+        atomic_write_json(self._index_file, existing, model=RunsIndexEntry)
 
         self.logger.info("Recorded run %s in index with log %s", run_id, log_reference)
 
@@ -156,7 +141,4 @@ class LocalStorageAgent:
         return {k: int(v) for k, v in raw.items()}
 
     def _write_failure_state(self, state: Dict[str, int]) -> None:
-        self._failure_state_file.write_text(
-            json.dumps(state, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        atomic_write_json(self._failure_state_file, state)

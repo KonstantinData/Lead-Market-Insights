@@ -51,7 +51,7 @@ async def test_taskgroup_cancels_parallel_tasks_on_failure() -> None:
 
     event_result: Dict[str, Any] = {"research": {}}
     event: Dict[str, Any] = {"id": "evt-123"}
-    info = {"company_name": "Example", "company_domain": "example.com"}
+    info = {"company_name": "Example", "company_domain": "example.ai"}
 
     with pytest.raises(ExceptionGroup) as exc_info:
         await agent._execute_precrm_research(  # type: ignore[attr-defined]

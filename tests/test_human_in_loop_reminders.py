@@ -66,7 +66,7 @@ async def test_pending_confirmation_triggers_reminders(tmp_path) -> None:
         "summary": "Pending dossier",
         "organizer": {"email": "organizer@example.com", "displayName": "Org"},
     }
-    info = {"company_name": "Example Corp", "web_domain": "example.com"}
+    info = {"company_name": "Example Corp", "web_domain": "example.ai"}
 
     response = agent.request_dossier_confirmation(event, info)
     assert response["status"] == "pending"

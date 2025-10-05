@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from unittest.mock import MagicMock
@@ -94,20 +95,18 @@ def test_record_run_writes_index_atomically(storage_agent, monkeypatch):
     log_path.write_text("{}", encoding="utf-8")
 
     replace_calls: list[tuple[Path, Path]] = []
-    path_cls = type(storage_agent._index_file)
-    original_replace = path_cls.replace
 
-    def tracking_replace(self, target):
-        # Ensure the temporary file already contains valid JSON before swap.
-        json.loads(Path(self).read_text(encoding="utf-8"))
-        replace_calls.append((Path(self), Path(target)))
-        return original_replace(self, target)
+    def tracking_replace(source: str | Path, target: str | Path) -> None:
+        json.loads(Path(source).read_text(encoding="utf-8"))
+        replace_calls.append((Path(source), Path(target)))
+        original_replace(source, target)
 
-    monkeypatch.setattr(path_cls, "replace", tracking_replace)
+    original_replace = os.replace
+    monkeypatch.setattr(os, "replace", tracking_replace)
 
     storage_agent.record_run("run-atomic", log_path)
 
-    assert replace_calls, "Expected Path.replace to be used for atomic swap"
+    assert replace_calls, "Expected os.replace to be used for atomic swap"
     temp_path, target_path = replace_calls[-1]
     assert target_path == storage_agent._index_file
     assert temp_path != storage_agent._index_file

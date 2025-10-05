@@ -34,5 +34,6 @@
       "https://example.com/press",
       "https://news.example.com/article"
     ]
-  }
+  },
+  "status": "completed"
 }

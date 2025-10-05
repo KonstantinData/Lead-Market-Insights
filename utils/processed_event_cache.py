@@ -13,6 +13,20 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 
+SIGNIFICANT_EVENT_FIELDS = (
+    "summary",
+    "description",
+    "location",
+    "eventType",
+    "creator",
+    "organizer",
+    "conferenceData",
+    "attachments",
+    "attendees",
+    "extendedProperties",
+)
+
+
 @dataclass
 class ProcessedEventCache:
     """Stores fingerprints of events that have been dispatched."""
@@ -64,13 +78,16 @@ class ProcessedEventCache:
         if not isinstance(event_id, str) or not event_id:
             return False
 
-        fingerprint, _ = self._fingerprint(event)
+        fingerprint, updated = self._fingerprint(event)
         entry = self.entries.get(event_id)
         if not entry:
             return False
 
         if entry.get("fingerprint") == fingerprint:
-            return bool(entry.get("updated"))
+            if updated and entry.get("updated") != updated:
+                entry["updated"] = updated
+                self.dirty = True
+            return bool(entry.get("updated") or updated)
 
         # Payload changed since last dispatch; forget cached fingerprint so the
         # event will be processed again.
@@ -130,10 +147,13 @@ class ProcessedEventCache:
         else:
             updated_str = None
 
-        summary = self._normalise_text(event.get("summary"))
-        description = self._normalise_text(event.get("description"))
+        payload_segments = [event_id]
+        for key in SIGNIFICANT_EVENT_FIELDS:
+            payload_segments.append(
+                f"{key}:{self._normalise_structure(event.get(key))}"
+            )
 
-        base = f"{event_id}|{updated_str or '-'}|{summary}|{description}"
+        base = "|".join(payload_segments)
         fingerprint = hashlib.sha1(base.encode("utf-8")).hexdigest()
         return fingerprint, updated_str
 
@@ -142,3 +162,26 @@ class ProcessedEventCache:
         if value is None:
             return ""
         return str(value).strip().lower()
+
+    @classmethod
+    def _normalise_structure(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return cls._normalise_text(value)
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, (int, float)):
+            return str(value)
+        if isinstance(value, dict):
+            items = []
+            for key in sorted(value.keys(), key=str):
+                items.append(
+                    f"{cls._normalise_text(key)}:{cls._normalise_structure(value[key])}"
+                )
+            return "{" + "|".join(items) + "}"
+        if isinstance(value, (list, tuple, set)):
+            parts = [cls._normalise_structure(item) for item in value]
+            parts.sort()
+            return "[" + "|".join(parts) + "]"
+        return cls._normalise_text(value)

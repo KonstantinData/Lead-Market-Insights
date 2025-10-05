@@ -79,7 +79,7 @@ async def _run_once(run_id: str) -> None:
 
 
 async def _daemon_loop(
-    *, interval: int = 300, prepare_run: Callable[[], str], initial_run_id: str
+    *, interval: int = 3600, prepare_run: Callable[[], str], initial_run_id: str
 ) -> None:
     log = logging.getLogger(__name__)
     run_id = initial_run_id
@@ -126,7 +126,7 @@ async def _async_main() -> None:
     if run_mode == "oneshot":
         await _run_once(run_id)
     else:
-        interval = int(os.getenv("LEADMI_DAEMON_INTERVAL", "300"))
+        interval = int(os.getenv("LEADMI_DAEMON_INTERVAL", "3600"))
         await _daemon_loop(
             interval=interval, prepare_run=_assign_new_run_id, initial_run_id=run_id
         )

@@ -1,47 +1,44 @@
 # HubSpot-Dossier-Workflow – Auditbericht
 
 ## 1) Executive Summary
-- Prüfbasis war die vom Auftraggeber bereitgestellte Spezifikation (HubSpot-gestützter Dossier-Entscheidungsbaum) gegenüber der implementierten Logik in allen beteiligten Agents und Services.【F:agents/internal_research_agent.py†L70-L553】【F:agents/master_workflow_agent.py†L360-L1563】【F:agents/human_in_loop_agent.py†L31-L720】【F:integration/hubspot_integration.py†L15-L232】
-- Der `InternalResearchAgent` liefert HubSpot-Ergebnisse samt `company_in_crm` und `attachments_in_crm`, persistiert Artefakte unter `log_storage/run_history/research/artifacts/internal_research`, erfüllt damit die Spezifikationsteile 1–1.2.【F:agents/internal_research_agent.py†L70-L160】【F:agents/internal_research_agent.py†L445-L553】
-- Der `MasterWorkflowAgent` differenziert Hard-/Soft-Trigger, stößt HITL-E-Mails an und leitet bei negativen Entscheidungen den Workflow korrekt aus, jedoch werden Attachments-Prüfungen nach Soft→Hard-Eskalation übersprungen (DEVIATION).【F:agents/master_workflow_agent.py†L360-L700】【F:agents/master_workflow_agent.py†L1260-L1330】
-- Human-in-the-loop-Kommunikation nutzt generische Texte mit Reminder-Logik (4h/24h/48h), erfüllt den HITL-Grundsatz, deckt aber nicht alle spezifizierten Platzhalter (z. B. Zeitzone) ab und adressiert unklare Company-/Domainfälle nur implizit (GAP).【F:agents/human_in_loop_agent.py†L31-L720】
-- Logging- und Artefaktablagen entsprechen der geforderten Verzeichnisstruktur unter `log_storage/run_history`, einschließlich Workflow-Logs, Agent-Logs, Artefakten und State-Dateien.【F:config/config.py†L251-L483】【F:docs/run_history_file_map.md†L1-L58】
-- Edge-Cases wie fehlender HubSpot-Zugriff, fehlendes Email-Backend oder Organizer ohne Mail werden erkannt und führen zu defensiven Statuswerten (`crm_lookup_skipped`, `dossier_backend_unavailable`, Reminder-Abbruch).【F:agents/internal_research_agent.py†L472-L522】【F:agents/master_workflow_agent.py†L1288-L1319】【F:agents/human_in_loop_agent.py†L588-L675】
-- Offene Punkte: (1) Soft-Trigger, die zu Hard eskalieren, umgehen die geforderte Attachments-Bestätigung; (2) HITL-Templates liefern nicht alle verlangten Kontextfelder; (3) Rückfragen bei unklaren Firmendaten erfolgen ohne dedizierte Klärungs-Prompts. Diese Punkte sind als GAP/DEVIATION gekennzeichnet.
+- Grundlage der Prüfung war die vom Auftraggeber gelieferte Spezifikation zu HubSpot-basierten Dossier-Entscheidungen; ausgewertet wurden interne Recherche, Master-Workflow, HITL-Kommunikation und Persistenzpfade.【F:agents/internal_research_agent.py†L70-L167】【F:agents/master_workflow_agent.py†L300-L1567】【F:agents/human_in_loop_agent.py†L31-L720】【F:config/config.py†L250-L520】
+- Der InternalResearchAgent ruft HubSpot auf, liefert `company_in_crm`/`attachments_in_crm`, legt Nachbarschafts- und Matching-Artefakte im Run-Verzeichnis ab und protokolliert alle Schritte im Workflow-Log – damit erfüllt er Spezifikationspunkt 1 mit robuster Fehlerbehandlung bei Integrationsausfällen.【F:agents/internal_research_agent.py†L54-L167】【F:agents/internal_research_agent.py†L466-L553】
+- Der MasterWorkflowAgent differenziert Hard-/Soft-Trigger, führt fehlende Pflichtdaten per HITL nach, stößt bei Attachments eine manuelle Prüfung an und orchestriert Dossier- sowie Similar-Research inklusive CRM-Dispatch; Soft→Hard-Eskalationen überspringen jedoch die geforderte erneute Attachments-Prüfung (DEVIATION).【F:agents/master_workflow_agent.py†L360-L700】【F:agents/master_workflow_agent.py†L1236-L1405】
+- HumanInLoopAgent generiert E-Mails mit englischen Textbausteinen, Reminder-Kaskade (4h/24h/48h) und Audit-Logging, deckt aber nicht alle verlangten Platzhalter wie Zeitzone, CRM-Link oder Run-ID ab und nutzt bei fehlenden Company-/Domain-Daten nur generische Rückfragen (GAP).【F:agents/human_in_loop_agent.py†L86-L445】【F:agents/human_in_loop_agent.py†L520-L675】
+- Persistenz erfüllt die geforderten Verzeichnisse `log_storage/run_history/...` für Agent-Logs, Research-Artefakte, Workflow-Logs, Cache-Dateien und Run-Index; Orchestrator speichert zusätzlich ein `workflow_runs/<run_id>/summary.json` Manifest.【F:config/config.py†L250-L520】【F:agents/local_storage_agent.py†L65-L106】【F:agents/workflow_orchestrator.py†L611-L637】
+- Edge-Cases wie fehlender HubSpot-Zugriff, 429/Timeout, unkonfiguriertes E-Mail-Backend oder fehlende Organizer-Adresse resultieren in defensiven Statuswerten (`crm_lookup_skipped`, `dossier_backend_unavailable`, Reminder-Stopp) – Timeout ohne Antwort bleibt dauerhaft `pending` und benötigt manuelle Nacharbeit (GAP).【F:agents/internal_research_agent.py†L472-L553】【F:integration/hubspot_integration.py†L180-L257】【F:agents/master_workflow_agent.py†L1269-L1319】【F:agents/human_in_loop_agent.py†L588-L675】
 
 ## 2) Terminologie & Feld-Mapping
-| Spezifikation | Implementierter Feldname | Beschreibung / Quelle |
+| Spezifikation | Implementierte Felder | Beschreibung & Quelle |
 | --- | --- | --- |
-| `trigger` (`hart`/`soft`) | `trigger_result["type"]` ("hard"/"soft") | Ermittelt durch `MasterWorkflowAgent._detect_trigger` aus dem Trigger-Agent.【F:agents/master_workflow_agent.py†L360-L520】 |
-| `company` (`True`/`False`) | `company_in_crm` | Setzt der InternalResearchAgent nach HubSpot-Lookup.【F:agents/internal_research_agent.py†L524-L553】 |
-| `Attachement` (`True`/`False`) | `attachments_in_crm` | Ebenfalls HubSpot-Lookup, standardisierte Schreibweise in Payloads.【F:agents/internal_research_agent.py†L524-L553】 |
-| Zusammenfassung | `crm_lookup` | Struktur mit `company_in_crm`, `attachments_in_crm`, `requires_dossier`, `attachments`, `attachment_count`, `company`.【F:agents/internal_research_agent.py†L524-L553】 |
-| Weiterleitungsflag | `requires_dossier` | Ableitung `not (company_in_crm and attachments_in_crm)`; vom Master-Agent überschreibbar.【F:agents/internal_research_agent.py†L531-L553】【F:agents/master_workflow_agent.py†L1528-L1537】 |
-| Firmenname | `company_name` | Aus Extraktion/Normalisierung; Pflichtfeld für Dossier-Research.【F:agents/master_workflow_agent.py†L360-L520】【F:agents/dossier_research_agent.py†L36-L120】 |
-| Domain | `company_domain` (`web_domain`) | Normalisiert, ggf. via Domain-Resolver; notwendig für HubSpot.【F:agents/master_workflow_agent.py†L360-L520】【F:agents/internal_research_agent.py†L472-L553】 |
-| Event-/Run-Kontext | `event_id`, `run_id` | Von Master-Agent gesetzt, für Logs & Artefakte genutzt.【F:agents/master_workflow_agent.py†L108-L205】【F:agents/dossier_research_agent.py†L58-L120】 |
-| HITL Status | `status` ∈ {`pending`,`approved`,`declined`,`skipped`} | Normalisiert durch HumanInLoopAgent nach Backend-Antwort.【F:agents/human_in_loop_agent.py†L200-L500】 |
-| HITL Ergebnis | `requires_dossier` / `dossier_required` | Boolesches Entscheidungsergebnis für Dossier-Fortsetzung.【F:agents/human_in_loop_agent.py†L200-L500】 |
-| Logging | `workflow_log_manager`, `local_storage_agent` | Persistenz der auditierbaren Schritte und Indizes.【F:logs/workflow_log_manager.py†L17-L59】【F:agents/local_storage_agent.py†L65-L106】 |
+| `trigger` ∈ {`hard`,`soft`} | `trigger_result["type"]` | Klassifikation des Trigger-Agents; Master verarbeitet Hart-/Soft-Zweige getrennt.【F:agents/master_workflow_agent.py†L300-L520】 |
+| `company` (`True`/`False`) | `company_in_crm` | HubSpot-Lookup liefert Flag im `crm_lookup` Payload.【F:agents/internal_research_agent.py†L466-L553】 |
+| `Attachement` | `attachments_in_crm` | Wird aus gefundenen HubSpot-Dateien abgeleitet (Liste `attachments`).【F:agents/internal_research_agent.py†L524-L551】 |
+| Meldung an Master | `crm_lookup` Block | Enthält `company_in_crm`, `attachments_in_crm`, `requires_dossier`, `attachments`, `attachment_count`, `company` und Artefaktpfade.【F:agents/internal_research_agent.py†L150-L163】【F:agents/internal_research_agent.py†L466-L553】 |
+| Weiterleitungsentscheidung | `requires_dossier` | Setzt InternalResearch (Default) bzw. Master (Override) und steuert Dossier-Research.【F:agents/internal_research_agent.py†L529-L553】【F:agents/master_workflow_agent.py†L1528-L1537】 |
+| Pflichtfelder | `company_name`, `company_domain` | Ergebnis der Extraktion/Normalisierung; fehlen sie, startet HITL `request_info`.【F:agents/master_workflow_agent.py†L355-L520】 |
+| Kontextfelder | `event_id`, `run_id`, `attachments`, `attachment_count` | Vom Master gesetzt, damit Sub-Agenten persistente Artefakte korrekt benennen.【F:agents/master_workflow_agent.py†L1188-L1330】 |
+| HITL-Ergebnis | `dossier_required`, `status` (`approved`,`declined`,`pending`,`skipped`) | HumanInLoop normalisiert Antworten und triggert Reminder bei `pending`.【F:agents/human_in_loop_agent.py†L200-L445】 |
 
-Zusätzliche optionale Felder (Quelle Event, HubSpot oder Settings): `meeting_start`, `meeting_end`, `timezone` (derzeit nicht im Template), `organizer_email`, `attendee_emails`, `audit_id`, `run_directory`, `attachments` (Liste der HubSpot-Dateien).【F:agents/master_workflow_agent.py†L1332-L1398】【F:agents/human_in_loop_agent.py†L300-L445】
+Optionale Felder gemäß Implementierung: `meeting_start`/`meeting_end` (`context.event_start/.event_end`), `timezone` (Event-Feld, derzeit nicht ausgegeben), `organizer_email`/`organizer_name` (aus `organizer`/`creator`), `attendee_emails` (Event), `audit_id`, `crm_company_link` (nicht gesetzt), `run_id`, `attachments` (HubSpot-Associations).【F:agents/master_workflow_agent.py†L1332-L1398】【F:agents/human_in_loop_agent.py†L350-L445】
 
 ## 3) Vollständige Entscheidungs-/Varianten-Matrix (1:1 zur Spezifikation)
-| Bedingung | Aktion Master-Agent | Sub-Agenten (Reihenfolge) | HITL? (Grund) | Outcome | Artefakte/Logs |
+| Bedingung | Aktion Master-Agent | Sub-Agenten (Reihenfolge) | HITL? / Grund | Outcome | Artefakte & Logs |
 | --- | --- | --- | --- | --- | --- |
-| Hard, `company_in_crm=True`, `attachments_in_crm=False` | Direkt `_process_crm_dispatch` mit `requires_dossier_override=True` (Dossier zwingend) | InternalResearch → (optional) SimilarCompanies → DossierResearch → CRM-Agent | Nein (keine Attachments) | Workflow läuft weiter, CRM-Dispatch & Dossier-Erstellung | `research/artifacts/internal_research/<run_id>/…`, `dossier_research/<run_id>/<event_id>_…json`, Workflow-Log `research.dossier_research` & `crm_dispatch` |【F:agents/master_workflow_agent.py†L360-L700】【F:agents/master_workflow_agent.py†L1260-L1330】【F:agents/master_workflow_agent.py†L1500-L1563】【F:docs/run_history_file_map.md†L11-L21】
-| Hard, `company_in_crm=True`, `attachments_in_crm=True` | HITL-Anfrage `attachments_review`, Entscheidung steuert weiteres Vorgehen | InternalResearch → HumanInLoop → (bei Zustimmung) `_process_crm_dispatch` | Ja, Grund „Attachments vorhanden“ | Zustimmung → weiter; Ablehnung → Ende mit Status `attachments_review_declined`; Pending → Warten | HITL-Audit (`log_storage/run_history/workflows/<run_id>.jsonl`), Reminder-Logs, evtl. Dossier-Artefakte |【F:agents/master_workflow_agent.py†L1260-L1330】【F:agents/human_in_loop_agent.py†L200-L720】【F:docs/run_history_file_map.md†L53-L58】
-| Hard, `company_in_crm=False` (Attachments zwangsläufig False) | `_process_crm_dispatch` mit Dossierpflicht | InternalResearch → DossierResearch → CRM-Agent | Nein | Workflow geht weiter (Dossier) | Artefakte wie oben, CRM-Payload mit `requires_dossier=True` |【F:agents/master_workflow_agent.py†L360-L700】【F:agents/master_workflow_agent.py†L1260-L1330】
-| Soft, vollständige Daten, Organizer sagt **Ja** | HITL `soft_trigger_confirmation`, danach `_handle_hard_trigger` mit `converted_from_soft=True` (DEVIATION: Attachments-Review entfällt) | InternalResearch → HumanInLoop → (bei Zustimmung) `_process_crm_dispatch` | Ja, Grund „Trigger soft“ | Workflow weiter; Dossier immer gestartet (`requires_dossier_override=True`) | HITL-/Reminder-Logs, Dossier-Artefakte, CRM-Payload |【F:agents/master_workflow_agent.py†L1332-L1400】【F:agents/master_workflow_agent.py†L1260-L1330】
-| Soft, vollständige Daten, Organizer sagt **Nein** | HITL, Ergebnis `dossier_declined`, kein weiterer Dispatch | InternalResearch → HumanInLoop | Ja | Workflow endet (Status `dossier_declined`) | Workflow-Logeintrag `hitl_dossier_declined`, kein neues Artefakt |【F:agents/master_workflow_agent.py†L1332-L1400】
-| Soft, unvollständige Daten (B-Fall), Organizer sagt **Ja** | HITL `soft_trigger_confirmation` → bei Zustimmung zusätzlicher HITL `request_info` → `_process_crm_dispatch` (DEVIATION: Attachments-Review wird nach Konversion übersprungen) | InternalResearch? (wenn möglich) → HumanInLoop (Soft) → HumanInLoop (Missing Info) → InternalResearch (force=True) → DossierResearch | Zwei HITLs (Entscheidung + Missing Info) | Workflow weiter, Dossier wird erstellt | HITL-Audit + `missing_info`-Logs, neue Artefakte, CRM-Dispatch |【F:agents/master_workflow_agent.py†L520-L700】
-| Hard, unvollständige Daten (A-Fall) | Sofortiger HITL `request_info`, erneute Recherche nach Erfolg | HumanInLoop (Missing Info) → InternalResearch (force=True) → ggf. DossierResearch | Ja, Grund „fehlende Pflichtfelder“ | Erfolgreich → weiter; fehlend → Status `missing_info_incomplete` | HITL-Audit + Workflow-Log `missing_info_*`, ggf. neue Artefakte |【F:agents/master_workflow_agent.py†L360-L520】
-| Edge: HubSpot-Fehler/Rate-Limit | InternalResearch liefert Fallback (`company_in_crm=False` …) und loggt `crm_lookup_failed`; Master behandelt wie „nicht im CRM“ | InternalResearch (mit Error), ggf. DossierResearch | Nein (keine Attachments bekannt) | Weiter mit Dossierpflicht | Workflow-Log `crm_lookup_failed`, keine Attachments in Payload |【F:agents/internal_research_agent.py†L472-L522】
-| Edge: kein Email-Backend/HITL-Timeout | HumanInLoop wirft `DossierConfirmationBackendUnavailable`; Master setzt Status `dossier_backend_unavailable` (Workflow stoppt). Pending-Fälle erzeugen Reminder (4h/24h) und Eskalation (48h) – Timeout-Handling erfolgt außerhalb (keine automatische Statusänderung). | HumanInLoop (Fehler) | Ja, aber Fehlerpfad | Ende mit Status `dossier_backend_unavailable` bzw. Pending | Workflow-Log `hitl_dossier_pending` + Reminder-Einträge oder Fehler |【F:agents/master_workflow_agent.py†L1260-L1330】【F:agents/human_in_loop_agent.py†L588-L675】
-| Edge: Organizer ohne E-Mail | Reminder-Sequenz wird übersprungen, Workflow-Log `hitl_dossier_reminder_skipped` dokumentiert Grund | HumanInLoop | Ja (nur initiale Anfrage möglich) | Pending bleibt ohne Reminder | Workflow-Logeintrag, keine weiteren Artefakte |【F:agents/human_in_loop_agent.py†L588-L675】
+| Hard, `company_in_crm=true`, `attachments_in_crm=false` | `_process_crm_dispatch` mit `requires_dossier_override=True` → Pflicht-Dossier | InternalResearch → (optional) SimilarCompanies → DossierResearch → CRM-Agent | Nein (keine Attachments) | Workflow läuft weiter, Status `dispatched_to_crm` | `research/artifacts/internal_research/<run_id>/...`, `dossier_research/<run_id>/<event_id>_...json`, Workflow-Log `crm_dispatch`, Run-Manifest |【F:agents/master_workflow_agent.py†L360-L700】【F:agents/master_workflow_agent.py†L1499-L1567】 |
+| Hard, `company_in_crm=true`, `attachments_in_crm=true` | HITL `attachments_review`; Zustimmung erzwingt Dossier, Ablehnung beendet Workflow | InternalResearch → HumanInLoop → (bei Zustimmung) DossierResearch → CRM-Agent | Ja, Attachments-Bewertung | Zustimmung → `dispatched_to_crm`; Ablehnung → `attachments_review_declined`; Pending → Reminder | Workflow-Log `hitl_dossier_*`, Audit-Einträge, Reminder-Logs |【F:agents/master_workflow_agent.py†L1236-L1331】【F:agents/human_in_loop_agent.py†L200-L675】 |
+| Hard, `company_in_crm=false` (Attachments automatisch false) | `_process_crm_dispatch` mit Dossierpflicht | InternalResearch → DossierResearch → CRM-Agent | Nein | Dossier & CRM-Dispatch | Artefakte wie oben, Status `dispatched_to_crm` |【F:agents/master_workflow_agent.py†L1236-L1331】【F:agents/master_workflow_agent.py†L1499-L1567】 |
+| Soft → Organizer „Ja“ | HITL `soft_trigger_confirmation`, anschließend `_handle_hard_trigger(converted_from_soft=True)` (DEVIATION: Attachments-Review entfällt) | InternalResearch → HumanInLoop → DossierResearch/CRM | Ja, Soft-Eskalation | Workflow läuft weiter, Dossier wird immer erzeugt | HITL-/Reminder-Logs, Dossier-Artefakte, CRM-Payload |【F:agents/master_workflow_agent.py†L1332-L1405】 |
+| Soft → Organizer „Nein“ | HITL lehnt Dossier ab, keine weitere Aktion | InternalResearch → HumanInLoop | Ja | Workflow endet mit `dossier_declined` | Workflow-Log `dossier_declined`, Audit-Eintrag |【F:agents/master_workflow_agent.py†L1332-L1415】 |
+| Soft, unvollständige Daten (B-Fall) | HITL (Soft) → bei Zustimmung zweiter HITL `request_info` → erneute Recherche/Dossier | HumanInLoop (Soft) → HumanInLoop (Missing Info) → InternalResearch(force) → DossierResearch | Ja (zweimal) | Erfolg → CRM-Dispatch; fehlende Info → `missing_info_incomplete` | Audit-Logs `dossier_confirmation` + `missing_info`, Workflow-Logs `missing_info_*` |【F:agents/master_workflow_agent.py†L520-L700】 |
+| Hard, unvollständige Daten (A-Fall) | Sofortiges `request_info`; nach Erfolg erneute Recherche, sonst Abbruch | HumanInLoop (Missing Info) → InternalResearch(force) → DossierResearch | Ja (fehlende Pflichtfelder) | Erfolg → Standard-Hard-Pfad; Scheitern → `missing_info_incomplete` | Workflow-Log `missing_info_pending/completed`, Audit-Log |【F:agents/master_workflow_agent.py†L429-L500】 |
+| Edge: HubSpot-Fehler/429/Timeout | InternalResearch loggt Fehler, liefert Flags False; Master behandelt wie Firma unbekannt | InternalResearch (Fehlerpfad) → DossierResearch | Nein | Weiter mit Dossierpflicht | Workflow-Log `crm_lookup_failed`, keine Attachments |【F:agents/internal_research_agent.py†L505-L553】【F:integration/hubspot_integration.py†L180-L245】 |
+| Edge: kein Email-Backend | HumanInLoop wirft `DossierConfirmationBackendUnavailable`; Master setzt Status `dossier_backend_unavailable` | HumanInLoop | Ja, Fehlerpfad | Workflow endet mit Fehlerstatus | Workflow-Log `dossier_backend_unavailable`, Audit `skipped` |【F:agents/master_workflow_agent.py†L1269-L1319】 |
+| Edge: Organizer ohne E-Mail | Reminder-Kette wird übersprungen, Log vermerkt Grund | HumanInLoop | Ja (initial), Reminder entfallen | Status bleibt `pending` bis manuelle Reaktion | Workflow-Log `hitl_dossier_reminder_skipped` |【F:agents/human_in_loop_agent.py†L588-L675】 |
+| Edge: Timeout ohne Antwort | Reminder bis 48 h, Admin-Eskalation möglich; kein automatischer Statuswechsel | HumanInLoop | Ja (Reminder) | Status verbleibt `pending` (GAP) | Reminder-/Eskalations-Logs, Audit-Einträge |【F:agents/human_in_loop_agent.py†L588-L675】 |
 
 ## 4) End-to-End Sequenzdiagramme (Mermaid)
-### Hard, Company vorhanden, keine Attachments
+### Hard, Firma im CRM ohne Attachments
 ```mermaid
 sequenceDiagram
     participant Main as main.py
@@ -57,13 +54,13 @@ sequenceDiagram
     Orchestrator->>Master: attach_run(run_id)
     Master->>Internal: run(payload)
     Internal->>HubSpot: lookup_company_with_attachments(domain)
-    HubSpot-->>Internal: {company_in_crm:true, attachments:[]}
+    HubSpot-->>Internal: {company, attachments:[]}
     Internal-->>Master: payload.crm_lookup{company_in_crm:true, attachments_in_crm:false}
     Master->>Logs: research.internal_research
     Master->>Dossier: run({company_name, company_domain, run_id})
     Dossier-->>Master: artifact_path, payload
     Master->>CRM: send(event, crm_payload{requires_dossier:true})
-    Master->>Logs: crm_dispatch, completed
+    Master->>Logs: crm_dispatch & completed
 ```
 
 ### Hard, Attachments vorhanden (Organizer stimmt zu)
@@ -71,40 +68,36 @@ sequenceDiagram
 sequenceDiagram
     Master->>Internal: run(...)
     Internal-->>Master: crm_lookup{company_in_crm:true, attachments_in_crm:true, attachments:[...]}
-    Master->>Human: request_dossier_confirmation(context.reason="attachments_review", attachment_count)
+    Master->>Human: request_dossier_confirmation(reason="attachments_review", attachment_count)
     Human-->>Master: {dossier_required:true, audit_id}
-    Master->>Logs: hitl_dossier (approved)
+    Master->>Logs: hitl_dossier approved
     Master->>Dossier: run(...)
     Dossier-->>Master: artifact_path
     Master->>CRM: send(... requires_dossier_override=true)
-    Master->>Logs: attachments_review_approved, crm_dispatch
 ```
 
-### Hard, Company nicht im CRM
+### Hard, Firma nicht im CRM
 ```mermaid
 sequenceDiagram
     Master->>Internal: run(...)
     Internal-->>Master: crm_lookup{company_in_crm:false}
     Master->>Dossier: run(...)
     Master->>CRM: send(... requires_dossier=true)
-    Master->>Logs: report_required, completed
 ```
 
-### Soft-Trigger, Organizer sagt Ja (DEVIATION)
+### Soft-Trigger, Organizer sagt „Ja“ (DEVIATION)
 ```mermaid
 sequenceDiagram
-    Master->>Internal: run(...)
-    Internal-->>Master: crm_lookup{company_in_crm:true, attachments_in_crm:true}
     Master->>Human: request_dossier_confirmation(reason="soft_trigger_confirmation")
     Human-->>Master: {dossier_required:true}
     Master->>Logs: hitl_dossier approved
-    Master->>Internal: (keine erneute Attachments-Review, converted_from_soft=true)
+    Master->>Master: _handle_hard_trigger(converted_from_soft=true)
+    Note right of Master: Attachments-Review wird übersprungen
     Master->>Dossier: run(...)
     Master->>CRM: send(... requires_dossier_override=true)
-    Note right of Master: Attachments-Review aus Spezifikation Schritt 2 entfällt (DEVIATION)
 ```
 
-### Soft-Trigger, Organizer sagt Nein
+### Soft-Trigger, Organizer sagt „Nein“
 ```mermaid
 sequenceDiagram
     Master->>Human: request_dossier_confirmation(reason="soft_trigger_confirmation")
@@ -116,12 +109,22 @@ sequenceDiagram
 ### Hard-Trigger, fehlende Pflichtdaten (A-Fall)
 ```mermaid
 sequenceDiagram
-    Master->>Human: request_info(missing {company_name, company_domain})
+    Master->>Human: request_info(missing_fields)
     Human-->>Master: {info{company_name, company_domain}, audit_id}
     Master->>Internal: run(force=True)
     Internal-->>Master: crm_lookup{...}
-    Master->>...: (weiter wie Hard-Fälle)
-    Note right of Human: Generische Anfrage ohne dedizierte Prompt für Domain/Name (GAP)
+    Master->>...: weiterer Hard-Pfad
+```
+
+### Soft-Trigger, fehlende Pflichtdaten (B-Fall)
+```mermaid
+sequenceDiagram
+    Master->>Human: request_dossier_confirmation(reason="soft_trigger_confirmation")
+    Human-->>Master: {dossier_required:true}
+    Master->>Human: request_info(missing_fields)
+    Human-->>Master: {info ergänzt, audit_id}
+    Master->>Internal: run(force=True)
+    Master->>Dossier: run(...)
 ```
 
 ### Edge: HubSpot-Fehler
@@ -136,208 +139,212 @@ sequenceDiagram
 ```
 
 ## 5) HITL-Konversation — Vorlagen & Ablauf
-### E-Mail-Betreff & Body (aktueller Stand)
-- Attachments-Review (reason=`attachments_review`):
-  - Betreff: `Review CRM attachments for {summary}` (Summary aus Event).【F:agents/human_in_loop_agent.py†L371-L384】
-  - Body (Auszug):
+### E-Mail-Betreff & Body (Ist-Zustand aus Code)
+- **Attachments-Review (`context.reason="attachments_review"`)**
+  - Betreff: `Review CRM attachments for {summary}` (Eventtitel).【F:agents/human_in_loop_agent.py†L371-L384】
+  - Body (englischer Text):
     ```text
     Event: {summary} ({event_id})
+    Scheduled: {event_start} - {event_end}   # falls vorhanden
+    We found an existing HubSpot company record with stored attachments.
     Attachments available: {attachment_count} file(s) in the CRM.
+    - {info_key}: {info_value}   # für alle Infofelder
+
     Should we prepare a dossier for this event? Reply yes or no.
     ```
-    Enthält optional Meeting-Fenster (`event_start`/`event_end`) sowie Liste der extrahierten Infofelder. Keine explizite Zeitzone oder CRM-Link (GAP).【F:agents/human_in_loop_agent.py†L385-L445】
-- Soft-Trigger-Eskalation (reason=`soft_trigger_confirmation`):
-  - Betreff: `Confirm dossier requirement for {summary}`.【F:agents/human_in_loop_agent.py†L379-L384】
-  - Body ergänzt Hinweis „This meeting was flagged by a soft trigger…“. Attachments werden erwähnt, falls bereits vorhanden.【F:agents/human_in_loop_agent.py†L420-L439】
-- Fehlende Pflichtdaten (indirekt über `request_info`): generierter Text listet fehlende Felder (`requested_fields`), liefert aber keine spezifischen Fragen oder Zeitzonenangaben (GAP).【F:agents/human_in_loop_agent.py†L86-L199】
+    Quelle: `_build_message` inkl. optionaler Attachment-Anzahl; keine Zeitzone, kein CRM-Link.【F:agents/human_in_loop_agent.py†L385-L445】
 
-### Erwartete Platzhalter laut Spezifikation & Abdeckung
-| Platzhalter | Quelle | Ist-Zustand |
+- **Soft-Trigger (`context.reason="soft_trigger_confirmation"`)**
+  - Betreff: `Confirm dossier requirement for {summary}`.【F:agents/human_in_loop_agent.py†L371-L384】
+  - Body ergänzt den Hinweis „This meeting was flagged by a soft trigger…“ und listet extrahierte Informationen sowie (falls vorhanden) bestehende Attachments.【F:agents/human_in_loop_agent.py†L419-L439】
+
+- **Missing Info (`request_info`)**
+  - Simulierter Text listet fehlende Felder und füllt sie automatisch; reale Rückfrage müsste zielgerichtet formuliert werden (GAP).【F:agents/human_in_loop_agent.py†L86-L199】
+
+### Platzhalter-Übersicht
+| Platzhalter | Quelle | Abdeckung |
 | --- | --- | --- |
-| `{organizer_name}` / `{organizer_email}` | Event (`organizer`, `creator`) | Wird maskiert in Audit-Logs, im E-Mail-Body implizit über Kontaktinformationen, aber nicht explizit gerendert (GAP).【F:agents/human_in_loop_agent.py†L300-L369】 |
-| `{meeting_start_local}` / `{timezone}` | Event (`start`, `end`) | Start/End werden als Strings ausgegeben, Zeitzone fehlt vollständig (GAP).【F:agents/human_in_loop_agent.py†L400-L408】 |
-| `{company_name}`, `{company_domain}` | Info-Payload | Erscheint als Stichpunktliste (`- company_name: …`).【F:agents/human_in_loop_agent.py†L429-L444】 |
-| `{run_id}`, `{audit_id}` | Master/HITL-Kontext | `audit_id` wird im Audit-Log geführt, jedoch nicht im Mailtext. `{run_id}` taucht weder im Subject noch Body auf (GAP).【F:agents/master_workflow_agent.py†L1260-L1330】【F:agents/human_in_loop_agent.py†L200-L500】 |
-| `{crm_company_link}` | HubSpot | Nicht vorhanden (GAP). |
-| `{attachments_count}` | HubSpot Lookup | Wird im Attachments-Review-Body ausgewiesen.【F:agents/human_in_loop_agent.py†L409-L439】 |
+| `{organizer_name}`, `{organizer_email}` | Event `organizer`/`creator` | Kontakt wird maskiert im Audit, im Mailtext nur implizit erwähnt (GAP).【F:agents/human_in_loop_agent.py†L300-L369】 |
+| `{meeting_start_local}`, `{timezone}` | Event `start`/`timeZone` | Start/End werden ohne Zeitzone ausgegeben; Zeitzone fehlt (GAP).【F:agents/human_in_loop_agent.py†L400-L408】 |
+| `{company_name}`, `{company_domain}` | `info`-Payload | Als Stichpunktliste enthalten.【F:agents/human_in_loop_agent.py†L429-L444】 |
+| `{attachments_count}` | HubSpot-Lookup | Wird als Zahl angezeigt.【F:agents/human_in_loop_agent.py†L409-L439】 |
+| `{run_id}`, `{audit_id}` | Master-/Audit-Kontext | Im Mailtext nicht enthalten; `audit_id` nur im Rückgabepayload.【F:agents/master_workflow_agent.py†L1260-L1330】【F:agents/human_in_loop_agent.py†L200-L320】 |
+| `{crm_company_link}` | Settings/HubSpot | Kein Feld vorhanden (GAP). |
+
+### Klärungsprompts für A/B-Fälle
+Aktuell: generische Liste fehlender Felder, automatische Simulation der Antwort. Empfehlung laut Spezifikation: explizite Fragen („Bitte bestätigen Sie Unternehmensname und Web-Domain“).【F:agents/human_in_loop_agent.py†L86-L199】
 
 ### Statusmodell & Reminder
-- Statuswerte: `pending` (keine Antwort), `approved` (`dossier_required=True`), `declined` (`False`), `skipped` (Backend nicht verfügbar).【F:agents/human_in_loop_agent.py†L200-L500】
-- Reminder-Policy: initial nach 4 h, Follow-up nach weiteren 24 h, Eskalation nach 48 h; optional wiederholte Admin-Reminder abhängig von `settings.hitl_admin_email`.【F:agents/human_in_loop_agent.py†L31-L64】【F:agents/human_in_loop_agent.py†L588-L720】
-- Reminder-Protokollierung erfolgt über `WorkflowLogManager` unter `hitl_dossier_reminder_*` mit `audit_id` und Kontaktadresse. Kein automatisches Timeout-Status-Update; bei dauerhafter Funkstille bleibt `pending`. (GAP für explizite Timeout-Konvertierung laut Spezifikation).【F:agents/human_in_loop_agent.py†L588-L675】
+- Normalisierte Statuswerte: `approved`, `declined`, `pending`, `skipped` (Backend fehlt).【F:agents/human_in_loop_agent.py†L200-L445】
+- Reminder-Policy: Initial nach 4 h, Folge nach 24 h, Eskalation nach 48 h; optionale Admin-Reminder bei konfiguriertem Empfänger.【F:agents/human_in_loop_agent.py†L31-L64】【F:agents/human_in_loop_agent.py†L588-L675】
+- Pending-Fälle werden geloggt (`hitl_dossier_pending`), aber nicht automatisch in `timeout` überführt (GAP).【F:agents/master_workflow_agent.py†L1286-L1290】【F:agents/human_in_loop_agent.py†L588-L675】
 
-### Klärungs-Prompts für A/B-Fälle
-- Hard/Soft mit fehlender Company/Domain führt zu generischem `request_info`; es gibt keine spezialisierten Fragezeilen. Vorschlag (GAP): klar formuliere Aufforderung wie „Bitte bestätigen Sie Unternehmensname und Web-Domain“.
-
-### Audit-Logging-Felder
-- Jede HITL-Anfrage/Antwort schreibt `audit_log.record` mit Feldern `event_id`, `request_type`, `stage`, `responder`, `outcome`, `payload` inkl. `subject`, `message`, maskierten Kontaktdaten. Idempotenz via `audit_id`.【F:agents/human_in_loop_agent.py†L200-L320】
+### Audit-Logging & Idempotenz
+Jede Anfrage/Antwort erzeugt Audit-Records mit `audit_id`, `event_id`, `request_type`, `stage`, `responder`, `outcome`, Payload (maskierte Kontakt- & Kontextdaten). Idempotenz erfolgt über wiederverwendete `audit_id` beim Response-Record.【F:agents/human_in_loop_agent.py†L200-L320】【F:utils/audit_log.py†L13-L103】
 
 ## 6) Ereignis-/Payload-Schemas (JSON)
 ### InternalResearch → Master
-Schema (vereinfachte Typisierung):
 ```json
 {
   "source": "internal_research",
   "status": "COMPANY_LOOKUP_COMPLETED",
   "payload": {
+    "action": "COMPANY_LOOKUP_COMPLETED",
+    "level1_samples": [ ... ],
     "crm_lookup": {
       "company_in_crm": true,
       "attachments_in_crm": false,
       "requires_dossier": true,
       "attachments": [],
       "attachment_count": 0,
-      "company": {"id": "123", "properties": {...}}
+      "company": { "id": "123", "properties": { ... } }
     },
     "artifacts": {
       "neighbor_samples": "log_storage/run_history/research/artifacts/internal_research/<run_id>/level1_samples.json",
       "crm_match": ".../crm_matching_company.json"
-    },
-    "level1_samples": [
-      {"company_name": "Example", "domain": "example.com", "reason_for_match": "internal industry/description similarity"}
-    ]
+    }
   }
 }
 ```
-Quelle: `_lookup_crm_company`, `_write_artifact`.【F:agents/internal_research_agent.py†L112-L160】【F:agents/internal_research_agent.py†L445-L553】
+Quelle: `InternalResearchAgent.run` und `_lookup_crm_company`.【F:agents/internal_research_agent.py†L112-L163】【F:agents/internal_research_agent.py†L466-L553】
 
-### Master → DossierResearch
+### Master → DossierResearch (Startsignal)
 ```json
 {
+  "id": "<event_id>",
   "run_id": "<run_id>",
-  "event_id": "<event_id>",
   "payload": {
     "company_name": "Example GmbH",
     "company_domain": "example.com",
-    "crm_lookup": {...},
-    "research": {...}
+    "research": { ... },
+    "crm_lookup": { ... }
   }
 }
 ```
-Der Master übergibt `prepared_info` mit normalisierten Feldern; Dossier-Agent validiert `company_name`/`company_domain`.【F:agents/master_workflow_agent.py†L1500-L1563】【F:agents/dossier_research_agent.py†L58-L155】
+Der Master übergibt normalisierte Infos an `_run_research_agent`; Dossier-Agent validiert Pflichtfelder und persistiert Artefakt.【F:agents/master_workflow_agent.py†L1499-L1567】【F:agents/dossier_research_agent.py†L64-L205】
 
-### Master → HumanInLoop (Attachments-Review)
+### Master → HumanInLoop (Request)
 ```json
 {
-  "event": {"id": "evt123", "summary": "Meeting"},
-  "info": {"company_name": "Example GmbH", "company_domain": "example.com"},
+  "event": { "id": "evt123", "summary": "Meeting" },
+  "info": { "company_name": "Example GmbH", "company_domain": "example.com" },
   "context": {
     "reason": "attachments_review",
     "company_name": "Example GmbH",
     "attachments_in_crm": true,
     "attachment_count": 3,
-    "attachments": [{"id": "567", ...}]
+    "attachments": [{ "id": "567" }],
+    "event_start": "2024-02-01T09:00:00Z",
+    "event_end": "2024-02-01T09:30:00Z"
   }
 }
 ```
-Master setzt `context.reason` für eindeutige Template-Branching.【F:agents/master_workflow_agent.py†L1260-L1330】
+Erzeugt in `_handle_hard_trigger` bzw. `_handle_soft_trigger`.【F:agents/master_workflow_agent.py†L1236-L1398】
 
-### HumanInLoop → Master
+### HumanInLoop → Master (Response)
 ```json
 {
   "dossier_required": false,
   "status": "declined",
   "details": {
-    "contact": {"email": "organizer@example.com"},
+    "contact": { "email": "organizer@example.com" },
     "subject": "Review CRM attachments for Meeting",
     "message": "Event: ...",
+    "context": { ... },
     "raw_response": "no"
   },
   "audit_id": "audit-456"
 }
 ```
-Normalisierung `status_from_decision` und Anhängen von `audit_id`.【F:agents/human_in_loop_agent.py†L200-L500】
+Normalisierung & Detail-Anreicherung erfolgen in `request_dossier_confirmation`.【F:agents/human_in_loop_agent.py†L200-L320】
 
-## 7) Logging- & Artefakt-Ablage
-- `log_storage/run_history/workflows/<run_id>.jsonl`: zentrale Workflow-Logs (`start`, `crm_lookup_completed`, `hitl_dossier_pending`, Reminder-Meldungen).【F:logs/workflow_log_manager.py†L17-L59】【F:agents/master_workflow_agent.py†L360-L700】
-- `log_storage/run_history/agents/internal_research/internal_research.log`: sequentielle Agent-Logs inkl. CRM-Lookup-Messages.【F:agents/internal_research_agent.py†L60-L109】【F:docs/run_history_file_map.md†L5-L9】
-- `log_storage/run_history/research/artifacts/internal_research/<run_id>/level1_samples.json` & `crm_matching_company.json`: Nachbarschafts- und Matching-Daten.【F:agents/internal_research_agent.py†L112-L160】【F:docs/run_history_file_map.md†L17-L21】
-- `log_storage/run_history/research/artifacts/dossier_research/<run_id>/<event_id>_company_detail_research.json`: strukturierter Dossier-Output.【F:agents/dossier_research_agent.py†L36-L205】【F:docs/run_history_file_map.md†L11-L16】
-- `log_storage/run_history/research/artifacts/similar_companies_level1/<run_id>/…`: optional, wenn SimilarCompanies-Agent läuft.【F:docs/run_history_file_map.md†L23-L28】
-- `log_storage/run_history/research/artifacts/workflow_runs/<run_id>/summary.json`: Run-Manifest (Master→Orchestrator).【F:docs/run_history_file_map.md†L29-L34】
-- `log_storage/run_history/runs/state/negative_cache.json` & `processed_events.json`: Cache-Dateien, die der Master-Agent bei jedem Run aktualisiert/flusht.【F:docs/run_history_file_map.md†L35-L45】【F:agents/master_workflow_agent.py†L1220-L1563】
-- `log_storage/run_history/runs/index.json`: Run-Index via `LocalStorageAgent.record_run` beim Finalisieren.【F:agents/master_workflow_agent.py†L1500-L1594】【F:agents/local_storage_agent.py†L65-L106】
+## 7) Logging- & Artefakt-Ablage (mit Pfad-Referenzen)
+- `log_storage/run_history/workflows/<run_id>.jsonl`: sequenzielle Workflow-Logs (`start`, `crm_lookup_completed`, `hitl_dossier_pending`, Reminder).【F:logs/workflow_log_manager.py†L17-L59】【F:agents/master_workflow_agent.py†L360-L700】
+- `log_storage/run_history/agents/internal_research/internal_research.log`: dedizierte Agent-Logs via `_configure_file_logger`.【F:agents/internal_research_agent.py†L54-L109】
+- `log_storage/run_history/research/artifacts/internal_research/<run_id>/level1_samples.json` & `crm_matching_company.json`: Nachbarschafts- bzw. Matching-Daten.【F:agents/internal_research_agent.py†L112-L167】
+- `log_storage/run_history/research/artifacts/dossier_research/<run_id>/<event_id>_company_detail_research.json`: strukturierter Dossier-Output.【F:agents/dossier_research_agent.py†L58-L205】
+- `log_storage/run_history/research/artifacts/similar_companies_level1/<run_id>/similar_companies_level1_<event>.json`: Similar-Companies-Artefakte (falls Agent aktiv).【F:agents/int_lvl_1_agent.py†L101-L358】
+- `log_storage/run_history/research/artifacts/workflow_runs/<run_id>/summary.json`: Run-Manifest durch Workflow-Orchestrator.【F:agents/workflow_orchestrator.py†L611-L637】
+- `log_storage/run_history/runs/<run_id>/polling_trigger.log`: Laufzeit-Logdatei des Master-Workflows.【F:agents/master_workflow_agent.py†L129-L143】
+- `log_storage/run_history/runs/state/negative_cache.json` & `processed_events.json`: Guardrails gegen doppelte Verarbeitung; Master lädt/schreibt beim Run-Finalisieren.【F:agents/master_workflow_agent.py†L129-L138】【F:agents/master_workflow_agent.py†L1553-L1567】【F:utils/negative_cache.py†L18-L152】【F:utils/processed_event_cache.py†L18-L146】
+- `log_storage/run_history/runs/index.json`: Run-Index via `LocalStorageAgent.record_run` mit Audit-Metadaten.【F:agents/local_storage_agent.py†L65-L106】【F:agents/master_workflow_agent.py†L1568-L1594】
 
-Beispielhafte Pfadstruktur:
+Beispielhafte Struktur:
 ```
 log_storage/run_history/
 ├── agents/internal_research/internal_research.log
-├── research/
-│   └── artifacts/
-│       ├── internal_research/<run_id>/crm_matching_company.json
-│       ├── dossier_research/<run_id>/<event_id>_company_detail_research.json
-│       └── workflow_runs/<run_id>/summary.json
+├── research/artifacts/
+│   ├── internal_research/<run_id>/crm_matching_company.json
+│   ├── dossier_research/<run_id>/<event_id>_company_detail_research.json
+│   ├── similar_companies_level1/<run_id>/...
+│   └── workflow_runs/<run_id>/summary.json
 ├── runs/
 │   ├── <run_id>/polling_trigger.log
 │   └── state/{negative_cache.json, processed_events.json}
 └── workflows/<run_id>.jsonl
 ```
-Quelle: `config.config.Settings`, `docs/run_history_file_map.md`.【F:config/config.py†L251-L483】【F:docs/run_history_file_map.md†L1-L58】
+Quelle: Settings-Ladepfade & Agents.【F:config/config.py†L250-L520】【F:agents/internal_research_agent.py†L54-L167】【F:agents/dossier_research_agent.py†L58-L205】
 
 ## 8) Traceability-Matrix (Spec → Code)
-| Spez.-Nr. | Anforderung | Implementierung | Bewertung |
+| Spez.-Nr. | Beschreibung | Implementierung | Bewertung |
 | --- | --- | --- | --- |
-| 1 | InternalResearch prüft HubSpot auf bestehende Firma | `_lookup_crm_company` ruft `HubSpotIntegration.lookup_company_with_attachments` und liefert `company_in_crm`. | Erfüllt.【F:agents/internal_research_agent.py†L466-L553】【F:integration/hubspot_integration.py†L200-L232】 |
-| 1.1 | Bei `company=True` Attachments prüfen | Lookup liefert `attachments`, Flag `attachments_in_crm` gesetzt. | Erfüllt.【F:agents/internal_research_agent.py†L524-L553】 |
-| 1.1.1 | Antwort an Master mit `company=True`, `Attachment=True` | Payload enthält Flags und Liste; wird unverändert weitergereicht. | Erfüllt.【F:agents/internal_research_agent.py†L150-L160】【F:agents/master_workflow_agent.py†L360-L520】 |
-| 1.2 | `Attachments=False` Meldung an Master | `requires_dossier=True`; Flags false. | Erfüllt.【F:agents/internal_research_agent.py†L524-L553】 |
-| 2 | Hard + company + attachments → HITL, Organizer entscheidet | `_handle_hard_trigger` sendet HITL, verarbeitet Antworten inkl. Logs. | Erfüllt.【F:agents/master_workflow_agent.py†L1260-L1330】【F:agents/human_in_loop_agent.py†L200-L500】 |
-| 2a | Organizer „Ja“ → Dossier weiterleiten | Bei Zustimmung `_process_crm_dispatch` mit Override. | Erfüllt.【F:agents/master_workflow_agent.py†L1292-L1310】 |
-| 2b | Organizer „Nein“ → Workflow endet, Logs | Status `attachments_review_declined`. | Erfüllt.【F:agents/master_workflow_agent.py†L1312-L1319】 |
-| 3 | Hard + company=false → Dossier | `_process_crm_dispatch` mit Override. | Erfüllt.【F:agents/master_workflow_agent.py†L1260-L1330】 |
-| 4 | Soft → HITL → bei Ja Hard-Pfad durchlaufen | Soft-Flow startet HITL und ruft `_handle_hard_trigger(converted_from_soft=True)`. | DEVIATION: Attachments-Review (Schritt 2) wird übersprungen; Dossier erzwingt Override unabhängig von Attachments.【F:agents/master_workflow_agent.py†L1332-L1400】 |
-| A | Hard aber Name/Domain unklar → Rückfrage | `request_info` generisch, füllt Werte simuliert. | GAP: keine echten Rückfragen oder unterschiedliche Texte für A/B.【F:agents/master_workflow_agent.py†L360-L520】【F:agents/human_in_loop_agent.py†L86-L199】 |
-| B | Soft + Name/Domain unklar → Rückfrage | Soft-Flow ruft `request_dossier_confirmation` vor `request_info`. | GAP: Domain-/Name-Klärung nicht spezifiziert, Templates generisch.【F:agents/master_workflow_agent.py†L520-L700】 |
-| HITL-E-Mail-Inhalt | Hinweis auf vorhandene Attachments, Bitte um Feedback | Implementiert, aber ohne CRM-Link/Zeitzone. | Teilweise; fehlende Platzhalter = GAP.【F:agents/human_in_loop_agent.py†L371-L445】 |
-| Timeout/Reminder | 24h/48h Eskalation | ReminderPolicy 4h/24h/48h, Logging vorhanden. | Erfüllt. Keine automatische Timeout-Statusänderung (Hinweis).【F:agents/human_in_loop_agent.py†L31-L64】【F:agents/human_in_loop_agent.py†L588-L675】 |
+| 1 | InternalResearch prüft HubSpot auf bestehende Firma | `_lookup_crm_company` + HubSpotIntegration | Erfüllt.【F:agents/internal_research_agent.py†L466-L553】【F:integration/hubspot_integration.py†L193-L257】 |
+| 1.1 | Attachments ermitteln bei vorhandener Firma | Liste `attachments` und Flag `attachments_in_crm` | Erfüllt.【F:agents/internal_research_agent.py†L524-L551】 |
+| 1.1.1 | Antwort an Master: `company=True`, `Attachment=True` | Payload `crm_lookup` enthält Flags | Erfüllt.【F:agents/internal_research_agent.py†L150-L163】 |
+| 1.2 | `attachments=False` → Meldung an Master | Flag false, `requires_dossier=True` | Erfüllt.【F:agents/internal_research_agent.py†L524-L553】 |
+| 2 | Hard + Attachments → HITL mit Entscheidung | `_handle_hard_trigger` + HITL-Anfrage | Erfüllt.【F:agents/master_workflow_agent.py†L1236-L1331】【F:agents/human_in_loop_agent.py†L200-L445】 |
+| 2a | Zustimmung → Dossier anstoßen | `_process_crm_dispatch` mit Override | Erfüllt.【F:agents/master_workflow_agent.py†L1292-L1310】 |
+| 2b | Ablehnung → Workflow-Ende, Logging | Status `attachments_review_declined` | Erfüllt.【F:agents/master_workflow_agent.py†L1312-L1319】 |
+| 3 | Hard + company=false → Dossier-Research | `_process_crm_dispatch` erzwingt Dossier | Erfüllt.【F:agents/master_workflow_agent.py†L1236-L1331】 |
+| 4 | Soft → HITL → bei Ja Hard-Pfad | `_handle_soft_trigger` ruft `_handle_hard_trigger(converted_from_soft=True)` | **DEVIATION**: Attachments-Review entfällt wegen Skip-Bedingung.【F:agents/master_workflow_agent.py†L1332-L1405】 |
+| A | Hard, Name/Domain unklar → Rückfrage | `request_info` simuliert fehlende Felder | **GAP**: keine echten gezielten Prompts.【F:agents/master_workflow_agent.py†L429-L500】【F:agents/human_in_loop_agent.py†L86-L199】 |
+| B | Soft, Name/Domain unklar → Rückfrage | Soft-HITL + `request_info` | **GAP**: Fragen nicht spezifiziert, Soft-Eskalation generisch.【F:agents/master_workflow_agent.py†L520-L700】 |
+| HITL-Mailinhalt | Hinweis auf bestehende Attachments, Bitte um Feedback | `_build_message` liefert englischen Text ohne Zeitzone/Link | Teilweise; fehlende Platzhalter = **GAP**.【F:agents/human_in_loop_agent.py†L385-L445】 |
+| Reminder/Timeout | 4h/24h/48h Erinnerungskette | ReminderPolicy + Escalation | Erfüllt (Timeout-Status fehlt → Hinweis).【F:agents/human_in_loop_agent.py†L31-L64】【F:agents/human_in_loop_agent.py†L588-L675】 |
 
 ## 9) Akzeptanzkriterien & Tests
-### Checkliste pro Variante
-| Variante | Erwartung | Status |
+### Checkliste (aktueller Stand)
+| Variante | Erwartetes Verhalten | Status |
 | --- | --- | --- |
-| Hard, company=true, attachments=false | Dossier wird ohne HITL gestartet | Pass |
-| Hard, company=true, attachments=true (Organizer Ja) | HITL, Zustimmung → Dossier | Pass |
-| Hard, company=true, attachments=true (Organizer Nein) | HITL, Ablehnung → Ende | Pass |
-| Hard, company=false | Dossier startet | Pass |
-| Soft → Organizer Ja | **Soll:** Soft→Hard inkl. Attachments-Review; **Ist:** Review entfällt | Fail (DEVIATION) |
+| Hard, company=true, attachments=false | Dossier ohne HITL | Pass |
+| Hard, company=true, attachments=true (Ja) | HITL, Zustimmung → Dossier | Pass |
+| Hard, company=true, attachments=true (Nein) | HITL, Ablehnung → Ende | Pass |
+| Hard, company=false | Dossierpflicht | Pass |
+| Soft → Organizer Ja | Attachments-Review nach Konversion | **Fail (DEVIATION)** |
 | Soft → Organizer Nein | Workflow endet mit `dossier_declined` | Pass |
-| Hard/Soft ohne Domain | Spezielle Rückfrage | Fail (GAP) |
-| HubSpot-Fehler | Fallback + Dossier | Pass |
-| Kein Email-Backend | Workflow stoppt, Status `dossier_backend_unavailable` | Pass |
+| Hard/Soft ohne Domain | Präzise Rückfrage an Organizer | **Fail (GAP)** |
+| HubSpot-Fehler | Fallback + Dossierpflicht | Pass |
+| Kein Email-Backend | Status `dossier_backend_unavailable` | Pass |
+| Pending >48h | Automatische Timeout-Kennzeichnung | **Fail (GAP)** |
 
-### Testvorschläge
-1. `test_soft_trigger_attachment_review_after_conversion` (Given soft trigger mit HubSpot-Attachments, When Organizer bestätigt, Then Master fordert Attachments-Review erneut). Erwartete Log-Sequenz: `hitl_dossier` zweimal (Soft + Attachments). Gap-Test.
-2. `test_request_info_prompts_missing_domain` (Given Missing Domain, Then Email enthält explizite Frage „Bitte bestätigen Sie…“). Gap-Test.
-3. `test_hitl_template_includes_timezone` (Given Event mit TimeZone, Then Body enthält `Europe/Berlin`). Gap-Test.
-4. `test_internal_research_handles_rate_limit` (Mock HubSpot 429, Expect workflow log `crm_lookup_failed` & requires_dossier=True). Bereits abgedeckt, Regression.
-5. `test_reminder_sequence_logging` (Simuliere Pending → prüfe Logs `hitl_dossier_reminder_*`). Regression.
+### Testempfehlungen (Given/When/Then)
+1. `test_soft_trigger_attachment_review_after_conversion`: Given Soft-Trigger mit Attachments, When Organizer bestätigt, Then Master sendet zweite HITL-Anfrage im Attachments-Modus (Absicherung DEVIATION).
+2. `test_request_info_prompts_missing_domain`: Sicherstellen, dass bei fehlender Domain konkrete deutschsprachige Fragen gestellt werden.
+3. `test_hitl_template_includes_timezone`: Event mit Zeitzone → Nachricht enthält `{meeting_start_local}` und `{timezone}`.
+4. `test_human_in_loop_timeout_transition`: Pending-Fall + ausgelaufene Erinnerungen → Status auf `timeout` aktualisiert.
+5. Regression: `test_internal_research_hubspot_failure` (Mock-Exception → `requires_dossier=True`).
 
-### Erwartete Artefakte/Logs je Testfall
-- Soft-Attachments-Test: `hitl_dossier`-Logs, Dossier-Artefakte, `crm_dispatch`.
-- Missing-Domain-Test: Audit-Log `missing_info` mit konkreter Frage, Workflow-Log `missing_info_pending`/`completed`.
-- Template-TimeZone-Test: generierte Nachricht im Backend-Mock.
+Erwartete Artefakte: Audit-Logs (`dossier_confirmation`, `missing_info`), Workflow-Logs (`hitl_dossier_*`, `missing_info_*`), Artefakte in `research/artifacts/...` je nach Pfad.【F:agents/master_workflow_agent.py†L360-L700】【F:agents/internal_research_agent.py†L112-L167】
 
 ## 10) Gap-Analyse & konkrete Maßnahmen
-| GAP / DEVIATION | Begründung | Änderungsvorschlag | Diff (Auszug) | Tests |
+| GAP / DEVIATION | Begründung | Änderungsvorschlag | Minimal-Patch (Skizze) | Folge-Tests |
 | --- | --- | --- | --- | --- |
-| DEVIATION: Soft→Hard ohne Attachments-Review | Spezifikation verlangt nach Umwandlung Schritt 2 (Attachments-HITL). Aktuell wird dieser Pfad durch `converted_from_soft=True` übersprungen. | Entferne Skip-Bedingung und unterscheide per Flag, ob Attachments-Review bereits erfolgte. Bei Soft→Hard erneut `request_dossier_confirmation` im Attachments-Modus, jedoch mit Hinweis auf vorherige Zustimmung. | ```diff
+| DEVIATION: Soft→Hard ohne Attachments-Review | Spezifikation verlangt Schritt 2 nach Umwandlung. | Entferne Skip-Bedingung, kennzeichne Soft-Genehmigung separat und sende erneute Attachments-Anfrage (mit Hinweis). | ```diff
 -        if company_in_crm and attachments_in_crm and not converted_from_soft:
 +        if company_in_crm and attachments_in_crm:
-+            if converted_from_soft and event_result.get("hitl_dossier_soft_approved"):
-+                context["note"] = "Soft trigger wurde bereits bestätigt; bitte prüfen Sie die vorhandenen Attachments."
-``` | `test_soft_trigger_attachment_review_after_conversion`
-| GAP: Fehlende spezifische Klärungs-Prompts für Company/Domain | `request_info` erzeugt generischen Text; Spezifikation verlangt gezielte Rückfragen (A/B). | Ergänze Template mit Aufzählung der fehlenden Felder und konkreter Formulierung („Bitte bestätigen Sie…“). | ```diff
++            if converted_from_soft:
++                context["note"] = "Soft trigger bereits bestätigt; bitte vorhandene Attachments prüfen."
+``` | `test_soft_trigger_attachment_review_after_conversion` |
+| GAP: fehlende spezifische Rückfragen (A/B) | Organizer erhält keine klaren Fragen. | `request_info`-Text um deutsche Prompt-Liste ergänzen, z. B. „Bitte bestätigen Sie den Firmennamen…“. | ```diff
+-        requested_fields = [...]
 -        lines = ["We extracted the following information:"]
-+        if requested_fields:
-+            lines = [
-+                "Für die weitere Bearbeitung benötigen wir folgende Angaben:",
-+                *(f"- Bitte bestätigen Sie {field.replace('_', ' ')}" for field in requested_fields)
-+            ]
-``` | `test_request_info_prompts_missing_domain`
-| GAP: HITL-Templates ohne Zeitzone/Run-Kontext | Spezifikation verlangt `{meeting_start_local}`, `{timezone}`, `{run_id}`, `{crm_company_link}`. | Erweitere `_build_message` um Zeitzone (via Event `start.timeZone`), Domain-Link (`settings.crm_attachment_base_url` + company ID), Run-ID (aus `self.run_id`), Audit-ID optional. | ```diff
--        if context.get("event_start") or context.get("event_end"):
++        requested_fields = [...]
++        lines = ["Für die weitere Bearbeitung benötigen wir folgende Angaben:"]
++        for field in requested_fields:
++            lines.append(f"- Bitte bestätigen Sie {field.replace('_', ' ')}")
+``` | `test_request_info_prompts_missing_domain` |
+| GAP: HITL-Templates ohne Zeitzone/Run-Kontext | Spezifikation fordert `{timezone}`, `{run_id}`, `{crm_company_link}`. | `_build_message` und Kontextaufbereitung erweitern; Master liefert CRM-Link (falls verfügbar). | ```diff
 +        timezone = event.get("start", {}).get("timeZone") or event.get("timeZone")
-+        if context.get("event_start") or context.get("event_end"):
-             ...
 +        if timezone:
 +            lines.append(f"Zeitzone: {timezone}")
 +        if self.run_id:
@@ -345,21 +352,20 @@ Quelle: `config.config.Settings`, `docs/run_history_file_map.md`.【F:config/con
 +        crm_link = context.get("crm_company_link")
 +        if crm_link:
 +            lines.append(f"HubSpot: {crm_link}")
-``` | `test_hitl_template_includes_timezone`
-| GAP: Kein automatisches Timeout-Status nach 24 h | Spezifikation impliziert Entscheidungsfortschritt nach Eskalation. | Ergänze Callback im Reminder, das nach Eskalation `status='timeout'` setzt und Logs/Audit aktualisiert. | (größerer Patch, hier nur Hinweis) | `test_hitl_timeout_status`
+``` | `test_hitl_template_includes_timezone`, `test_human_in_loop_includes_crm_link` |
+| GAP: Kein automatisches Timeout | Nach Eskalation bleibt Status `pending`. | ReminderEscalation-Callback nach Eskalation → Master aktualisiert Status `timeout`, Audit dokumentiert. | (Neuer Hook in `ReminderEscalation` + Master-Callback) | `test_human_in_loop_timeout_transition` |
 
 ## 11) Risiken & Edge Cases
-- **HubSpot Rate Limits / 5xx**: Fallback setzt Flags auf False, dennoch Dossierpflicht. Risiko: wiederholte Fehler → keine Information über bestehende Attachments. Logging über `crm_lookup_failed`. Empfehlung: Retry/Backoff bereits vorhanden (`HubSpotIntegration` nutzt `AsyncHTTP` + Semaphor).【F:integration/hubspot_integration.py†L200-L232】【F:agents/internal_research_agent.py†L505-L522】
-- **Fehlende Organizer-E-Mail**: Reminder entfallen, Entscheidungsstatus bleibt `pending`. Risiko: Workflow hängt. Vorschlag: Eskalation an Admin erzwingen.!【F:agents/human_in_loop_agent.py†L588-L675】
-- **Ungültige Domains**: `resolve_company_domain` entfernt Domainfelder → HITL für Missing Info. Risiko: automatisches Füllen durch Demo-Logik führt zu falschen Daten (Simulation).【F:agents/master_workflow_agent.py†L520-L700】
-- **Doppelte Events**: `ProcessedEventCache` verhindert erneute Verarbeitung, speichert Fingerprint. Risiko: notwendige Aktualisierung übersehen; Flush erfolgt bei Finalisierung.!【F:agents/master_workflow_agent.py†L1220-L1567】【F:utils/processed_event_cache.py†L18-L158】
-- **Zeitzonen-Konvertierung**: Nachrichten verwenden Strings ohne Locale; Missverständnisse möglich. (GAP).【F:agents/human_in_loop_agent.py†L400-L408】
-- **Backend-Ausfall**: `DossierConfirmationBackendUnavailable` stoppt Workflow mit Status `dossier_backend_unavailable`, kein Retry. Empfehlung: Fallback-Kanal hinterlegen.!【F:agents/master_workflow_agent.py†L1260-L1330】
+- **HubSpot Rate Limits / 5xx**: AsyncHTTP + Semaphore + Timeout-Handling werfen Exception → Fallback `requires_dossier=True`; Risiko: wiederholte Fehlversuche ohne Alternativquelle.【F:integration/hubspot_integration.py†L180-L245】【F:agents/internal_research_agent.py†L505-L553】
+- **Fehlende Organizer-E-Mail**: Reminder entfallen, Status bleibt `pending`; Empfehlung: Eskalation an Admin erzwingen oder Alternativkontakt pflegen.【F:agents/human_in_loop_agent.py†L588-L675】
+- **Ungültige Domains**: `resolve_company_domain` entfernt `company_domain` → HITL; Demo-Simulation füllt generischen Wert ein, Risiko falscher Daten bei echter Produktion.【F:agents/master_workflow_agent.py†L660-L709】【F:agents/human_in_loop_agent.py†L86-L199】
+- **Doppelte Events**: `ProcessedEventCache` verhindert erneute Verarbeitung; Änderungen an Events löschen Fingerprint automatisch.【F:utils/processed_event_cache.py†L18-L146】【F:agents/master_workflow_agent.py†L1553-L1567】
+- **Zeitzonen-Konvertierung**: Nachrichten enthalten nur Rohstrings; Meetingzeiten können missverstanden werden (GAP).【F:agents/human_in_loop_agent.py†L400-L408】
+- **Backend-Ausfall**: Fehlender Kommunikationskanal stoppt Workflow (`dossier_backend_unavailable`); es erfolgt kein Retry.【F:agents/master_workflow_agent.py†L1269-L1319】
 
 ## 12) Schlussübersicht (Commit-fertige To-Dos)
-1. Attachments-Review nach Soft→Hard wieder aktivieren und Kontextnotiz ergänzen. Aufwand M, Risiko mittel (erneute HITL-Schleife). (Siehe DEVIATION-Patchvorschlag.)
-2. HITL-Templates um Zeitzone, CRM-Link, Run-ID, Organizer-Daten erweitern; Kontextobjekt anreichern (`crm_company_link`, `timezone`). Aufwand M, Risiko gering (reiner Text, Template-Update).【F:agents/master_workflow_agent.py†L1260-L1330】【F:agents/human_in_loop_agent.py†L385-L445】
-3. Spezifische Rückfragen für fehlende Company-/Domain-Daten implementieren (`request_info`). Aufwand S, Risiko gering (nur Text + Tests).【F:agents/human_in_loop_agent.py†L86-L199】
-4. Optional: Automatisches Timeout-Status-Update nach Eskalationsphase implementieren (z. B. 24 h → `timeout`). Aufwand M, Risiko mittel (Async/Reminder-Sequenz).【F:agents/human_in_loop_agent.py†L588-L720】
-5. Regressionstests für neue Pfade hinzufügen (`tests/test_master_workflow_agent_soft_trigger.py`, `tests/unit/test_human_in_loop_templates.py`). Aufwand M, Risiko gering.
-
+1. Attachments-Review nach Soft→Hard erneut ausführen und Hinweis im Kontext ergänzen (Aufwand M, Risiko mittel).【F:agents/master_workflow_agent.py†L1236-L1405】
+2. HITL-Templates um Zeitzone, CRM-Link, Run-ID und Organizer-Daten erweitern; Master muss Kontextfelder bereitstellen (Aufwand M, Risiko gering).【F:agents/human_in_loop_agent.py†L371-L445】【F:agents/master_workflow_agent.py†L1236-L1398】
+3. Spezifische Rückfragen für fehlende Company-/Domain-Daten formulieren und Tests ergänzen (Aufwand S, Risiko gering).【F:agents/human_in_loop_agent.py†L86-L199】
+4. Automatisches Timeout-Handling nach Reminder/Eskalation implementieren (Aufwand M, Risiko mittel wegen Async-Logik).【F:agents/human_in_loop_agent.py†L588-L675】
+5. Regressionstests für neue Pfade (Soft-Attachments, Template-Erweiterungen, Timeout) erstellen (Aufwand M, Risiko gering).【F:tests/unit/test_master_workflow_agent_followups.py†L1-L200】

@@ -106,6 +106,14 @@ def _default_payload(default: Any) -> Any:
     return deepcopy(default)
 
 
+def _is_dict(payload: Any) -> bool:
+    return isinstance(payload, dict)
+
+
+def _is_list(payload: Any) -> bool:
+    return isinstance(payload, list)
+
+
 def load_json_or_default(
     path: str | os.PathLike[str],
     *,
@@ -151,9 +159,9 @@ def load_json_or_default(
 
     expected_type: Callable[[Any], bool] | None = None
     if isinstance(fallback, dict):
-        expected_type = lambda payload: isinstance(payload, dict)
+        expected_type = _is_dict
     elif isinstance(fallback, list):
-        expected_type = lambda payload: isinstance(payload, list)
+        expected_type = _is_list
 
     if expected_type and not expected_type(raw):
         atomic_write_json(target, fallback, model=model)

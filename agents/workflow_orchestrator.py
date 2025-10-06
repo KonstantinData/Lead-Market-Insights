@@ -23,6 +23,7 @@ from typing import (
 )
 
 from agents.alert_agent import AlertAgent, AlertSeverity
+from agents.email_agent import _validate_smtp_settings
 from agents.master_workflow_agent import MasterWorkflowAgent
 from polling.inbox_agent import (
     InboxAgent,
@@ -66,6 +67,8 @@ class WorkflowOrchestrator:
         self._research_summary_root = (
             Path(settings.research_artifact_dir) / "workflow_runs"
         )
+
+        _validate_smtp_settings(settings)
 
         self._background_tasks: Set[asyncio.Task[Any]] = set()
         self._async_cleanups: list[tuple[str, Callable[[], Awaitable[None]]]] = []

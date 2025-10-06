@@ -2,10 +2,11 @@ import email
 from email import policy
 from pathlib import Path
 from typing import List
+from types import SimpleNamespace
 
 import pytest
 
-from agents.email_agent import EmailAgent
+from agents.email_agent import EmailAgent, _validate_smtp_settings
 
 
 def _install_dummy_async_smtp(
@@ -79,3 +80,33 @@ async def test_email_agent_handles_missing_attachments_gracefully(
         part for part in message.walk() if part.get_content_type() == "text/plain"
     )
     assert text_part.get_content().startswith("Simple body")
+
+
+def test_validate_smtp_settings_requires_all_fields() -> None:
+    settings = SimpleNamespace(
+        smtp_host=None,
+        smtp_port=465,
+        smtp_username="",
+        smtp_password="secret",
+        smtp_sender=None,
+    )
+
+    with pytest.raises(RuntimeError) as exc:
+        _validate_smtp_settings(settings)
+
+    message = str(exc.value)
+    assert "smtp_host" in message
+    assert "smtp_username" in message
+    assert "smtp_sender" in message
+
+
+def test_validate_smtp_settings_accepts_complete_configuration() -> None:
+    settings = SimpleNamespace(
+        smtp_host="smtp.example.com",
+        smtp_port=465,
+        smtp_username="mailer",
+        smtp_password="secret",
+        smtp_sender="alerts@example.com",
+    )
+
+    _validate_smtp_settings(settings)

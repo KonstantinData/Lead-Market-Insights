@@ -11,9 +11,6 @@ from utils.observability import current_run_id_var, generate_run_id
 from utils.pii import mask_pii
 
 
-pytestmark = pytest.mark.asyncio
-
-
 class DummyEventAgent:
     def __init__(self, events: Iterable[Dict[str, Any]]):
         self._events = list(events)
@@ -82,6 +79,7 @@ def test_mask_pii_respects_whitelist():
     assert masked["info"]["contact_name"] == "<redacted-name>"
 
 
+@pytest.mark.asyncio
 async def test_master_agent_masks_logged_events(orchestrator_environment):
     original_run_dir = settings.run_log_dir
     original_mask_logs = settings.mask_pii_in_logs
@@ -128,6 +126,7 @@ async def test_master_agent_masks_logged_events(orchestrator_environment):
         settings.compliance_mode = original_compliance
 
 
+@pytest.mark.asyncio
 async def test_human_agent_masks_messages(orchestrator_environment):
     backend = DummyHumanBackend()
     original_mask_messages = settings.mask_pii_in_messages

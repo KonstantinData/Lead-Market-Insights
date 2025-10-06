@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Optional
 
 import pytest
 
@@ -60,9 +60,13 @@ async def test_hard_trigger_with_complete_info_dispatches_without_unhandled_stat
         _event_id: Any,
         *,
         force_internal: bool,
+        internal_result: Optional[Dict[str, Any]] = None,
+        requires_dossier_override: Optional[bool] = None,
     ) -> None:
         dispatched["called"] = True
         dispatched["force_internal"] = force_internal
+        dispatched["internal_result"] = internal_result
+        dispatched["requires_dossier_override"] = requires_dossier_override
         event_result["status"] = "dispatched_to_crm"
         event_result["crm_payload"] = {"info": _info}
 

@@ -7,7 +7,7 @@ import os
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Optional
 
 import pytest
 
@@ -131,11 +131,16 @@ def stub_agent_registry(isolated_agent_registry):
             }
 
         def request_dossier_confirmation(
-            self, event: Dict[str, object], info: Dict[str, object]
+            self,
+            event: Dict[str, object],
+            info: Dict[str, object],
+            *,
+            context: Optional[Dict[str, object]] = None,
         ) -> Dict[str, object]:
             return {
                 "approved": True,
                 "audit_id": "audit-dossier",
+                "details": {"context": context or {}},
             }
 
     class StubCrmAgent(BaseCrmAgent):

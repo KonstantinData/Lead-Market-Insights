@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from config.config import Settings
 import warnings
@@ -189,6 +189,87 @@ class HubSpotIntegration:
                 ) from exc
         response.raise_for_status()
         return response.json()
+
+    async def lookup_company_with_attachments(
+        self,
+        domain: str,
+        *,
+        properties: Optional[Sequence[str]] = None,
+        attachment_limit: int = 5,
+    ) -> Dict[str, Any]:
+        """Return the company record and associated file attachments if available.
+
+        Parameters
+        ----------
+        domain:
+            The company web domain used to locate the HubSpot record.
+        properties:
+            Optional list of HubSpot company properties to include in the response.
+        attachment_limit:
+            Upper bound on the number of attachment association records to fetch.
+
+        Returns
+        -------
+        dict
+            ``{"company": <company or None>, "attachments": [..]}``
+        """
+
+        company = await self.find_company_by_domain_async(domain, properties=properties)
+        if not company:
+            return {"company": None, "attachments": []}
+
+        company_id = self._extract_company_id(company)
+        if not company_id:
+            return {"company": company, "attachments": []}
+
+        attachments = await self._list_company_files(company_id, limit=attachment_limit)
+        return {"company": company, "attachments": attachments}
+
+    async def _get(
+        self, path: str, *, params: Optional[Mapping[str, Any]] = None
+    ) -> Dict[str, Any]:
+        timeout = float(self._config.request_timeout)
+        async with concurrency.HUBSPOT_SEMAPHORE:
+            try:
+                response = await asyncio.wait_for(
+                    self._http.get(path, params=params, timeout=timeout),
+                    timeout=timeout,
+                )
+            except asyncio.TimeoutError as exc:
+                raise TimeoutError(
+                    f"HubSpot request to {path} timed out after {timeout:.2f} seconds"
+                ) from exc
+        if response.status_code == 404:
+            return {}
+        response.raise_for_status()
+        return response.json()
+
+    async def _list_company_files(self, company_id: str, *, limit: int = 5) -> List[Dict[str, Any]]:
+        path = f"/crm/v3/objects/companies/{company_id}/associations/files"
+        params: Dict[str, Any] = {"limit": max(1, limit)}
+        payload = await self._get(path, params=params)
+        results = payload.get("results", [])
+        attachments: List[Dict[str, Any]] = []
+        if isinstance(results, Iterable):
+            for item in results:
+                if isinstance(item, Mapping):
+                    attachments.append(dict(item))
+        return attachments
+
+    @staticmethod
+    def _extract_company_id(company: Mapping[str, Any]) -> Optional[str]:
+        for key in ("id", "companyId", "objectId"):
+            value = company.get(key)
+            if value:
+                return str(value)
+
+        properties = company.get("properties")
+        if isinstance(properties, Mapping):
+            for key in ("hs_object_id", "id"):
+                value = properties.get(key)
+                if value:
+                    return str(value)
+        return None
 
     async def aclose(self) -> None:
         await self._http.aclose()

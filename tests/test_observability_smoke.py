@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import importlib
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Optional
 
 import json
 from unittest import mock
@@ -102,11 +102,15 @@ class DummyExtractionAgent:
 
 class DummyHumanAgent:
     def request_dossier_confirmation(
-        self, _event: Dict[str, Any], _info: Dict[str, Any]
+        self,
+        _event: Dict[str, Any],
+        _info: Dict[str, Any],
+        *,
+        context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         return {
             "dossier_required": True,
-            "details": {"note": "prepare dossier"},
+            "details": {"note": "prepare dossier", "context": context or {}},
             "audit_id": "audit-dossier",
         }
 

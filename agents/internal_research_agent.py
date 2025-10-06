@@ -4,49 +4,20 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from functools import lru_cache
 from pathlib import Path
-from typing import (
-    Any,
-    Dict,
-    Iterable,
-    List,
-    Mapping,
-    MutableMapping,
-    Optional,
-    Sequence,
-)
+from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Sequence
 
 from agents.factory import register_agent
 from agents.interfaces import BaseResearchAgent
 from agents.internal_company.run import run as internal_company_run
 from agents.email_agent import EmailAgent
+from integration.hubspot_integration import HubSpotIntegration
 from config.config import settings
 from logs.workflow_log_manager import WorkflowLogManager
 from reminders.reminder_escalation import ReminderEscalation
-from utils.datetime_formatting import format_report_datetime
 from utils.persistence import atomic_write_json
 
 NormalizedPayload = Dict[str, Any]
-
-_TEMPLATE_ROOT = Path(__file__).resolve().parents[1] / "templates" / "email"
-
-
-class _SafeFormatDict(dict):
-    """Dictionary returning an empty string for missing format keys."""
-
-    def __missing__(self, key: str) -> str:  # pragma: no cover - defensive safeguard
-        return ""
-
-
-@lru_cache(maxsize=None)
-def _load_email_template(template_name: str) -> str:
-    template_path = _TEMPLATE_ROOT / template_name
-    if not template_path.exists():
-        raise FileNotFoundError(
-            f"Email template '{template_name}' not found at {template_path}"
-        )
-    return template_path.read_text(encoding="utf-8")
 
 
 @register_agent(BaseResearchAgent, "internal_research", "default", is_default=True)
@@ -67,6 +38,7 @@ class InternalResearchAgent(BaseResearchAgent):
         workflow_log_manager: Optional[WorkflowLogManager] = None,
         email_agent: Optional[EmailAgent] = None,
         internal_search_runner=internal_company_run,
+        hubspot_integration: Optional[HubSpotIntegration] = None,
         logger: Optional[logging.Logger] = None,
     ) -> None:
         self.config = config
@@ -74,6 +46,7 @@ class InternalResearchAgent(BaseResearchAgent):
             config.workflow_log_dir
         )
         self._internal_search_runner = internal_search_runner
+        self._hubspot_integration = hubspot_integration
         self.logger = logger or logging.getLogger(
             f"{__name__}.{self.__class__.__name__}"
         )
@@ -146,10 +119,11 @@ class InternalResearchAgent(BaseResearchAgent):
                 event_id,
             )
 
+        crm_match_payload = self._build_crm_matching_payload(payload)
         crm_artifact = self._write_artifact(
             run_id,
             "crm_matching_company.json",
-            self._build_crm_matching_payload(payload),
+            crm_match_payload,
         )
         if crm_artifact:
             self._log_workflow(
@@ -159,20 +133,18 @@ class InternalResearchAgent(BaseResearchAgent):
                 event_id,
             )
 
-        action, email_status = await self._determine_next_action(
-            trigger, payload, payload_result, run_id, event_id
+        crm_summary = await self._lookup_crm_company(
+            payload,
+            run_id,
+            event_id,
         )
 
+        action = "COMPANY_LOOKUP_COMPLETED"
         self._log_workflow(
             run_id,
             "completed",
-            f"Internal research completed with status {action}.",
+            "Internal research completed with CRM lookup.",
             event_id,
-            error=None
-            if email_status
-            else "email_delivery_failed"
-            if email_status is False
-            else None,
         )
 
         normalized = {
@@ -184,8 +156,7 @@ class InternalResearchAgent(BaseResearchAgent):
             "payload": {
                 "action": action,
                 "level1_samples": samples,
-                "existing_report": bool(payload_result.get("exists")),
-                "last_report_date": payload_result.get("last_report_date"),
+                "crm_lookup": crm_summary,
                 "artifacts": {
                     "neighbor_samples": neighbor_artifact,
                     "crm_match": crm_artifact,
@@ -492,123 +463,111 @@ class InternalResearchAgent(BaseResearchAgent):
             }
         ]
 
-    async def _determine_next_action(
-        self,
-        trigger: Mapping[str, Any],
-        payload: Mapping[str, Any],
-        payload_result: Mapping[str, Any],
-        run_id: str,
-        event_id: Optional[str],
-    ) -> tuple[str, Optional[bool]]:
-        exists = payload_result.get("exists")
-        last_report_date = payload_result.get("last_report_date")
-
-        if exists and last_report_date:
-            email_status = await self._send_existing_report_email(
-                payload,
-                payload_result,
-                run_id,
-                event_id,
-                last_report_date,
-            )
-            action = "AWAIT_REQUESTOR_DECISION"
-            return action, email_status
-
-        action = "REPORT_REQUIRED"
-        self._log_workflow(
-            run_id,
-            "report_required",
-            "No existing dossier found; report creation required.",
-            event_id,
-        )
-        return action, None
-
-    async def _send_existing_report_email(
+    async def _lookup_crm_company(
         self,
         payload: Mapping[str, Any],
-        payload_result: Mapping[str, Any],
         run_id: str,
         event_id: Optional[str],
-        last_report_date: str,
-    ) -> Optional[bool]:
-        recipient = payload.get("creator_email")
-        if not recipient or not self.email_agent:
+    ) -> Dict[str, Any]:
+        domain = payload.get("company_domain") or payload.get("web_domain")
+        if not domain:
             self._log_workflow(
                 run_id,
-                "existing_report_email_skipped",
-                "Existing report email skipped due to configuration.",
+                "crm_lookup_skipped",
+                "CRM lookup skipped due to missing domain.",
                 event_id,
-                error="email_not_configured"
-                if not self.email_agent
-                else "missing_recipient",
             )
-            return None
+            return {
+                "company_in_crm": False,
+                "attachments_in_crm": False,
+                "requires_dossier": True,
+                "attachments": [],
+                "company": None,
+            }
 
-        company_name = payload.get("company_name") or "the requested company"
-        display_date = format_report_datetime(last_report_date)
-
-        subject = f"Existing research available for {company_name}"
-        first_name = recipient.split("@", 1)[0]
-        context = {
-            "recipient_name": first_name,
-            "company_name": company_name,
-            "last_report_date": display_date,
-            "signature": self._default_signature_text,
-        }
-        body = (
-            self._render_email_template(
-                "internal_research_existing_dossier.txt", context
+        integration = self._ensure_hubspot_integration()
+        if integration is None:
+            self._log_workflow(
+                run_id,
+                "crm_lookup_skipped",
+                "HubSpot integration not configured; skipping CRM lookup.",
+                event_id,
+                error="integration_unavailable",
             )
-            or ""
-        )
-        html_body = self._render_email_template(
-            "internal_research_existing_dossier.html",
-            {**context, "signature": self._default_signature_html},
-            optional=True,
-        )
-
-        portal_link = self._build_crm_portal_link(payload_result, payload)
-        attachment_links: Optional[Iterable[str]] = None
-        if portal_link:
-            attachment_links = [portal_link]
+            return {
+                "company_in_crm": False,
+                "attachments_in_crm": False,
+                "requires_dossier": True,
+                "attachments": [],
+                "company": None,
+            }
 
         try:
-            send_email = getattr(self.email_agent, "send_email_async", None)
-            if not callable(send_email):
-                raise AttributeError("email_agent must expose 'send_email_async'")
-            sent = await send_email(
-                recipient,
-                subject,
-                body,
-                html_body=html_body,
-                attachment_links=attachment_links,
-            )
+            lookup = await integration.lookup_company_with_attachments(domain)
         except Exception as exc:  # pragma: no cover - defensive logging
             self._log_workflow(
                 run_id,
-                "existing_report_email_failed",
-                "Failed to send existing report notification.",
+                "crm_lookup_failed",
+                "HubSpot lookup failed.",
                 event_id,
                 error=str(exc),
             )
-            return False
+            self.logger.exception("HubSpot lookup failed for domain %s", domain)
+            return {
+                "company_in_crm": False,
+                "attachments_in_crm": False,
+                "requires_dossier": True,
+                "attachments": [],
+                "company": None,
+            }
 
-        if sent:
-            self._log_workflow(
-                run_id,
-                "existing_report_email_sent",
-                f"Existing report email sent to {recipient}.",
-                event_id,
-            )
+        company = lookup.get("company") if isinstance(lookup, Mapping) else None
+        attachments = lookup.get("attachments") if isinstance(lookup, Mapping) else []
+        if not isinstance(attachments, list):
+            attachments = []
+
+        company_in_crm = bool(company)
+        attachments_in_crm = bool(attachments)
+        requires_dossier = not (company_in_crm and attachments_in_crm)
+
+        message = "Company found in CRM." if company_in_crm else "Company not in CRM."
+        if attachments_in_crm:
+            message += " Attachments detected."
         else:
-            self._log_workflow(
-                run_id,
-                "existing_report_email_failed",
-                f"Existing report email failed for {recipient}.",
-                event_id,
-                error="send_failed",
+            message += " No attachments available."
+
+        self._log_workflow(
+            run_id,
+            "crm_lookup_completed",
+            message,
+            event_id,
+        )
+
+        return {
+            "company_in_crm": company_in_crm,
+            "attachments_in_crm": attachments_in_crm,
+            "requires_dossier": requires_dossier,
+            "attachments": attachments,
+            "attachment_count": len(attachments),
+            "company": company,
+        }
+
+    def _ensure_hubspot_integration(self) -> Optional[HubSpotIntegration]:
+        if self._hubspot_integration is not None:
+            return self._hubspot_integration
+
+        try:
+            self._hubspot_integration = HubSpotIntegration(settings=self.config)
+        except EnvironmentError as exc:
+            self.logger.info(
+                "HubSpot integration unavailable: %s",
+                exc,
             )
-        return bool(sent)
+            self._hubspot_integration = None
+        except Exception as exc:  # pragma: no cover - defensive safeguard
+            self.logger.exception("Failed to initialise HubSpot integration: %s", exc)
+            self._hubspot_integration = None
+        return self._hubspot_integration
 
     def _log_workflow(
         self,
@@ -625,87 +584,6 @@ class InternalResearchAgent(BaseResearchAgent):
             event_id=event_id,
             error=error,
         )
-
-    def _render_email_template(
-        self,
-        template_name: str,
-        context: Mapping[str, Any],
-        *,
-        optional: bool = False,
-    ) -> Optional[str]:
-        try:
-            template = _load_email_template(template_name)
-        except FileNotFoundError:
-            if optional:
-                return None
-            raise
-
-        safe_context = _SafeFormatDict(context)
-        rendered = template.format_map(safe_context)
-        return rendered
-
-    def _build_crm_portal_link(self, *sources: Mapping[str, Any]) -> Optional[str]:
-        for source in sources:
-            if not isinstance(source, Mapping):
-                continue
-            link = self._extract_portal_link_from_mapping(source)
-            if link:
-                return link
-        return None
-
-    def _extract_portal_link_from_mapping(
-        self, mapping: Mapping[str, Any]
-    ) -> Optional[str]:
-        candidate_keys = (
-            "crm_attachment_link",
-            "crm_attachment_url",
-            "crm_attachment_path",
-            "attachment_link",
-            "attachment_url",
-            "portal_link",
-            "portal_url",
-            "portal_path",
-        )
-        for key in candidate_keys:
-            value = mapping.get(key)
-            normalized = self._normalize_portal_value(value)
-            if normalized:
-                return normalized
-
-        nested = mapping.get("payload")
-        if isinstance(nested, Mapping):
-            return self._extract_portal_link_from_mapping(nested)
-        return None
-
-    def _normalize_portal_value(self, value: Any) -> Optional[str]:
-        if isinstance(value, Mapping):
-            for nested_value in value.values():
-                normalized = self._normalize_portal_value(nested_value)
-                if normalized:
-                    return normalized
-            return None
-
-        if isinstance(value, (list, tuple, set)):
-            for item in value:
-                normalized = self._normalize_portal_value(item)
-                if normalized:
-                    return normalized
-            return None
-
-        if not value:
-            return None
-
-        value_str = str(value).strip()
-        if not value_str:
-            return None
-
-        if value_str.startswith("http://") or value_str.startswith("https://"):
-            return value_str
-
-        base = (self.config.crm_attachment_base_url or "").rstrip("/")
-        if not base:
-            return None
-        return f"{base}/{value_str.lstrip('/')}"
 
 
 __all__ = ["InternalResearchAgent"]

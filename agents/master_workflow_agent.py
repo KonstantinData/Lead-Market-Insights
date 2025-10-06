@@ -380,7 +380,15 @@ class MasterWorkflowAgent:
                 continue
 
             internal_status = None
-            internal_result = None
+            internal_result: Optional[Dict[str, Any]] = None
+            crm_lookup: Dict[str, Any] = {
+                "company_in_crm": False,
+                "attachments_in_crm": False,
+                "requires_dossier": True,
+                "attachments": [],
+                "attachment_count": 0,
+                "company": None,
+            }
 
             if not normalised_info.get("company_domain"):
                 event_result["status"] = "hitl_required"
@@ -397,10 +405,7 @@ class MasterWorkflowAgent:
                 except InvalidExtractionError:
                     continue
 
-            # Verhindere doppelten internen Research bei Hard Trigger + vollständigen Daten:
-            if has_research_inputs and not (
-                is_complete and trigger_result.get("type") == "hard"
-            ):
+            if has_research_inputs:
                 internal_result = await self._run_internal_research(
                     event_result,
                     event,
@@ -409,6 +414,7 @@ class MasterWorkflowAgent:
                     force=False,
                 )
                 internal_status = self._extract_internal_status(internal_result)
+                crm_lookup = self._extract_crm_lookup(internal_result)
                 workflow_step_recorder.record_step(
                     self.run_id, event_id, "internal_lookup_completed"
                 )
@@ -422,12 +428,13 @@ class MasterWorkflowAgent:
 
             if trigger_result.get("type") == "hard":
                 if is_complete:
-                    await self._process_crm_dispatch(
+                    await self._handle_hard_trigger(
                         event,
                         normalised_info,
                         event_result,
                         event_id,
-                        force_internal=False,
+                        internal_result=internal_result,
+                        crm_lookup=crm_lookup,
                     )
                     continue
                 else:
@@ -461,12 +468,26 @@ class MasterWorkflowAgent:
                         filled_info, _ = self._normalise_info_for_research(
                             filled.get("info", {}) or {}, event=event
                         )
-                        await self._process_crm_dispatch(
+                        refreshed_internal = await self._run_internal_research(
+                            event_result,
+                            event,
+                            filled_info,
+                            event_id,
+                            force=True,
+                        )
+                        refreshed_lookup = self._extract_crm_lookup(
+                            refreshed_internal
+                        )
+                        workflow_step_recorder.record_step(
+                            self.run_id, event_id, "internal_lookup_completed"
+                        )
+                        await self._handle_hard_trigger(
                             event,
                             filled_info,
                             event_result,
                             event_id,
-                            force_internal=True,
+                            internal_result=refreshed_internal,
+                            crm_lookup=refreshed_lookup,
                         )
                     else:
                         logger.warning(
@@ -479,51 +500,14 @@ class MasterWorkflowAgent:
                 continue
 
             if trigger_result.get("type") == "soft" and is_complete:
-                with observe_operation(
-                    "hitl_dossier", {"event.id": str(event_id)} if event_id else None
-                ):
-                    try:
-                        response = self.request_dossier_confirmation(
-                            event,
-                            info,
-                            event_id=event_id,
-                        )
-                    except DossierConfirmationBackendUnavailable as exc:
-                        self._handle_missing_dossier_backend(
-                            event_result, event_id, str(exc)
-                        )
-                        continue
-                event_result["hitl_dossier"] = response
-                audit_id = response.get("audit_id")
-                status = self._resolve_dossier_status(response)
-                if status == "pending":
-                    self._log_dossier_pending(event_id, audit_id, response)
-                    record_hitl_outcome("dossier", "pending")
-                    event_result["status"] = "dossier_pending"
-                elif response.get("dossier_required") or status == "approved":
-                    logger.info(
-                        "Organizer approved dossier for event %s [audit_id=%s]: %s",
-                        event_id,
-                        audit_id or "n/a",
-                        self._mask_for_logging(response.get("details")),
-                    )
-                    record_hitl_outcome("dossier", "approved")
-                    await self._process_crm_dispatch(
-                        event,
-                        normalised_info,
-                        event_result,
-                        event_id,
-                        force_internal=False,
-                    )
-                else:
-                    logger.info(
-                        "Organizer declined dossier for event %s [audit_id=%s]: %s",
-                        event_id,
-                        audit_id or "n/a",
-                        self._mask_for_logging(response.get("details")),
-                    )
-                    record_hitl_outcome("dossier", "declined")
-                    event_result["status"] = "dossier_declined"
+                await self._handle_soft_trigger(
+                    event,
+                    normalised_info,
+                    event_result,
+                    event_id,
+                    internal_result=internal_result,
+                    crm_lookup=crm_lookup,
+                )
                 continue
 
             if trigger_result.get("type") == "soft" and not is_complete:
@@ -933,8 +917,11 @@ class MasterWorkflowAgent:
         *,
         event_id: Optional[Any] = None,
         run_id: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        result = self.human_agent.request_dossier_confirmation(event, info)
+        result = self.human_agent.request_dossier_confirmation(
+            event, info, context=context
+        )
         status = self._resolve_dossier_status(result)
         audit_id = None
         if isinstance(result, dict):
@@ -1167,6 +1154,266 @@ class MasterWorkflowAgent:
                 return action
         return None
 
+    def _determine_requires_dossier(
+        self, internal_result: Optional[Dict[str, Any]]
+    ) -> bool:
+        if not isinstance(internal_result, Mapping):
+            return True
+
+        payload = internal_result.get("payload")
+        if isinstance(payload, Mapping):
+            if "requires_dossier" in payload:
+                return bool(payload.get("requires_dossier"))
+
+            company_flag = payload.get("company_in_crm")
+            attachments_flag = payload.get("attachments_in_crm")
+            if company_flag is not None or attachments_flag is not None:
+                return not (bool(company_flag) and bool(attachments_flag))
+
+        status = internal_result.get("status")
+        if isinstance(status, str):
+            normalised = status.strip().upper()
+            if normalised in {"REPORT_REQUIRED", "COMPANY_LOOKUP_COMPLETED"}:
+                payload = internal_result.get("payload")
+                if isinstance(payload, Mapping):
+                    if payload.get("company_in_crm") and payload.get(
+                        "attachments_in_crm"
+                    ):
+                        return False
+                return True
+            if normalised in {"AWAIT_REQUESTOR_DECISION", "AWAIT_REQUESTOR_DETAILS"}:
+                return False
+        return True
+
+    def _extract_crm_lookup(
+        self, internal_result: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        default_lookup: Dict[str, Any] = {
+            "company_in_crm": False,
+            "attachments_in_crm": False,
+            "requires_dossier": True,
+            "attachments": [],
+            "attachment_count": 0,
+            "company": None,
+        }
+        if not isinstance(internal_result, Mapping):
+            return default_lookup
+
+        payload = internal_result.get("payload")
+        if not isinstance(payload, Mapping):
+            return default_lookup
+
+        lookup = dict(default_lookup)
+        for key in ("company_in_crm", "attachments_in_crm"):
+            if key in payload:
+                lookup[key] = bool(payload.get(key))
+        if "requires_dossier" in payload:
+            lookup["requires_dossier"] = bool(payload.get("requires_dossier"))
+
+        attachments = payload.get("attachments")
+        if isinstance(attachments, list):
+            lookup["attachments"] = attachments
+
+        if "attachment_count" in payload:
+            try:
+                lookup["attachment_count"] = int(payload.get("attachment_count") or 0)
+            except (TypeError, ValueError):
+                lookup["attachment_count"] = len(lookup["attachments"])
+        elif isinstance(attachments, list):
+            lookup["attachment_count"] = len(attachments)
+
+        company = payload.get("company")
+        if company is not None:
+            lookup["company"] = company
+
+        if "requires_dossier" not in payload:
+            lookup["requires_dossier"] = not (
+                lookup["company_in_crm"] and lookup["attachments_in_crm"]
+            )
+
+        return lookup
+
+    async def _handle_hard_trigger(
+        self,
+        event: Dict[str, Any],
+        info: Dict[str, Any],
+        event_result: Dict[str, Any],
+        event_id: Optional[Any],
+        *,
+        internal_result: Optional[Dict[str, Any]],
+        crm_lookup: Optional[Dict[str, Any]],
+        converted_from_soft: bool = False,
+    ) -> None:
+        lookup = dict(crm_lookup or {})
+        attachments = lookup.get("attachments")
+        if not isinstance(attachments, list):
+            attachments = []
+        attachment_count = lookup.get("attachment_count")
+        if not isinstance(attachment_count, int):
+            attachment_count = len(attachments)
+
+        company_in_crm = bool(lookup.get("company_in_crm"))
+        attachments_in_crm = bool(lookup.get("attachments_in_crm"))
+
+        if company_in_crm and attachments_in_crm and not converted_from_soft:
+            context = {
+                "reason": "attachments_review",
+                "company_name": info.get("company_name"),
+                "attachments_in_crm": True,
+                "attachment_count": attachment_count,
+                "attachments": attachments,
+            }
+            with observe_operation(
+                "hitl_dossier", {"event.id": str(event_id)} if event_id else None
+            ):
+                try:
+                    response = self.request_dossier_confirmation(
+                        event,
+                        info,
+                        event_id=event_id,
+                        context=context,
+                    )
+                except DossierConfirmationBackendUnavailable as exc:
+                    self._handle_missing_dossier_backend(
+                        event_result, event_id, str(exc)
+                    )
+                    return
+
+            event_result["hitl_dossier"] = response
+            audit_id = response.get("audit_id")
+            status = self._resolve_dossier_status(response)
+
+            if status == "pending":
+                self._log_dossier_pending(event_id, audit_id, response)
+                record_hitl_outcome("dossier", "pending")
+                event_result["status"] = "attachments_review_pending"
+                return
+
+            if response.get("dossier_required") or status == "approved":
+                logger.info(
+                    "Organizer approved dossier after attachment review for event %s "
+                    "[audit_id=%s]: %s",
+                    event_id,
+                    audit_id or "n/a",
+                    self._mask_for_logging(response.get("details")),
+                )
+                record_hitl_outcome("dossier", "approved")
+                await self._process_crm_dispatch(
+                    event,
+                    info,
+                    event_result,
+                    event_id,
+                    force_internal=False,
+                    internal_result=internal_result,
+                    requires_dossier_override=True,
+                )
+                return
+
+            logger.info(
+                "Organizer declined new dossier for event %s [audit_id=%s]: %s",
+                event_id,
+                audit_id or "n/a",
+                self._mask_for_logging(response.get("details")),
+            )
+            record_hitl_outcome("dossier", "declined")
+            event_result["status"] = "attachments_review_declined"
+            return
+
+        await self._process_crm_dispatch(
+            event,
+            info,
+            event_result,
+            event_id,
+            force_internal=False,
+            internal_result=internal_result,
+            requires_dossier_override=True,
+        )
+
+    async def _handle_soft_trigger(
+        self,
+        event: Dict[str, Any],
+        info: Dict[str, Any],
+        event_result: Dict[str, Any],
+        event_id: Optional[Any],
+        *,
+        internal_result: Optional[Dict[str, Any]],
+        crm_lookup: Optional[Dict[str, Any]],
+    ) -> None:
+        lookup = dict(crm_lookup or {})
+        attachments = lookup.get("attachments")
+        if not isinstance(attachments, list):
+            attachments = []
+        attachment_count = lookup.get("attachment_count")
+        if not isinstance(attachment_count, int):
+            attachment_count = len(attachments)
+
+        start = event.get("start") or {}
+        end = event.get("end") or {}
+        start_time = start.get("dateTime") or start.get("date")
+        end_time = end.get("dateTime") or end.get("date")
+
+        context = {
+            "reason": "soft_trigger_confirmation",
+            "company_name": info.get("company_name"),
+            "attachments_in_crm": bool(lookup.get("attachments_in_crm")),
+            "attachment_count": attachment_count,
+            "attachments": attachments,
+            "event_start": start_time,
+            "event_end": end_time,
+        }
+
+        with observe_operation(
+            "hitl_dossier", {"event.id": str(event_id)} if event_id else None
+        ):
+            try:
+                response = self.request_dossier_confirmation(
+                    event,
+                    info,
+                    event_id=event_id,
+                    context=context,
+                )
+            except DossierConfirmationBackendUnavailable as exc:
+                self._handle_missing_dossier_backend(event_result, event_id, str(exc))
+                return
+
+        event_result["hitl_dossier"] = response
+        audit_id = response.get("audit_id")
+        status = self._resolve_dossier_status(response)
+
+        if status == "pending":
+            self._log_dossier_pending(event_id, audit_id, response)
+            record_hitl_outcome("dossier", "pending")
+            event_result["status"] = "dossier_pending"
+            return
+
+        if response.get("dossier_required") or status == "approved":
+            logger.info(
+                "Organizer approved dossier for soft trigger event %s [audit_id=%s]: %s",
+                event_id,
+                audit_id or "n/a",
+                self._mask_for_logging(response.get("details")),
+            )
+            record_hitl_outcome("dossier", "approved")
+            await self._handle_hard_trigger(
+                event,
+                info,
+                event_result,
+                event_id,
+                internal_result=internal_result,
+                crm_lookup=crm_lookup,
+                converted_from_soft=True,
+            )
+            return
+
+        logger.info(
+            "Organizer declined dossier for soft trigger event %s [audit_id=%s]: %s",
+            event_id,
+            audit_id or "n/a",
+            self._mask_for_logging(response.get("details")),
+        )
+        record_hitl_outcome("dossier", "declined")
+        event_result["status"] = "dossier_declined"
+
     async def _execute_precrm_research(
         self,
         event_result: Dict[str, Any],
@@ -1246,6 +1493,8 @@ class MasterWorkflowAgent:
         event_id: Optional[Any],
         *,
         force_internal: bool,
+        internal_result: Optional[Dict[str, Any]] = None,
+        requires_dossier_override: Optional[bool] = None,
     ) -> None:
         prepared_info, _ = self._normalise_info_for_research(info, event=event)
         if not self._has_research_inputs(prepared_info):
@@ -1257,13 +1506,17 @@ class MasterWorkflowAgent:
         except InvalidExtractionError:
             return
 
-        internal_result = await self._run_internal_research(
-            event_result,
-            event,
-            prepared_info,
-            event_id,
-            force=force_internal,
-        )
+        if internal_result is None:
+            internal_result = await self._run_internal_research(
+                event_result,
+                event,
+                prepared_info,
+                event_id,
+                force=force_internal,
+            )
+        research_store = event_result.setdefault("research", {})
+        if internal_result is not None:
+            research_store.setdefault("internal_research", internal_result)
         internal_status = self._extract_internal_status(internal_result)
         if internal_status == "AWAIT_REQUESTOR_DETAILS":
             event_result["status"] = "awaiting_requestor_details"
@@ -1272,7 +1525,10 @@ class MasterWorkflowAgent:
             event_result["status"] = "awaiting_requestor_decision"
             return
 
-        requires_dossier = internal_status in (None, "REPORT_REQUIRED")
+        if requires_dossier_override is not None:
+            requires_dossier = bool(requires_dossier_override)
+        else:
+            requires_dossier = self._determine_requires_dossier(internal_result)
         await self._execute_precrm_research(
             event_result,
             event,

@@ -17,7 +17,11 @@ class DummyHumanAgent:
         return dict(self.follow_up)
 
     def request_dossier_confirmation(
-        self, event: Dict[str, Any], info: Dict[str, Any]
+        self,
+        event: Dict[str, Any],
+        info: Dict[str, Any],
+        *,
+        context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:  # pragma: no cover - not used in these tests
         raise NotImplementedError
 

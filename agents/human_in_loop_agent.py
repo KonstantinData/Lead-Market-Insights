@@ -3,7 +3,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, Mapping, Optional, Sequence
 
 from agents.factory import register_agent
 from agents.interfaces import BaseHumanAgent
@@ -167,7 +167,11 @@ class HumanInLoopAgent(BaseHumanAgent):
         return extracted
 
     def request_dossier_confirmation(
-        self, event: Dict[str, Any], info: Dict[str, Any]
+        self,
+        event: Dict[str, Any],
+        info: Dict[str, Any],
+        *,
+        context: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Ask the organizer whether a dossier should be created for the event.
@@ -197,12 +201,20 @@ class HumanInLoopAgent(BaseHumanAgent):
         DossierConfirmationBackendUnavailable
             If no communication backend is configured for dossier confirmation requests.
         """
+        context_payload: Dict[str, Any] = dict(context or {})
         contact = self._extract_organizer_contact(event)
         masked_event = self._mask_for_message(event)
         masked_info = self._mask_for_message(info)
-        subject = self._build_subject(masked_event)
-        message = self._build_message(masked_event, masked_info)
-        payload = {"event": masked_event, "info": masked_info}
+        masked_context = self._mask_for_message(context_payload)
+        subject = self._build_subject(masked_event, context=context_payload)
+        message = self._build_message(
+            masked_event, masked_info, context=context_payload
+        )
+        payload = {
+            "event": masked_event,
+            "info": masked_info,
+            "context": masked_context,
+        }
 
         backend_response: Optional[Any] = None
         handler = self._resolve_backend_handler()
@@ -229,6 +241,7 @@ class HumanInLoopAgent(BaseHumanAgent):
                     "subject": subject,
                     "message": message,
                     "contact": masked_contact,
+                    "context": masked_context,
                 },
             )
         logger.debug("Sending dossier confirmation request via backend %s", handler)
@@ -239,6 +252,7 @@ class HumanInLoopAgent(BaseHumanAgent):
             message=message,
             event=event,
             info=info,
+            context=context_payload,
             payload=payload,
         )
 
@@ -249,6 +263,8 @@ class HumanInLoopAgent(BaseHumanAgent):
         details.setdefault("contact", masked_contact)
         details.setdefault("subject", subject)
         details.setdefault("message", message)
+        if "context" not in details:
+            details["context"] = masked_context
         normalized["details"] = details
 
         if self.audit_log:
@@ -352,27 +368,80 @@ class HumanInLoopAgent(BaseHumanAgent):
         phone = organizer.get("phone") or organizer.get("phoneNumber")
         return {"email": email, "name": name, "phone": phone, "raw": organizer or None}
 
-    def _build_subject(self, event: Dict[str, Any]) -> str:
-        """
-        Builds the subject line for dossier confirmation requests.
-        """
+    def _build_subject(
+        self, event: Dict[str, Any], *, context: Optional[Mapping[str, Any]] = None
+    ) -> str:
+        """Build the subject line for dossier confirmation requests."""
+
+        reason = (context or {}).get("reason") if context else None
         summary = event.get("summary") or "event"
+
+        if reason == "attachments_review":
+            return f"Review CRM attachments for {summary}"
+        if reason == "soft_trigger_confirmation":
+            return f"Confirm dossier requirement for {summary}"
         return f"Dossier confirmation required for {summary}"
 
-    def _build_message(self, event: Dict[str, Any], info: Dict[str, Any]) -> str:
-        """
-        Builds the message body for dossier confirmation requests.
-        """
+    def _build_message(
+        self,
+        event: Dict[str, Any],
+        info: Dict[str, Any],
+        *,
+        context: Optional[Mapping[str, Any]] = None,
+    ) -> str:
+        """Build the message body for dossier confirmation requests."""
+
+        context = dict(context or {})
+        reason = context.get("reason")
         summary = event.get("summary", "Unknown event")
         event_id = event.get("id", "<unknown>")
-        lines = [
-            f"Event: {summary} ({event_id})",
-            "We extracted the following information:",
-        ]
-        for key, value in info.items():
-            lines.append(f"- {key}: {value}")
+        lines = [f"Event: {summary} ({event_id})"]
+
+        if context.get("event_start") or context.get("event_end"):
+            start = context.get("event_start")
+            end = context.get("event_end")
+            window = " - ".join(
+                [value for value in (str(start or ""), str(end or "")) if value]
+            ).strip()
+            if window:
+                lines.append(f"Scheduled: {window}")
+
+        if reason == "attachments_review":
+            attachment_count = context.get("attachment_count")
+            if attachment_count is None and isinstance(context.get("attachments"), list):
+                attachment_count = len(context.get("attachments"))
+            lines.append(
+                "We found an existing HubSpot company record with stored attachments."
+            )
+            lines.append(
+                f"Attachments available: {attachment_count or 0} file(s) in the CRM."
+            )
+        elif reason == "soft_trigger_confirmation":
+            lines.append(
+                "This meeting was flagged by a soft trigger. We are unsure if a dossier"
+            )
+            lines.append(
+                "is required for preparation and would appreciate your guidance."
+            )
+        else:
+            lines.append("We extracted the following information:")
+
+        if info:
+            for key, value in info.items():
+                lines.append(f"- {key}: {value}")
+
+        if reason != "attachments_review":
+            attachments_flag = context.get("attachments_in_crm")
+            if attachments_flag:
+                attachment_count = context.get("attachment_count")
+                lines.append(
+                    f"Existing CRM attachments detected: {attachment_count or 'yes'}."
+                )
+
         lines.append("")
-        lines.append("Should we prepare a dossier for this event? Reply yes or no.")
+        lines.append(
+            "Should we prepare a dossier for this event? Reply yes or no."
+        )
         return "\n".join(lines)
 
     def _normalize_response(self, response: Any) -> Dict[str, Any]:

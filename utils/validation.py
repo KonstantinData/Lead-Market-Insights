@@ -15,6 +15,23 @@ PLACEHOLDER_DOMAINS = {
 
 PUBLIC_SUFFIX_RE = re.compile(r"^[a-z0-9.-]+\.[a-z]{2,}$")
 
+LEGAL_SUFFIX_RE = re.compile(
+    r"("  # common corporate suffixes, anchored at end with optional whitespace
+    r"gmbh(?:\s*&\s*co\.?\s*kg)?|ag|ug|kg|ohg|e\.?k\.?|kgaa|se|"
+    r"limited|ltd|inc|llc|llp|plc|"
+    r"sarl|s\.?a\.?r\.?l\.?|sas|bv|nv|ab|oy|a/s|aps|"
+    r"s\.?p\.?a\.?|spa|srl|"
+    r"sp\.\s*z\s*o\.?o\.?|spzoo|"
+    r"s\.?a\.?|sa"
+    r")\s*$",
+    re.IGNORECASE,
+)
+
+SALUTATION_HEAD_RE = re.compile(
+    r"^\s*(herr|hr\.?|frau|fr\.?|firma|fa\.?|mr\.?|mrs\.?|ms\.?)\b",
+    re.IGNORECASE,
+)
+
 
 class InvalidExtractionError(ValueError):
     """Raised when extraction results fail validation requirements."""
@@ -48,15 +65,46 @@ def is_valid_business_domain(domain: str | None) -> bool:
     return bool(PUBLIC_SUFFIX_RE.match(candidate))
 
 
+def _squash_internal_whitespace(text: str) -> str:
+    """Collapse repeated whitespace into single spaces and strip the result."""
+
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _starts_with_salutation(company_name: str) -> bool:
+    """Return ``True`` when *company_name* begins with a salutation or generic marker."""
+
+    return bool(SALUTATION_HEAD_RE.search(company_name))
+
+
+def _has_legal_suffix(company_name: str) -> bool:
+    """Return ``True`` if *company_name* ends with a recognised legal entity suffix."""
+
+    return bool(LEGAL_SUFFIX_RE.search(company_name))
+
+
 def validate_extraction_or_raise(info: Mapping[str, Any]) -> Mapping[str, Any]:
     """Validate ``info`` extracted for research and CRM dispatch."""
 
-    company_name = (info.get("company_name") or info.get("name") or "").strip()
+    company_name_raw = (info.get("company_name") or info.get("name") or "").strip()
     domain = info.get("company_domain") or info.get("web_domain") or info.get("domain")
     normalised_domain = normalize_domain(domain)
 
-    if not company_name:
+    if not company_name_raw:
         raise InvalidExtractionError("company_name missing")
+
+    company_name = _squash_internal_whitespace(company_name_raw)
+
+    starts_with_salutation = _starts_with_salutation(company_name)
+    has_legal_suffix = _has_legal_suffix(company_name)
+
+    if starts_with_salutation and not has_legal_suffix:
+        raise InvalidExtractionError(
+            "company_name starts with a salutation but lacks a legal entity suffix"
+        )
+
+    if not normalised_domain:
+        raise InvalidExtractionError("company_domain missing")
 
     if not is_valid_business_domain(normalised_domain):
         raise InvalidExtractionError(f"invalid web_domain: {normalised_domain or domain!r}")

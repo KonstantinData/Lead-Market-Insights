@@ -40,6 +40,45 @@ def test_validate_extraction_or_raise_normalises_inputs() -> None:
         validate_extraction_or_raise({"company_name": "Acme", "company_domain": "example.com"})
 
 
+def test_validate_extraction_or_raise_rejects_salutations() -> None:
+    with pytest.raises(InvalidExtractionError):
+        validate_extraction_or_raise(
+            {
+                "company_name": "Herr Milonas Firma Condata",
+                "company_domain": "condata.io",
+            }
+        )
+
+    # Allow legitimate companies that coincidentally start with "Herr" but include a suffix.
+    validated = validate_extraction_or_raise(
+        {"company_name": "Herr GmbH", "company_domain": "herr-gmbh.de"}
+    )
+    assert validated["company_name"] == "Herr GmbH"
+
+
+@pytest.mark.parametrize(
+    "name, expected_valid",
+    [
+        ("Firma Condata", False),
+        ("Herr GmbH", True),
+        ("HERR Industrie GmbH", True),
+        ("Frau Müller Consulting", False),
+        ("Herr AG", True),
+        ("Mr. Smith LLC", True),
+        ("Herr Milonas Condata", False),
+    ],
+)
+def test_validate_extraction_or_raise_salutation_matrix(name: str, expected_valid: bool) -> None:
+    payload = {"company_name": name, "company_domain": "condata.io"}
+
+    if expected_valid:
+        validated = validate_extraction_or_raise(payload)
+        assert validated["company_name"] == name.strip()
+    else:
+        with pytest.raises(InvalidExtractionError):
+            validate_extraction_or_raise(payload)
+
+
 def test_normalize_similar_companies_handles_empty_results() -> None:
     empty_payload = normalize_similar_companies({"results": []})
     assert empty_payload["status"] == "no_candidates"

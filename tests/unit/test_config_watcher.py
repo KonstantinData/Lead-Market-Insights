@@ -56,8 +56,8 @@ def test_watcher_start_registers_directories(monkeypatch, config_file):
     watcher = LlmConfigurationWatcher(dummy_settings)
     assert watcher.start() is True
     assert observer.started is True
-    scheduled_dirs = {entry[0] for entry in observer.scheduled}
-    assert config_file.parent.as_posix() in scheduled_dirs
+    scheduled_dirs = {Path(entry[0]).resolve() for entry in observer.scheduled}
+    assert config_file.parent.resolve() in scheduled_dirs
 
 
 def test_handle_event_refreshes_settings(monkeypatch, config_file):

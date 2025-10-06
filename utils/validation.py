@@ -83,6 +83,28 @@ def _has_legal_suffix(company_name: str) -> bool:
     return bool(LEGAL_SUFFIX_RE.search(company_name))
 
 
+def _strip_leading_salutations(company_name: str) -> str:
+    """Remove salutation tokens from the head of *company_name* and normalise spacing."""
+
+    remainder = company_name
+    while True:
+        match = SALUTATION_HEAD_RE.match(remainder)
+        if not match:
+            break
+        remainder = remainder[match.end() :]
+        remainder = remainder.lstrip(" ,.-")
+    return _squash_internal_whitespace(remainder)
+
+
+def _extract_domain_keyword(domain: str) -> str:
+    """Return a representative keyword for *domain* to match against company names."""
+
+    labels = [label for label in domain.split(".") if label and label.lower() != "www"]
+    if not labels:
+        return ""
+    return max(labels, key=len)
+
+
 def validate_extraction_or_raise(info: Mapping[str, Any]) -> Mapping[str, Any]:
     """Validate ``info`` extracted for research and CRM dispatch."""
 
@@ -95,19 +117,34 @@ def validate_extraction_or_raise(info: Mapping[str, Any]) -> Mapping[str, Any]:
 
     company_name = _squash_internal_whitespace(company_name_raw)
 
-    starts_with_salutation = _starts_with_salutation(company_name)
-    has_legal_suffix = _has_legal_suffix(company_name)
-
-    if starts_with_salutation and not has_legal_suffix:
-        raise InvalidExtractionError(
-            "company_name starts with a salutation but lacks a legal entity suffix"
-        )
-
     if not normalised_domain:
         raise InvalidExtractionError("company_domain missing")
 
     if not is_valid_business_domain(normalised_domain):
         raise InvalidExtractionError(f"invalid web_domain: {normalised_domain or domain!r}")
+
+    starts_with_salutation = _starts_with_salutation(company_name)
+    has_legal_suffix = _has_legal_suffix(company_name)
+
+    if starts_with_salutation and not has_legal_suffix:
+        stripped = _strip_leading_salutations(company_name)
+        domain_keyword = _extract_domain_keyword(normalised_domain)
+        if (
+            stripped
+            and not _starts_with_salutation(stripped)
+            and (
+                _has_legal_suffix(stripped)
+                or (
+                    domain_keyword
+                    and domain_keyword.lower() in stripped.lower()
+                )
+            )
+        ):
+            company_name = stripped
+        else:
+            raise InvalidExtractionError(
+                "company_name starts with a salutation but lacks a legal entity suffix"
+            )
 
     payload = dict(info)
     payload["company_name"] = company_name

@@ -9,6 +9,7 @@ from utils.validation import (
     InvalidExtractionError,
     finalize_dossier,
     is_valid_business_domain,
+    normalize_domain,
     normalize_similar_companies,
     validate_extraction_or_raise,
 )
@@ -19,6 +20,12 @@ def test_is_valid_business_domain_filters_placeholders() -> None:
     assert not is_valid_business_domain("example.com")
     assert not is_valid_business_domain("localhost")
     assert not is_valid_business_domain("invalid")
+    assert not is_valid_business_domain("printer.local")
+
+
+def test_normalize_domain_strips_protocol_and_slashes() -> None:
+    assert normalize_domain("HTTPS://Example.com/") == "example.com"
+    assert normalize_domain(None) == ""
 
 
 def test_validate_extraction_or_raise_normalises_inputs() -> None:

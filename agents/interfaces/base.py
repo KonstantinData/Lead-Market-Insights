@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Iterable, Mapping
+from typing import Any, Dict, Iterable, Mapping, Optional
 
 
 class BasePollingAgent(ABC):
@@ -52,7 +52,11 @@ class BaseHumanAgent(ABC):
 
     @abstractmethod
     def request_dossier_confirmation(
-        self, event: Mapping[str, Any], info: Mapping[str, Any]
+        self,
+        event: Mapping[str, Any],
+        info: Mapping[str, Any],
+        *,
+        context: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Ask whether a dossier should be produced for the supplied event."""
 

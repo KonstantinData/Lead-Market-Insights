@@ -164,6 +164,11 @@ async def test_missing_required_fields_raise_value_error(
         await agent.run(trigger)
 
 
+async def test_payload_must_be_mapping(agent: DossierResearchAgent) -> None:
+    with pytest.raises(ValueError, match="requires a mapping payload"):
+        await agent.run({"payload": "not-a-mapping"})
+
+
 async def test_artifacts_are_traceable_by_run_and_event(
     agent: DossierResearchAgent, trigger_factory
 ) -> None:
@@ -183,6 +188,38 @@ async def test_artifacts_are_traceable_by_run_and_event(
         "evt-456_company_detail_research.json",
         "evt-789_company_detail_research.json",
     ]
+
+
+async def test_run_generates_run_and_event_id_when_missing(
+    agent: DossierResearchAgent, monkeypatch
+) -> None:
+    class _UUID:
+        def __init__(self, value: str) -> None:
+            self.hex = value
+
+    monkeypatch.setattr(
+        "agents.dossier_research_agent.uuid4", lambda: _UUID("auto-generated")
+    )
+
+    trigger = {
+        "payload": {
+            "company_name": "Generated Corp",
+            "company_domain": "generated.example",
+            "summary": "Synthetic summary",
+            "insights": [],
+            "sources": [],
+        }
+    }
+
+    result = await agent.run(trigger)
+    payload = result["payload"]
+
+    assert payload["run_id"] == "auto-generated"
+    assert payload["event_id"] == "auto-generated"
+
+    artifact_path = Path(result["artifact_path"])
+    assert artifact_path.parent.name == "auto-generated"
+    assert artifact_path.name == "auto-generated_company_detail_research.json"
 
 
 async def test_company_detail_schema_snapshot(

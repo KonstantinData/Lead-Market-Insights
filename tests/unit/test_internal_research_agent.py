@@ -1,4 +1,3 @@
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -39,12 +38,22 @@ def workflow_logs():
 
 
 @pytest.fixture
-def agent(config, workflow_logs):
+def hubspot_stub():
+    return SimpleNamespace(
+        lookup_company_with_attachments=AsyncMock(
+            return_value={"company": None, "attachments": []}
+        )
+    )
+
+
+@pytest.fixture
+def agent(config, workflow_logs, hubspot_stub):
     return InternalResearchAgent(
         config=config,
         workflow_log_manager=workflow_logs,
         email_agent=MagicMock(),
         internal_search_runner=lambda trigger: {"payload": {}},
+        hubspot_integration=hubspot_stub,
     )
 
 
@@ -146,58 +155,54 @@ async def test_dispatch_missing_field_reminder_requires_email(agent):
 
 
 @pytest.mark.asyncio
-async def test_determine_next_action_sends_existing_report(agent, workflow_logs):
-    agent._send_existing_report_email = AsyncMock(return_value=False)
+async def test_run_includes_crm_lookup(agent, hubspot_stub, workflow_logs):
+    hubspot_stub.lookup_company_with_attachments.return_value = {
+        "company": {"id": "123"},
+        "attachments": [{"id": "a1"}],
+    }
 
-    payload = {"creator_email": "analyst@example.com"}
-    payload_result = {"exists": True, "last_report_date": "2024-01-01T00:00:00Z"}
-
-    action, email_status = await agent._determine_next_action(
-        {},
-        payload,
-        payload_result,
-        "run-1",
-        "evt-2",
-    )
-
-    assert action == "AWAIT_REQUESTOR_DECISION"
-    assert email_status is False
-    agent._send_existing_report_email.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_determine_next_action_reports_required(agent, workflow_logs):
-    payload_result = {"exists": False}
-
-    action, email_status = await agent._determine_next_action(
-        {},
-        {},
-        payload_result,
-        "run-2",
-        None,
-    )
-
-    assert action == "REPORT_REQUIRED"
-    assert email_status is None
-
-    assert any(entry["step"] == "report_required" for entry in workflow_logs.records)
-
-
-def test_build_crm_portal_link_prefers_nested_payload(agent):
-    nested = {
+    trigger = {
         "payload": {
-            "portal_path": "reports/doc.pdf",
+            "company_name": "ACME",
+            "company_domain": "acme.example",
         }
     }
 
-    link = agent._build_crm_portal_link({}, nested)
-    assert link == "https://crm.example.com/base/reports/doc.pdf"
+    result = await agent.run(trigger)
+    lookup = result["payload"]["crm_lookup"]
+
+    assert lookup["company_in_crm"] is True
+    assert lookup["attachments_in_crm"] is True
+    assert lookup["requires_dossier"] is False
+    assert lookup["attachment_count"] == 1
+
+    assert any(entry["step"] == "crm_lookup_completed" for entry in workflow_logs.records)
 
 
-def test_build_crm_portal_link_accepts_full_url(agent):
-    payload_result = {"portal_link": "https://crm.example.com/report"}
-    link = agent._build_crm_portal_link(payload_result)
-    assert link == "https://crm.example.com/report"
+@pytest.mark.asyncio
+async def test_lookup_crm_company_handles_missing_domain(agent, workflow_logs):
+    summary = await agent._lookup_crm_company({}, "run-x", "evt-x")
+
+    assert summary["company_in_crm"] is False
+    assert summary["attachments_in_crm"] is False
+    assert summary["requires_dossier"] is True
+    assert any(entry["step"] == "crm_lookup_skipped" for entry in workflow_logs.records)
+
+
+@pytest.mark.asyncio
+async def test_lookup_crm_company_handles_integration_failure(
+    agent, hubspot_stub, workflow_logs
+):
+    hubspot_stub.lookup_company_with_attachments.side_effect = RuntimeError("boom")
+
+    summary = await agent._lookup_crm_company(
+        {"company_domain": "example.com"}, "run-y", "evt-y"
+    )
+
+    assert summary["company_in_crm"] is False
+    assert summary["attachments_in_crm"] is False
+    assert summary["requires_dossier"] is True
+    assert any(entry["step"] == "crm_lookup_failed" for entry in workflow_logs.records)
 
 
 def test_normalise_payload_populates_optional_aliases(agent):
@@ -287,78 +292,3 @@ async def test_run_handles_missing_fields_without_lookup(agent, monkeypatch):
 
     assert result["status"] == "AWAIT_REQUESTOR_DETAILS"
     lookup.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_run_existing_report_records_artifacts(agent, tmp_path, workflow_logs):
-    neighbor_payload = {
-        "payload": {
-            "exists": True,
-            "last_report_date": "2024-01-01T00:00:00Z",
-            "neighbors": [{"company_name": "Neighbor Inc", "description": "Match"}],
-            "crm_attachment_link": "https://crm.example.com/doc",
-        }
-    }
-
-    agent._internal_search_runner = MagicMock(return_value=neighbor_payload)
-    agent._send_existing_report_email = AsyncMock(return_value=True)
-
-    trigger = {
-        "payload": {
-            "company_name": "ACME",
-            "company_domain": "acme.example",
-            "creator_email": "owner@example.com",
-        }
-    }
-
-    result = await agent.run(trigger)
-
-    artifacts = result["payload"]["artifacts"]
-    assert Path(artifacts["neighbor_samples"]).exists()
-    assert Path(artifacts["crm_match"]).exists()
-    agent._send_existing_report_email.assert_awaited_once()
-    assert any(
-        entry["step"] == "neighbor_samples_recorded" for entry in workflow_logs.records
-    )
-
-
-@pytest.mark.asyncio
-async def test_send_existing_report_email_success(agent, workflow_logs):
-    send_email = AsyncMock(return_value=True)
-    agent.email_agent = MagicMock(send_email_async=send_email)
-
-    payload = {"creator_email": "owner@example.com", "company_name": "ACME"}
-    payload_result = {"crm_attachment_link": "https://crm.example.com/doc"}
-
-    status = await agent._send_existing_report_email(
-        payload,
-        payload_result,
-        "run-77",
-        "evt-88",
-        "2024-01-01T00:00:00Z",
-    )
-
-    assert status is True
-    send_email.assert_awaited_once()
-    assert any(
-        entry["step"] == "existing_report_email_sent" for entry in workflow_logs.records
-    )
-
-
-@pytest.mark.asyncio
-async def test_send_existing_report_email_skips_without_recipient(agent, workflow_logs):
-    agent.email_agent = MagicMock(send_email_async=AsyncMock())
-
-    status = await agent._send_existing_report_email(
-        {},
-        {},
-        "run-1",
-        None,
-        "2024-01-01T00:00:00Z",
-    )
-
-    assert status is None
-    assert any(
-        entry["step"] == "existing_report_email_skipped" and entry["error"]
-        for entry in workflow_logs.records
-    )

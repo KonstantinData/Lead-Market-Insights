@@ -35,6 +35,16 @@ if STUBS.exists() and str(STUBS) not in sys.path:
 DEFAULT_TEST_GOOGLE_CALENDAR_ID = "test-calendar@example.com"
 os.environ.setdefault("GOOGLE_CALENDAR_ID", DEFAULT_TEST_GOOGLE_CALENDAR_ID)
 
+_DEFAULT_SMTP_ENV = {
+    "SMTP_HOST": "smtp.test.invalid",
+    "SMTP_PORT": "465",
+    "SMTP_USERNAME": "mailer",
+    "SMTP_PASSWORD": "secret",
+    "SMTP_SENDER": "alerts@example.com",
+}
+for _key, _value in _DEFAULT_SMTP_ENV.items():
+    os.environ.setdefault(_key, _value)
+
 
 @pytest.fixture
 def isolated_agent_registry(monkeypatch):

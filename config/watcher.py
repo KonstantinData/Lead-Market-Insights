@@ -91,7 +91,9 @@ class LlmConfigurationWatcher:
 
         self._observer = Observer()
         for directory in self._directories:
-            self._observer.schedule(self._handler, str(directory), recursive=False)
+            self._observer.schedule(
+                self._handler, directory.as_posix(), recursive=False
+            )
         self._observer.start()
         logger.debug(
             "Started LLM configuration watcher for %s",

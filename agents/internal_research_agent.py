@@ -226,7 +226,9 @@ class InternalResearchAgent(BaseResearchAgent):
             or getattr(config, "smtp_user", None)
         )
         password = getattr(config, "smtp_password", None)
-        sender = getattr(config, "smtp_sender", None) or username
+        sender = getattr(config, "smtp_sender", None) or getattr(
+            config, "smtp_from", None
+        )
 
         if not (host and port and username and password and sender):
             self.logger.info(

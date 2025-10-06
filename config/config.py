@@ -496,10 +496,10 @@ class Settings:
         self.smtp_password: Optional[str] = _get_env_var(
             "SMTP_PASSWORD", aliases=("SMTP_PASS",)
         )
-        smtp_sender = _get_env_var("SMTP_SENDER") or _get_env_var("SMTP_FROM")
-        if not smtp_sender and self.smtp_username:
-            smtp_sender = self.smtp_username
-        self.smtp_sender: Optional[str] = smtp_sender
+        smtp_sender = _get_env_var("SMTP_SENDER")
+        smtp_from = _get_env_var("SMTP_FROM")
+        self.smtp_sender: Optional[str] = smtp_sender or smtp_from
+        self.smtp_from: Optional[str] = smtp_from
         self.smtp_secure: bool = _get_bool_env("SMTP_SECURE", True)
 
         # Backwards compatibility aliases

@@ -12,9 +12,6 @@ from config.config import Settings
 from integration.hubspot_integration import HubSpotIntegration
 
 
-pytestmark = pytest.mark.asyncio
-
-
 class DummyResponse:
     def __init__(self, payload: Dict[str, object]):
         self._payload = payload
@@ -49,6 +46,7 @@ def configured_settings(monkeypatch) -> Settings:
     return Settings()
 
 
+@pytest.mark.asyncio
 async def test_find_company_by_domain_normalizes_and_matches(
     monkeypatch, configured_settings
 ):
@@ -79,6 +77,7 @@ async def test_find_company_by_domain_normalizes_and_matches(
     assert captured_payloads, "Expected HubSpot request payload to be captured"
 
 
+@pytest.mark.asyncio
 async def test_list_similar_companies_uses_normalized_name(
     monkeypatch, configured_settings
 ):
@@ -111,6 +110,7 @@ def test_missing_access_token_raises_error(monkeypatch):
         HubSpotIntegration(settings=Settings())
 
 
+@pytest.mark.asyncio
 async def test_hubspot_requests_respect_concurrency_limit(
     monkeypatch, configured_settings
 ):

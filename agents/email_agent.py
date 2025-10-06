@@ -57,6 +57,7 @@ def _validate_smtp_settings(settings: object) -> None:
             "SMTP configuration incomplete: " + ", ".join(sorted(unique_missing))
         )
 
+
 from utils.async_smtp import send_email_ssl
 
 

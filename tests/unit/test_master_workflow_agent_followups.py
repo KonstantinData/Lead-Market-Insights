@@ -127,7 +127,7 @@ async def test_missing_info_continuation_registers_pending(monkeypatch: pytest.M
 
     context = {
         "event": {"id": "evt-2"},
-        "info": {"company_name": "Acme"},
+        "info": {"company_name": ""},
         "event_id": "evt-2",
     }
 
@@ -172,7 +172,7 @@ async def test_missing_info_pending_handler_failure_is_logged(
 
     context = {
         "event": {"id": "evt-3"},
-        "info": {"company_name": "Acme"},
+        "info": {"company_name": ""},
         "event_id": "evt-3",
     }
 
@@ -196,7 +196,7 @@ async def test_missing_info_continuation_marks_incomplete(monkeypatch: pytest.Mo
 
     context = {
         "event": {"id": "evt-3"},
-        "info": {"company_name": "Acme"},
+        "info": {"company_name": ""},
         "event_id": "evt-3",
     }
 
@@ -232,7 +232,7 @@ async def test_missing_info_pending_handler_errors_are_ignored(
 
     context = {
         "event": {"id": "evt-err"},
-        "info": {"company_name": "Acme"},
+        "info": {"company_name": ""},
         "event_id": "evt-err",
     }
 
@@ -280,7 +280,7 @@ async def test_missing_info_follow_up_completes(monkeypatch: pytest.MonkeyPatch)
 
     context = {
         "event": {"id": "evt-6"},
-        "info": {"company_name": "Acme"},
+        "info": {"company_name": ""},
         "event_id": "evt-6",
     }
 
@@ -297,7 +297,7 @@ async def test_dossier_continuation_decline_short_circuits(monkeypatch: pytest.M
     agent = _build_agent(human)
     monkeypatch.setattr(agent, "_process_crm_dispatch", lambda *args, **kwargs: None)
 
-    context = {"event": {"id": "evt-3"}, "info": {"company_name": "Acme"}, "event_id": "evt-3"}
+    context = {"event": {"id": "evt-3"}, "info": {"company_name": ""}, "event_id": "evt-3"}
 
     result = await agent.continue_after_dossier_decision("audit-1", "Declined", context)
 
@@ -362,7 +362,7 @@ async def test_dossier_continuation_requests_follow_up(monkeypatch: pytest.Monke
 
     context = {
         "event": {"id": "evt-5"},
-        "info": {"company_name": "Acme"},
+        "info": {"company_name": ""},
         "event_id": "evt-5",
     }
 
@@ -390,7 +390,7 @@ async def test_dossier_continuation_incomplete_returns_none(
 
     context = {
         "event": {"id": "evt-8"},
-        "info": {"company_name": "Acme"},
+        "info": {"company_name": ""},
         "event_id": "evt-8",
     }
 
@@ -435,7 +435,7 @@ async def test_dossier_follow_up_completion(monkeypatch: pytest.MonkeyPatch) -> 
 
     context = {
         "event": {"id": "evt-7"},
-        "info": {"company_name": "Acme"},
+        "info": {"company_name": ""},
         "event_id": "evt-7",
     }
 

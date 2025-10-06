@@ -307,8 +307,14 @@ async def test_audit_log_records_missing_info_flow(tmp_path) -> None:
         await agent.process_all_events()
 
         entries = agent.audit_log.load_entries()
-        assert len(entries) == 2
+        assert len(entries) == 3
         assert {entry["request_type"] for entry in entries} == {"missing_info"}
+        system_entry = next(
+            entry for entry in entries if entry["stage"] == "system"
+        )
+        assert system_entry["outcome"] == "hitl_required"
+        payload = system_entry.get("payload") or {}
+        assert payload.get("reason") == "web_domain missing or invalid; HITL required"
         response_entry = next(
             entry for entry in entries if entry["stage"] == "response"
         )

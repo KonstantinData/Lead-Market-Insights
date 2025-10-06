@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from utils.persistence import ProcessedEventsState, atomic_write_json
+from utils.persistence import (
+    ProcessedEventsState,
+    atomic_write_json,
+    load_json_or_default,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,20 +45,17 @@ class ProcessedEventCache:
         """Load cache entries from *path* if it exists."""
 
         entries: Dict[str, Dict[str, Optional[str]]] = {}
-        if path.exists():
-            try:
-                raw = json.loads(path.read_text(encoding="utf-8"))
-            except json.JSONDecodeError:
-                logger.warning(
-                    "Processed event cache at %s contained invalid JSON. Reinitialising.",
-                    path,
-                )
-                raw = {}
-        else:
-            raw = {}
-
-        if not isinstance(raw, dict):
-            raw = {}
+        raw, reason = load_json_or_default(
+            path,
+            default=lambda: {"entries": {}},
+            model=ProcessedEventsState,
+        )
+        if reason and reason not in {"missing"}:
+            logger.warning(
+                "Processed event cache at %s was reset due to %s; using default schema.",
+                path,
+                reason,
+            )
 
         raw_entries = raw.get("entries") if isinstance(raw.get("entries"), dict) else raw
         if isinstance(raw_entries, dict):

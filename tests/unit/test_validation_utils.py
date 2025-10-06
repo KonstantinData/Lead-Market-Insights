@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 from pathlib import Path
 
@@ -40,40 +42,43 @@ def test_validate_extraction_or_raise_normalises_inputs() -> None:
         validate_extraction_or_raise({"company_name": "Acme", "company_domain": "example.com"})
 
 
-def test_validate_extraction_or_raise_rejects_salutations() -> None:
-    with pytest.raises(InvalidExtractionError):
-        validate_extraction_or_raise(
-            {
-                "company_name": "Herr Milonas Firma Condata",
-                "company_domain": "condata.io",
-            }
-        )
+def test_validate_extraction_or_raise_normalises_salutations() -> None:
+    validated = validate_extraction_or_raise(
+        {
+            "company_name": "Herr Milonas Firma Condata",
+            "company_domain": "condata.io",
+        }
+    )
+
+    assert validated["company_name"] == "Milonas Firma Condata"
 
     # Allow legitimate companies that coincidentally start with "Herr" but include a suffix.
-    validated = validate_extraction_or_raise(
+    validated_suffix = validate_extraction_or_raise(
         {"company_name": "Herr GmbH", "company_domain": "herr-gmbh.de"}
     )
-    assert validated["company_name"] == "Herr GmbH"
+    assert validated_suffix["company_name"] == "Herr GmbH"
 
 
 @pytest.mark.parametrize(
-    "name, expected_valid",
+    "name, expected_valid, expected_normalised",
     [
-        ("Firma Condata", False),
-        ("Herr GmbH", True),
-        ("HERR Industrie GmbH", True),
-        ("Frau Müller Consulting", False),
-        ("Herr AG", True),
-        ("Mr. Smith LLC", True),
-        ("Herr Milonas Condata", False),
+        ("Firma Condata", True, "Condata"),
+        ("Herr GmbH", True, "Herr GmbH"),
+        ("HERR Industrie GmbH", True, "HERR Industrie GmbH"),
+        ("Frau Müller Consulting", False, None),
+        ("Herr AG", True, "Herr AG"),
+        ("Mr. Smith LLC", True, "Mr. Smith LLC"),
+        ("Herr Milonas Condata", True, "Milonas Condata"),
     ],
 )
-def test_validate_extraction_or_raise_salutation_matrix(name: str, expected_valid: bool) -> None:
+def test_validate_extraction_or_raise_salutation_matrix(
+    name: str, expected_valid: bool, expected_normalised: str | None
+) -> None:
     payload = {"company_name": name, "company_domain": "condata.io"}
 
     if expected_valid:
         validated = validate_extraction_or_raise(payload)
-        assert validated["company_name"] == name.strip()
+        assert validated["company_name"] == expected_normalised
     else:
         with pytest.raises(InvalidExtractionError):
             validate_extraction_or_raise(payload)

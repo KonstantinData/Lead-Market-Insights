@@ -1,5 +1,6 @@
 import inspect
 import logging
+import re
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Dict, Optional, Sequence
@@ -10,6 +11,7 @@ from config.config import settings
 from logs.workflow_log_manager import WorkflowLogManager
 from reminders.reminder_escalation import ReminderEscalation
 from utils.audit_log import AuditLog
+from utils.domain_resolution import resolve_company_domain
 from utils.pii import mask_pii
 
 logger = logging.getLogger(__name__)
@@ -130,12 +132,17 @@ class HumanInLoopAgent(BaseHumanAgent):
             masked_initial_info,
         )
         # Notes: Simulate human response for demo purposes.
-        extracted["info"]["company_name"] = (
-            extracted["info"].get("company_name") or "Example Corp"
-        )
-        extracted["info"]["web_domain"] = (
-            extracted["info"].get("web_domain") or "example.com"
-        )
+        info_payload = dict(extracted.get("info", {}) or {})
+        if not info_payload.get("company_name"):
+            info_payload["company_name"] = "Example Corp"
+        resolved_domain, _ = resolve_company_domain(info_payload, event)
+        if not resolved_domain:
+            slug = re.sub(r"[^a-z0-9]+", "", info_payload["company_name"].lower())
+            slug = slug or "resolved-company"
+            resolved_domain = f"{slug}.test"
+        info_payload["web_domain"] = resolved_domain
+        info_payload["company_domain"] = resolved_domain
+        extracted["info"] = info_payload
         extracted["is_complete"] = True
 
         if self.audit_log:

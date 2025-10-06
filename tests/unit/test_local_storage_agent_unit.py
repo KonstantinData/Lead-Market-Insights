@@ -63,8 +63,9 @@ def test_record_run_recovers_from_invalid_index(storage_agent, tmp_path_factory)
     index = json.loads(storage_agent._index_file.read_text(encoding="utf-8"))
     assert index[-1]["log_path"] == outside_log.as_posix()
     storage_agent.logger.warning.assert_called_with(
-        "Index file %s was invalid JSON. Rebuilding from scratch.",
+        "Index file %s was reset due to %s. Rebuilding from scratch.",
         storage_agent._index_file,
+        "invalid_json",
     )
 
 

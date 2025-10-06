@@ -6,7 +6,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, MutableMapping, Optional
+from typing import Any, Callable, Dict, List, Mapping, MutableMapping, Optional, Tuple
 
 from agents.factory import create_agent
 from agents.human_in_loop_agent import DossierConfirmationBackendUnavailable
@@ -41,6 +41,7 @@ from utils.observability import (
     record_hitl_outcome,
     record_trigger_match,
 )
+from utils.domain_resolution import resolve_company_domain
 from utils.negative_cache import NegativeEventCache
 from utils.processed_event_cache import ProcessedEventCache
 from utils.pii import mask_pii
@@ -48,6 +49,7 @@ from utils.trigger_loader import load_trigger_words
 from utils.validation import (
     InvalidExtractionError,
     finalize_dossier,
+    is_valid_business_domain,
     normalize_domain,
     normalize_similar_companies,
     validate_extraction_or_raise,
@@ -351,7 +353,22 @@ class MasterWorkflowAgent:
             event_result["extraction"] = extracted
 
             info = extracted.get("info", {}) or {}
-            is_complete = bool(extracted.get("is_complete"))
+            normalised_info, domain_meta = self._normalise_info_for_research(
+                info, event=event
+            )
+            extracted.setdefault("info", {})
+            extracted["info"]["company_name"] = normalised_info.get("company_name")
+            extracted["info"]["web_domain"] = normalised_info.get("company_domain")
+            extracted["info"]["company_domain"] = normalised_info.get(
+                "company_domain"
+            )
+            is_complete = bool(
+                normalised_info.get("company_name")
+                and normalised_info.get("company_domain")
+            )
+            extracted["is_complete"] = is_complete
+            event_result["domain_resolution"] = domain_meta
+
             if not self._meets_confidence_threshold("extraction", extracted):
                 logger.info(
                     "Extraction confidence %.3f below threshold %.3f for event %s",
@@ -362,9 +379,14 @@ class MasterWorkflowAgent:
                 event_result["status"] = "skipped_extraction_threshold"
                 continue
 
-            normalised_info = self._normalise_info_for_research(info)
             internal_status = None
             internal_result = None
+
+            if not normalised_info.get("company_domain"):
+                event_result["status"] = "hitl_required"
+                self._record_domain_guardrail(
+                    event_result, event_id, info, domain_meta
+                )
 
             has_research_inputs = self._has_research_inputs(normalised_info)
             if has_research_inputs:
@@ -436,8 +458,8 @@ class MasterWorkflowAgent:
                             self.run_id, event_id, "fields_validated"
                         )
                         record_hitl_outcome("missing_info", "completed")
-                        filled_info = self._normalise_info_for_research(
-                            filled.get("info", {}) or {}
+                        filled_info, _ = self._normalise_info_for_research(
+                            filled.get("info", {}) or {}, event=event
                         )
                         await self._process_crm_dispatch(
                             event,
@@ -561,8 +583,8 @@ class MasterWorkflowAgent:
                             self.run_id, event_id, "fields_validated"
                         )
                         record_hitl_outcome("missing_info", "completed")
-                        filled_info = self._normalise_info_for_research(
-                            filled.get("info", {}) or {}
+                        filled_info, _ = self._normalise_info_for_research(
+                            filled.get("info", {}) or {}, event=event
                         )
                         await self._process_crm_dispatch(
                             event,
@@ -636,18 +658,86 @@ class MasterWorkflowAgent:
             )
             return None
 
-    def _normalise_info_for_research(self, info: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalise_info_for_research(
+        self,
+        info: Dict[str, Any],
+        *,
+        event: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[Dict[str, Any], Dict[str, Optional[str]]]:
         payload = dict(info or {})
         if "company_name" not in payload and payload.get("name"):
             payload["company_name"] = payload.get("name")
-        domain = (
+
+        company_name = (payload.get("company_name") or "").strip()
+        if company_name:
+            payload["company_name"] = company_name
+        elif "company_name" in payload:
+            payload["company_name"] = ""
+
+        existing_domain = normalize_domain(
             payload.get("company_domain")
             or payload.get("web_domain")
             or payload.get("domain")
         )
-        if domain:
-            payload["company_domain"] = domain
-        return payload
+
+        resolved_domain, source = resolve_company_domain(payload, event)
+        if resolved_domain:
+            payload["company_domain"] = resolved_domain
+            payload["web_domain"] = resolved_domain
+        else:
+            payload.pop("company_domain", None)
+            payload.pop("web_domain", None)
+
+        metadata = {
+            "company_name": payload.get("company_name") or None,
+            "domain": resolved_domain,
+            "source": source,
+            "original_domain": existing_domain or None,
+        }
+        payload.pop("domain", None)
+        return payload, metadata
+
+    def _record_domain_guardrail(
+        self,
+        event_result: Dict[str, Any],
+        event_id: Optional[Any],
+        info: Mapping[str, Any],
+        metadata: Mapping[str, Optional[str]],
+    ) -> None:
+        message = "web_domain missing or invalid; HITL required"
+        errors = event_result.setdefault("research_errors", [])
+        if not any(err.get("type") == "missing_domain" for err in errors):
+            errors.append(
+                {
+                    "type": "missing_domain",
+                    "event_id": event_id,
+                    "message": message,
+                }
+            )
+        event_result.setdefault("hitl_reason", "missing_domain")
+
+        audit_log = self.audit_log
+        if audit_log is None:
+            return
+
+        payload = {
+            "reason": message,
+            "info": self._mask_for_logging(dict(info or {})),
+            "resolution": {k: v for k, v in dict(metadata).items() if v},
+        }
+        try:
+            audit_log.record(
+                event_id=str(event_id) if event_id is not None else None,
+                request_type="missing_info",
+                stage="system",
+                responder="automated_guardrails",
+                outcome="hitl_required",
+                payload=payload,
+            )
+        except Exception:  # pragma: no cover - defensive logging
+            logger.exception(
+                "Failed to record domain guardrail audit for event %s", event_id
+            )
 
     def _infer_requested_fields(
         self, info: Optional[Dict[str, Any]]
@@ -676,7 +766,7 @@ class MasterWorkflowAgent:
             "status": "missing_info_followup",
         }
 
-        normalised_info = self._normalise_info_for_research(base_info)
+        normalised_info, _ = self._normalise_info_for_research(base_info, event=event)
         if self._has_research_inputs(normalised_info):
             self._record_missing_info_completion(event_id)
             record_hitl_outcome("missing_info", "completed")
@@ -702,8 +792,8 @@ class MasterWorkflowAgent:
         if follow_up.get("is_complete"):
             self._record_missing_info_completion(event_id)
             record_hitl_outcome("missing_info", "completed")
-            filled_info = self._normalise_info_for_research(
-                follow_up.get("info", {}) or {}
+            filled_info, _ = self._normalise_info_for_research(
+                follow_up.get("info", {}) or {}, event=event
             )
             await self._process_crm_dispatch(
                 event,
@@ -741,7 +831,7 @@ class MasterWorkflowAgent:
             return None
 
         record_hitl_outcome("dossier", "approved")
-        normalised_info = self._normalise_info_for_research(info)
+        normalised_info, _ = self._normalise_info_for_research(info, event=event)
         if self._has_research_inputs(normalised_info):
             await self._process_crm_dispatch(
                 event,
@@ -765,8 +855,8 @@ class MasterWorkflowAgent:
         if follow_up.get("is_complete"):
             self._record_missing_info_completion(event_id)
             record_hitl_outcome("missing_info", "completed")
-            filled_info = self._normalise_info_for_research(
-                follow_up.get("info", {}) or {}
+            filled_info, _ = self._normalise_info_for_research(
+                follow_up.get("info", {}) or {}, event=event
             )
             await self._process_crm_dispatch(
                 event,
@@ -871,7 +961,9 @@ class MasterWorkflowAgent:
         return result
 
     def _has_research_inputs(self, info: Dict[str, Any]) -> bool:
-        return bool(info.get("company_name")) and bool(info.get("company_domain"))
+        return bool(info.get("company_name")) and is_valid_business_domain(
+            info.get("company_domain")
+        )
 
     def _validate_extraction_inputs(
         self,
@@ -1155,7 +1247,7 @@ class MasterWorkflowAgent:
         *,
         force_internal: bool,
     ) -> None:
-        prepared_info = self._normalise_info_for_research(info)
+        prepared_info, _ = self._normalise_info_for_research(info, event=event)
         if not self._has_research_inputs(prepared_info):
             event_result["status"] = "missing_research_inputs"
             return

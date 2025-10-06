@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
 
-from utils.persistence import RunsIndexEntry, atomic_write_json
+from utils.persistence import RunsIndexEntry, atomic_write_json, load_json_or_default
 
 
 Metadata = Dict[str, object]
@@ -87,16 +87,15 @@ class LocalStorageAgent:
         if metadata:
             entry.update(metadata)
 
-        existing = []
-        if self._index_file.exists():
-            try:
-                existing = json.loads(self._index_file.read_text(encoding="utf-8"))
-            except json.JSONDecodeError:
-                self.logger.warning(
-                    "Index file %s was invalid JSON. Rebuilding from scratch.",
-                    self._index_file,
-                )
-                existing = []
+        existing, reason = load_json_or_default(
+            self._index_file, default=list, model=RunsIndexEntry
+        )
+        if reason and reason not in {"missing"}:
+            self.logger.warning(
+                "Index file %s was reset due to %s. Rebuilding from scratch.",
+                self._index_file,
+                reason,
+            )
 
         existing = [item for item in existing if item.get("run_id") != run_id]
         existing.append(entry)

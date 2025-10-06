@@ -277,13 +277,12 @@ async def test_dossier_reply_requests_follow_up_when_incomplete(
 
     await orchestrator._handle_inbox_reply(message, "audit-original")
 
-    master._process_crm_dispatch.assert_not_awaited()
-    assert len(human.requests) == 1
+    master._process_crm_dispatch.assert_awaited_once()
+    dispatch_args = master._process_crm_dispatch.await_args
+    assert dispatch_args.kwargs.get("force_internal") is False
+    assert len(human.requests) == 0
     assert human.reminder_escalation.cancelled == ["audit-original"]
-    assert orchestrator._pending_audits["audit-follow"]["kind"] == "missing_info"
-    follow_context = orchestrator._pending_audits["audit-follow"]["context"]
-    assert follow_context["run_id"] == master.run_id
-    assert follow_context["requested_fields"] == ["company_domain"]
+    assert "audit-follow" not in orchestrator._pending_audits
     assert master._completions == []  # type: ignore[attr-defined]
 
 

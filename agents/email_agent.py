@@ -45,6 +45,22 @@ def _validate_smtp_settings(settings: object) -> None:
     sender = _normalise(getattr(settings, "smtp_sender", None)) or _normalise(
         getattr(settings, "smtp_from", None)
     )
+    if sender is None and username and "@" in username:
+        # When the username already looks like an email address, it is a sensible
+        # default for the envelope sender as well. This mirrors how many SMTP
+        # services authenticate.
+        sender = username
+        try:
+            setattr(settings, "smtp_sender", sender)
+        except Exception:
+            # ``settings`` may be an immutable proxy in some contexts. Failure to
+            # assign should not prevent using the derived sender.
+            pass
+        if not _normalise(getattr(settings, "smtp_from", None)):
+            try:
+                setattr(settings, "smtp_from", sender)
+            except Exception:
+                pass
     if sender is None:
         missing.append("smtp_sender")
 

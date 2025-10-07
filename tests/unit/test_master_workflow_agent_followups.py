@@ -97,7 +97,10 @@ async def test_missing_info_continuation_dispatches_when_complete(monkeypatch: p
     monkeypatch.setattr(agent, "_record_missing_info_completion", lambda event_id: None)
 
     context = {
-        "event": {"id": "evt-1"},
+        "event": {
+            "id": "evt-1",
+            "summary": "Event discussion about acme.com",
+        },
         "info": {"company_name": "Acme"},
         "event_id": "evt-1",
     }
@@ -130,7 +133,10 @@ async def test_missing_info_continuation_registers_pending(monkeypatch: pytest.M
     monkeypatch.setattr(agent, "_process_crm_dispatch", lambda *args, **kwargs: None)
 
     context = {
-        "event": {"id": "evt-2"},
+        "event": {
+            "id": "evt-2",
+            "summary": "Event discussion about acme.com",
+        },
         "info": {"company_name": ""},
         "event_id": "evt-2",
     }
@@ -175,7 +181,10 @@ async def test_missing_info_pending_handler_failure_is_logged(
     monkeypatch.setattr(agent, "_process_crm_dispatch", lambda *args, **kwargs: None)
 
     context = {
-        "event": {"id": "evt-3"},
+        "event": {
+            "id": "evt-3",
+            "summary": "Event discussion about acme.com",
+        },
         "info": {"company_name": ""},
         "event_id": "evt-3",
     }
@@ -199,7 +208,10 @@ async def test_missing_info_continuation_marks_incomplete(monkeypatch: pytest.Mo
     monkeypatch.setattr(agent, "_process_crm_dispatch", lambda *args, **kwargs: None)
 
     context = {
-        "event": {"id": "evt-3"},
+        "event": {
+            "id": "evt-3",
+            "summary": "Event discussion about acme.com",
+        },
         "info": {"company_name": ""},
         "event_id": "evt-3",
     }
@@ -235,7 +247,10 @@ async def test_missing_info_pending_handler_errors_are_ignored(
     monkeypatch.setattr(agent, "_process_crm_dispatch", lambda *args, **kwargs: None)
 
     context = {
-        "event": {"id": "evt-err"},
+        "event": {
+            "id": "evt-err",
+            "summary": "Event discussion about acme.com",
+        },
         "info": {"company_name": ""},
         "event_id": "evt-err",
     }
@@ -283,7 +298,10 @@ async def test_missing_info_follow_up_completes(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(agent, "_process_crm_dispatch", _fake_dispatch)
 
     context = {
-        "event": {"id": "evt-6"},
+        "event": {
+            "id": "evt-6",
+            "summary": "Event discussion about acme.com",
+        },
         "info": {"company_name": ""},
         "event_id": "evt-6",
     }
@@ -301,7 +319,14 @@ async def test_dossier_continuation_decline_short_circuits(monkeypatch: pytest.M
     agent = _build_agent(human)
     monkeypatch.setattr(agent, "_process_crm_dispatch", lambda *args, **kwargs: None)
 
-    context = {"event": {"id": "evt-3"}, "info": {"company_name": ""}, "event_id": "evt-3"}
+    context = {
+        "event": {
+            "id": "evt-3",
+            "summary": "Dossier review about acme.com",
+        },
+        "info": {"company_name": ""},
+        "event_id": "evt-3",
+    }
 
     result = await agent.continue_after_dossier_decision("audit-1", "Declined", context)
 
@@ -336,7 +361,10 @@ async def test_dossier_continuation_dispatches_when_complete(monkeypatch: pytest
     monkeypatch.setattr(agent, "_process_crm_dispatch", _fake_dispatch)
 
     context = {
-        "event": {"id": "evt-4"},
+        "event": {
+            "id": "evt-4",
+            "summary": "Dossier review about acme.com",
+        },
         "info": {"company_name": "Acme", "company_domain": "acme.com"},
         "event_id": "evt-4",
     }
@@ -365,7 +393,10 @@ async def test_dossier_continuation_requests_follow_up(monkeypatch: pytest.Monke
     monkeypatch.setattr(agent, "_process_crm_dispatch", lambda *args, **kwargs: None)
 
     context = {
-        "event": {"id": "evt-5"},
+        "event": {
+            "id": "evt-5",
+            "summary": "Dossier review about acme.com",
+        },
         "info": {"company_name": ""},
         "event_id": "evt-5",
     }
@@ -393,7 +424,10 @@ async def test_dossier_continuation_incomplete_returns_none(
     monkeypatch.setattr(agent, "_process_crm_dispatch", lambda *args, **kwargs: None)
 
     context = {
-        "event": {"id": "evt-8"},
+        "event": {
+            "id": "evt-8",
+            "summary": "Dossier review about acme.com",
+        },
         "info": {"company_name": ""},
         "event_id": "evt-8",
     }
@@ -438,7 +472,10 @@ async def test_dossier_follow_up_completion(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(agent, "_process_crm_dispatch", _fake_dispatch)
 
     context = {
-        "event": {"id": "evt-7"},
+        "event": {
+            "id": "evt-7",
+            "summary": "Dossier review about acme.com",
+        },
         "info": {"company_name": ""},
         "event_id": "evt-7",
     }

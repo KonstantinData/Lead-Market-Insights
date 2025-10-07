@@ -105,7 +105,7 @@ async def test_processed_event_cache_skips_repeat_dispatch(tmp_path, monkeypatch
     event = {
         "id": "evt-hard-1",
         "updated": "2024-05-01T10:00:00Z",
-        "summary": "Urgent expansion",
+        "summary": "Urgent expansion for acme.com",
         "description": "Customer expanding operations.",
     }
     trigger_result = {"trigger": True, "type": "hard", "confidence": 0.99}

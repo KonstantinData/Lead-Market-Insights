@@ -118,8 +118,13 @@ def _build_orchestrator(
 
 
 def _pending_context(info: Dict[str, Any]) -> Dict[str, Any]:
+    domain_hint = info.get("company_domain") or "acme.com"
     return {
-        "event": {"id": "evt-123", "creator": "organizer@example.com"},
+        "event": {
+            "id": "evt-123",
+            "creator": "organizer@example.com",
+            "summary": f"Follow-up regarding {domain_hint}",
+        },
         "info": info,
         "event_id": "evt-123",
     }

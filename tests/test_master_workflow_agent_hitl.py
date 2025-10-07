@@ -66,7 +66,7 @@ class DummyExtractionAgent:
 def _prepare_agent(backend: Optional[DummyBackend]) -> MasterWorkflowAgent:
     event = {
         "id": "event-123",
-        "summary": "Soft trigger meeting",
+        "summary": "Soft trigger meeting for example.ai",
         "organizer": {"email": "organizer@example.com", "displayName": "Org"},
     }
     info = {"company_name": "Example Corp", "web_domain": "example.ai"}

@@ -123,11 +123,22 @@ class ExtractionAgent(BaseExtractionAgent):
             company_name_source = "event" if company_name else None
 
             # Try to find web domain in a dedicated field or extract from text.
-            web_domain = self._normalise_domain(event.get("web_domain"))
+            supplied_domain = self._normalise_domain(event.get("web_domain"))
 
             extracted_domain = self._find_domain_in_text(summary, description)
             if extracted_domain:
-                web_domain = web_domain or extracted_domain
+                web_domain = self._normalise_domain(extracted_domain)
+            else:
+                web_domain = None
+
+            if (
+                not web_domain
+                and supplied_domain
+                and self._domain_appears_in_text(
+                    supplied_domain, summary, description
+                )
+            ):
+                web_domain = supplied_domain
 
             if web_domain:
                 derived_name = self._derive_company_from_domain(web_domain)
@@ -229,6 +240,25 @@ class ExtractionAgent(BaseExtractionAgent):
         if match:
             return match.group(0).lower()
         return None
+
+    def _domain_appears_in_text(
+        self, domain: str, summary: str, description: str
+    ) -> bool:
+        if not domain:
+            return False
+        search_space = " ".join(
+            segment.lower()
+            for segment in (summary, description)
+            if isinstance(segment, str) and segment
+        )
+        if not search_space:
+            return False
+        domain_lower = domain.lower()
+        if domain_lower in search_space:
+            return True
+        if domain_lower.startswith("www."):
+            return domain_lower[4:] in search_space
+        return f"www.{domain_lower}" in search_space
 
     def _normalise_domain(self, domain: Optional[str]) -> Optional[str]:
         if not domain:

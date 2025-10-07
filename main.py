@@ -1,10 +1,12 @@
 import asyncio
 import logging
 import os
+from datetime import datetime
 from typing import Callable
 
 from dotenv import load_dotenv
 
+from utils.datetime_formatting import CET_ZONE, LOG_TIMESTAMP_FORMAT
 from utils.observability import (
     current_run_id_var,
     generate_run_id,
@@ -31,6 +33,15 @@ _run_id_filter = _RunIdLoggingFilter()
 _run_id_filter_attached = False
 
 
+class _CETFormatter(logging.Formatter):
+    """Logging formatter enforcing CET timestamps with a fixed format."""
+
+    def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:  # noqa: N802
+        moment = datetime.fromtimestamp(record.created, tz=CET_ZONE)
+        fmt = datefmt or LOG_TIMESTAMP_FORMAT
+        return moment.strftime(fmt)
+
+
 def _init_logging() -> None:
     global _run_id_filter_attached
     root_logger = logging.getLogger()
@@ -43,11 +54,13 @@ def _init_logging() -> None:
     if root_logger.handlers:
         return
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s [run_id=%(run_id)s] %(message)s",
+    logging.basicConfig(level=logging.INFO)
+    formatter = _CETFormatter(
+        "%(asctime)s %(levelname)s [run_id=%(run_id)s] %(message)s",
+        datefmt=LOG_TIMESTAMP_FORMAT,
     )
     for handler in logging.getLogger().handlers:
+        handler.setFormatter(formatter)
         if _run_id_filter not in handler.filters:
             handler.addFilter(_run_id_filter)
 

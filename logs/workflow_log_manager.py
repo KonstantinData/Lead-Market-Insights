@@ -1,9 +1,10 @@
 import json
 import logging
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
+
+from utils.datetime_formatting import now_cet_timestamp
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
 
@@ -41,7 +42,7 @@ class WorkflowLogManager:
         """Append a log entry to the workflow log."""
 
         entry: Dict[str, Optional[str]] = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": now_cet_timestamp(),
             "run_id": run_id,
             "step": step,
             "message": message,

@@ -46,10 +46,13 @@ import os
 import random
 import statistics
 import time
+from datetime import datetime
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator, Dict, List, Optional, Tuple
+
+from utils.datetime_formatting import CET_ZONE, LOG_TIMESTAMP_FORMAT
 
 try:  # Optional dependency
     from prometheus_client import CollectorRegistry, Gauge, start_http_server
@@ -242,11 +245,21 @@ async def run_load_test(config: LoadConfig) -> Dict[str, object]:
     return results
 
 
+class _CETFormatter(logging.Formatter):
+    def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:  # noqa: N802
+        moment = datetime.fromtimestamp(record.created, tz=CET_ZONE)
+        fmt = datefmt or LOG_TIMESTAMP_FORMAT
+        return moment.strftime(fmt)
+
+
 def _setup_logging() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
+    logging.basicConfig(level=logging.INFO)
+    formatter = _CETFormatter(
+        "%(asctime)s %(levelname)s %(message)s",
+        datefmt=LOG_TIMESTAMP_FORMAT,
     )
+    for handler in logging.getLogger().handlers:
+        handler.setFormatter(formatter)
 
 
 def _start_prometheus(

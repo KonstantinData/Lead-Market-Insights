@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
 
+from utils.datetime_formatting import now_cet_timestamp
 from utils.persistence import RunsIndexEntry, atomic_write_json, load_json_or_default
 
 
@@ -82,7 +82,7 @@ class LocalStorageAgent:
         entry: Metadata = {
             "run_id": run_id,
             "log_path": log_reference,
-            "recorded_at": datetime.now(timezone.utc).isoformat(),
+            "recorded_at": now_cet_timestamp(),
         }
         if metadata:
             entry.update(metadata)

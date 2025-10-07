@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -14,6 +14,7 @@ from utils.persistence import (
     atomic_write_json,
     load_json_or_default,
 )
+from utils.datetime_formatting import format_cet_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +67,14 @@ class ProcessedEventCache:
                 if not isinstance(fingerprint, str) or not fingerprint:
                     continue
                 updated = entry.get("updated")
+                formatted_updated: Optional[str] = None
+                if isinstance(updated, (str, datetime, int, float)):
+                    formatted_updated = format_cet_timestamp(updated)
+                if formatted_updated is None and isinstance(updated, str):
+                    formatted_updated = updated
                 entries[str(event_id)] = {
                     "fingerprint": fingerprint,
-                    "updated": updated if isinstance(updated, str) else None,
+                    "updated": formatted_updated,
                 }
 
         return cls(path=path, entries=entries, dirty=False)
@@ -139,13 +145,11 @@ class ProcessedEventCache:
     def _fingerprint(self, event: Dict[str, Any]) -> tuple[str, Optional[str]]:
         event_id = str(event.get("id")) if event.get("id") is not None else ""
         updated = event.get("updated")
-        updated_str: Optional[str]
-        if isinstance(updated, str):
-            updated_str = updated
-        elif isinstance(updated, datetime):
-            updated_str = updated.astimezone(timezone.utc).isoformat()
-        else:
-            updated_str = None
+        updated_str: Optional[str] = None
+        if isinstance(updated, (str, datetime, int, float)):
+            updated_str = format_cet_timestamp(updated)
+            if updated_str is None and isinstance(updated, str):
+                updated_str = updated
 
         payload_segments = [event_id]
         for key in SIGNIFICANT_EVENT_FIELDS:

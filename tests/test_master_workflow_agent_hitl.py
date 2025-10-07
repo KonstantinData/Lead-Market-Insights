@@ -397,3 +397,89 @@ async def test_audit_log_records_missing_info_flow(tmp_path) -> None:
         if agent is not None:
             agent.finalize_run_logs()
         settings.run_log_dir = original_run_dir
+
+
+async def test_collect_missing_info_pending_sets_status(tmp_path) -> None:
+    original_run_dir = settings.run_log_dir
+    temp_run_dir = tmp_path / "runs"
+    temp_run_dir.mkdir()
+    agent: Optional[MasterWorkflowAgent] = None
+    try:
+        settings.run_log_dir = temp_run_dir
+        agent = MasterWorkflowAgent(
+            communication_backend=None,
+            event_agent=DummyEventAgent([]),
+            trigger_agent=DummyTriggerAgent({"trigger": False}),
+            extraction_agent=DummyExtractionAgent({"info": {}, "is_complete": False}),
+        )
+
+        run_id = generate_run_id()
+        current_run_id_var.set(run_id)
+        agent.attach_run(run_id, agent.workflow_log_manager)
+
+        def _fake_request_info(self, event_payload, extracted_payload, **_):
+            return {
+                "status": "pending",
+                "audit_id": "audit-123",
+                "info": extracted_payload.get("info", {}),
+            }
+
+        agent.request_info = MethodType(_fake_request_info, agent)
+
+        event_result: Dict[str, Any] = {}
+        follow_up = await agent._collect_missing_info_via_hitl(
+            event_result,
+            {"id": "event-1"},
+            {"info": {"company_name": "", "web_domain": ""}},
+            "event-1",
+        )
+
+        assert follow_up is None
+        assert event_result["status"] == "missing_info_pending"
+    finally:
+        if agent is not None:
+            agent.finalize_run_logs()
+        settings.run_log_dir = original_run_dir
+
+
+async def test_collect_missing_info_incomplete_sets_status(tmp_path) -> None:
+    original_run_dir = settings.run_log_dir
+    temp_run_dir = tmp_path / "runs"
+    temp_run_dir.mkdir()
+    agent: Optional[MasterWorkflowAgent] = None
+    try:
+        settings.run_log_dir = temp_run_dir
+        agent = MasterWorkflowAgent(
+            communication_backend=None,
+            event_agent=DummyEventAgent([]),
+            trigger_agent=DummyTriggerAgent({"trigger": False}),
+            extraction_agent=DummyExtractionAgent({"info": {}, "is_complete": False}),
+        )
+
+        run_id = generate_run_id()
+        current_run_id_var.set(run_id)
+        agent.attach_run(run_id, agent.workflow_log_manager)
+
+        def _fake_request_info(self, event_payload, extracted_payload, **_):
+            return {
+                "status": "declined",
+                "audit_id": "audit-456",
+                "info": {},
+            }
+
+        agent.request_info = MethodType(_fake_request_info, agent)
+
+        event_result: Dict[str, Any] = {}
+        follow_up = await agent._collect_missing_info_via_hitl(
+            event_result,
+            {"id": "event-2"},
+            {"info": {"company_name": "", "web_domain": ""}},
+            "event-2",
+        )
+
+        assert follow_up is None
+        assert event_result["status"] == "missing_info_incomplete"
+    finally:
+        if agent is not None:
+            agent.finalize_run_logs()
+        settings.run_log_dir = original_run_dir

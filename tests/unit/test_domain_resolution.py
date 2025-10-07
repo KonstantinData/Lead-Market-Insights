@@ -93,3 +93,34 @@ def test_resolve_company_domain_rejects_domain_missing_from_event_text() -> None
 
     assert domain is None
     assert source is None
+
+
+def test_domain_in_event_text_accepts_non_mapping_event() -> None:
+    """Non-Mapping ``event`` objects should default to allowing the domain."""
+
+    assert dr._domain_in_event_text("example.com", event="raw string") is True
+
+
+def test_domain_in_event_text_handles_www_prefixes() -> None:
+    """Ensure both present and missing ``www`` prefixes are considered."""
+
+    event = {"summary": "Deep dive on https://example.com product"}
+    assert dr._domain_in_event_text("www.example.com", event) is True
+
+    absent_event = {"summary": "Kick-off without relevant URLs"}
+    assert dr._domain_in_event_text("www.missing.io", absent_event) is False
+
+
+def test_load_company_domain_mapping_without_yaml(monkeypatch) -> None:
+    """When PyYAML is unavailable an empty mapping should be returned."""
+
+    monkeypatch.setattr(dr, "yaml", None)
+    _reset_mapping_cache()
+
+    assert dr.load_company_domain_mapping(Path("/dev/null")) == {}
+
+
+def test_extract_email_domain_skips_generic_providers() -> None:
+    """Generic webmail domains must not be treated as company domains."""
+
+    assert dr._extract_email_domain("user@gmail.com") is None

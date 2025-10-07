@@ -13,6 +13,7 @@ from typing import Any, Dict, Iterator, List, Optional
 
 from utils.datetime_formatting import format_cet_timestamp, now_cet_timestamp
 
+
 @dataclass
 class AuditRecord:
     """Structured representation of a single audit entry."""

@@ -1,0 +1,8 @@
+{
+  "python.defaultInterpreterPath": "d:/Git-GitHub/Repositories/Lead-Market-Insights/.venv/Scripts/python.exe",
+  "black-formatter.interpreter": [
+    "d:/Git-GitHub/Repositories/Lead-Market-Insights/.venv/Scripts/python.exe"
+  ],
+  "[python]": { "editor.defaultFormatter": "ms-python.black-formatter" },
+  "editor.formatOnSave": true
+}

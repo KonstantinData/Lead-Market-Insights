@@ -81,3 +81,16 @@ def test_convert_research_artifacts_names_follow_inputs(tmp_path: Path) -> None:
 
     assert dossier_pdf.name == "custom_dossier_payload.pdf"
     assert similar_pdf.name == "similar_companies.pdf"
+
+
+def test_convert_research_artifacts_requires_reportlab(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("utils.reporting._REPORTLAB_IMPORT_ERROR", ImportError("missing"))
+
+    with pytest.raises(ImportError) as exc:
+        convert_research_artifacts_to_pdfs(
+            {"company": "Example"},
+            {"results": []},
+            output_dir=tmp_path,
+        )
+
+    assert "ReportLab is required" in str(exc.value)

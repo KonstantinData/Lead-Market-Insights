@@ -922,6 +922,17 @@ class MasterWorkflowAgent:
             filled_info, domain_meta = self._normalise_info_for_research(
                 info_payload or {}, event=event
             )
+            provided_domain = normalize_domain(
+                (info_payload or {}).get("company_domain")
+                or (info_payload or {}).get("web_domain")
+                or (info_payload or {}).get("domain")
+            )
+            if provided_domain and not filled_info.get("company_domain"):
+                filled_info["company_domain"] = provided_domain
+                filled_info["web_domain"] = provided_domain
+                domain_meta = dict(domain_meta)
+                domain_meta["domain"] = provided_domain
+                domain_meta["source"] = domain_meta.get("source") or "hitl_provided"
             event_result["status"] = "missing_info_completed"
             return {
                 "info": filled_info,

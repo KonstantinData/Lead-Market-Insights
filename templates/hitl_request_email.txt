@@ -1,0 +1,12 @@
+Subject: HITL Approval Request · {{ run_id }}
+
+Run: {{ run_id }}
+Company: {{ context.company_name }}
+Domain: {{ context.company_domain }}
+Primary contact: {{ context.contact_email }}
+Missing fields: {{ context.missing_fields }}
+
+Reply with one of:
+- APPROVE
+- DECLINE
+- CHANGE: key=value; key2=value2

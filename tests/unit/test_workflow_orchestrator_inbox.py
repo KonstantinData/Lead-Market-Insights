@@ -54,6 +54,21 @@ class DummyReminder:
 class DummyHuman:
     def __init__(self) -> None:
         self.reminder_escalation = DummyReminder()
+        self.decisions: list[Dict[str, Any]] = []
+
+    def apply_decision(
+        self,
+        *,
+        run_id: str,
+        decision: str,
+        actor: str,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        payload = {"run_id": run_id, "decision": decision, "actor": actor}
+        if extra:
+            payload["extra"] = extra
+        self.decisions.append(payload)
+        return {"status": decision, "actor": actor, "extra": extra}
 
 
 @dataclass
@@ -67,6 +82,12 @@ class DummyMasterAgent:
         self.continue_after_missing_info = AsyncMock()
         self.continue_after_dossier_decision = AsyncMock()
         self.on_pending_audit = None
+        self.hitl_callbacks: list[tuple[str, Dict[str, Any]]] = []
+
+        def _record_decision(run_id: str, payload: Dict[str, Any]) -> None:
+            self.hitl_callbacks.append((run_id, payload))
+
+        self.on_hitl_decision = _record_decision
 
     async def aclose(self) -> None:  # pragma: no cover - optional cleanup
         pass
@@ -114,6 +135,17 @@ def _patch_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "agents.master_workflow_agent.workflow_step_recorder", recorder
     )
+
+
+class DummyTelemetry:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str, Dict[str, Any]]] = []
+
+    def info(self, event: str, payload: Optional[Dict[str, Any]] = None) -> None:
+        self.events.append(("info", event, dict(payload or {})))
+
+    def warn(self, event: str, payload: Optional[Dict[str, Any]] = None) -> None:
+        self.events.append(("warn", event, dict(payload or {})))
 
 
 @pytest.fixture
@@ -184,6 +216,66 @@ async def test_handle_missing_info_reply_continues_workflow(
 
     await orchestrator._handle_inbox_reply(message, "audit-1")
     assert master.continue_after_missing_info.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_hitl_inbox_reply_handoff(orchestrator: WorkflowOrchestrator) -> None:
+    orchestrator.telemetry = DummyTelemetry()
+    message = InboxMessage(
+        id="msg-hitl",
+        subject="HITL Decision",
+        sender="ops@example.com",
+        body="approve",
+        headers={"X-Run-ID": "run-xyz"},
+    )
+
+    await orchestrator._handle_inbox_reply(message, None)
+
+    human = orchestrator.master_agent.human_agent
+    assert human.decisions and human.decisions[0]["decision"] == "approved"
+    assert orchestrator.master_agent.hitl_callbacks[0][0] == "run-xyz"
+    assert orchestrator.telemetry.events[-1][:2] == ("info", "hitl_decision_applied")
+
+
+@pytest.mark.asyncio
+async def test_hitl_inbox_missing_run_id_emits_warning(
+    orchestrator: WorkflowOrchestrator,
+) -> None:
+    orchestrator.telemetry = DummyTelemetry()
+    message = InboxMessage(
+        id="msg-hitl-missing",
+        subject="HITL Reply",
+        sender="ops@example.com",
+        body="approve",
+    )
+
+    await orchestrator._handle_inbox_reply(message, None)
+
+    assert orchestrator.telemetry.events == [
+        ("warn", "hitl_inbox_unmatched", {"subject": "HITL Reply"})
+    ]
+    assert orchestrator.master_agent.human_agent.decisions == []
+
+
+@pytest.mark.asyncio
+async def test_hitl_inbox_no_decision_emits_info(
+    orchestrator: WorkflowOrchestrator,
+) -> None:
+    orchestrator.telemetry = DummyTelemetry()
+    message = InboxMessage(
+        id="msg-hitl-empty",
+        subject="HITL Decision",
+        sender="ops@example.com",
+        body="Thank you!",
+        headers={"X-Run-ID": "run-xyz"},
+    )
+
+    await orchestrator._handle_inbox_reply(message, None)
+
+    assert orchestrator.telemetry.events == [
+        ("info", "hitl_inbox_no_decision", {"run_id": "run-xyz"})
+    ]
+    assert orchestrator.master_agent.human_agent.decisions == []
 
 
 @pytest.mark.asyncio

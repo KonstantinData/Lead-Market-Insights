@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 
 
 def _normalise_key(key: str) -> str:
@@ -44,4 +44,46 @@ def parse_dossier_reply(subject: str, body: str) -> Dict[str, Any]:
     return {"decision": decision, "outcome": outcome}
 
 
-__all__ = ["parse_missing_info_reply", "parse_dossier_reply"]
+def extract_run_id(message: Any) -> Optional[str]:
+    """Return the workflow run identifier encoded in *message* if present."""
+
+    headers = getattr(message, "headers", None)
+    if headers:
+        for key, value in headers.items():
+            if key.lower() == "x-run-id":
+                run_id = str(value).strip()
+                if run_id:
+                    return run_id
+                break
+
+    subject = getattr(message, "subject", "") or ""
+    match = re.search(r"\[run:([^\]]+)\]", subject)
+    if match:
+        candidate = match.group(1).strip()
+        if candidate:
+            return candidate
+    return None
+
+
+def parse_hitl_reply(body: str) -> Tuple[Optional[str], Dict[str, str]]:
+    """Parse a HITL reply body into a decision and optional key/value payload."""
+
+    normalised = (body or "").strip()
+    upper = normalised.upper()
+    if "APPROVE" in upper:
+        return "approved", {}
+    if "DECLINE" in upper:
+        return "declined", {}
+    if "CHANGE" in upper:
+        pairs = re.findall(r"([A-Z0-9_]+)\s*=\s*([^\s;,\n]+)", normalised, re.IGNORECASE)
+        payload = {key.lower(): value for key, value in pairs}
+        return "change_requested", payload
+    return None, {}
+
+
+__all__ = [
+    "parse_missing_info_reply",
+    "parse_dossier_reply",
+    "extract_run_id",
+    "parse_hitl_reply",
+]

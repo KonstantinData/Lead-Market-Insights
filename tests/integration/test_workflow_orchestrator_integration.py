@@ -247,7 +247,7 @@ async def test_orchestrator_records_research_artifacts_and_email_details(
                         "existing_report": False,
                         "artifacts": {
                             "neighbor_samples": "stub/level1_samples.json",
-                            "crm_match": "stub/crm_matching_company.json",
+                            "crm_match": "stub/crm_match_evt-456.json",
                         },
                     },
                 },
@@ -314,7 +314,7 @@ async def test_orchestrator_records_research_artifacts_and_email_details(
     internal_payload = entry["research"]["internal_research"]["payload"]
     assert internal_payload["action"] == "REPORT_REQUIRED"
     assert (
-        internal_payload["artifacts"]["crm_match"] == "stub/crm_matching_company.json"
+        internal_payload["artifacts"]["crm_match"] == "stub/crm_match_evt-456.json"
     )
 
     dossier_payload = entry["research"]["dossier_research"]["payload"]

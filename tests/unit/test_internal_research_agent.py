@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -257,27 +259,59 @@ def test_validate_required_fields_with_aliases(agent):
     assert not missing_optional
 
 
-def test_build_crm_matching_payload_includes_normalised_fields(agent):
+def test_persist_crm_match_artifact_writes_full_payload(agent):
     payload = {
         "company_name": "Hooli",
         "company_domain": "hooli.com",
-        "company_industry_group": "Technology",
-        "company_industry": "Software",
-        "company_description": "Innovative technology conglomerate.",
+    }
+    crm_lookup = {
+        "company_in_crm": True,
+        "attachments_in_crm": False,
+        "requires_dossier": True,
+        "attachments": [],
+        "attachment_count": 0,
+        "company": {"id": "123"},
     }
 
-    agent._normalise_payload(payload)
-    crm_payload = agent._build_crm_matching_payload(payload)
+    artifact_path = agent._persist_crm_match_artifact(
+        "run-xyz",
+        "evt-123",
+        payload,
+        crm_lookup,
+    )
 
-    assert crm_payload == [
-        {
-            "company_name": "Hooli",
-            "company_domain": "hooli.com",
-            "industry_group": "Technology",
-            "industry": "Software",
-            "description": "Innovative technology conglomerate.",
-        }
-    ]
+    assert artifact_path
+    path_obj = Path(artifact_path)
+    assert path_obj.name == "crm_match_evt-123.json"
+    contents = json.loads(path_obj.read_text(encoding="utf-8"))
+    assert contents["run_id"] == "run-xyz"
+    assert contents["event_id"] == "evt-123"
+    assert contents["company_name"] == "Hooli"
+    assert contents["company_domain"] == "hooli.com"
+    assert contents["crm_lookup"] == crm_lookup
+    assert "written_at" in contents
+
+
+def test_persist_crm_match_artifact_handles_missing_event(agent):
+    payload = {
+        "company_name": "Umbrella",
+        "web_domain": "umbrella.example",
+    }
+    crm_lookup = {"company_in_crm": False, "attachments": []}
+
+    artifact_path = agent._persist_crm_match_artifact(
+        "run-xyz",
+        None,
+        payload,
+        crm_lookup,
+    )
+
+    assert artifact_path
+    path_obj = Path(artifact_path)
+    assert path_obj.name.startswith("crm_match_run-xyz_")
+    contents = json.loads(path_obj.read_text(encoding="utf-8"))
+    assert contents["event_id"] is None
+    assert contents["company_domain"] == "umbrella.example"
 
 
 @pytest.mark.asyncio

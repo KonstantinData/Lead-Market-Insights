@@ -201,7 +201,7 @@ Jede Anfrage/Antwort erzeugt Audit-Einträge (`request_type`, `stage`, `responde
     },
     "artifacts": {
       "neighbor_samples": "log_storage/run_history/research/artifacts/internal_research/<run_id>/level1_samples.json",
-      "crm_match": ".../crm_matching_company.json"
+      "crm_match": ".../crm_match_<event_id>.json"
     }
   }
 }
@@ -261,7 +261,7 @@ Normalisierung & Detail-Anreicherung erfolgen nach Backend-Response und Audit-Pr
 ## 7) Logging- & Artefakt-Ablage (mit Pfad-Referenzen)
 - `log_storage/run_history/workflows/<run_id>.jsonl`: sequenzielle Workflow-Logs vom WorkflowLogManager.【F:logs/workflow_log_manager.py†L17-L59】【F:agents/master_workflow_agent.py†L360-L439】
 - `log_storage/run_history/agents/internal_research/internal_research.log`: dedizierte Agent-Logs durch `_configure_file_logger`.【F:agents/internal_research_agent.py†L54-L109】
-- `log_storage/run_history/research/artifacts/internal_research/<run_id>/level1_samples.json` & `crm_matching_company.json`: Artefakte aus InternalResearch.【F:agents/internal_research_agent.py†L112-L167】
+- `log_storage/run_history/research/artifacts/internal_research/<run_id>/level1_samples.json` & `crm_match_<event_id>.json`: Artefakte aus InternalResearch.【F:agents/internal_research_agent.py†L112-L167】
 - `log_storage/run_history/research/artifacts/dossier_research/<run_id>/<event_id>_company_detail_research.json`: Persistiertes Dossier.【F:agents/dossier_research_agent.py†L58-L205】
 - `log_storage/run_history/research/artifacts/similar_companies_level1/<run_id>/...`: Similar-Research, sofern aktiviert.【F:agents/int_lvl_1_agent.py†L98-L170】
 - `log_storage/run_history/research/artifacts/workflow_runs/<run_id>/summary.json`: Run-Summary vom Workflow-Orchestrator.【F:agents/workflow_orchestrator.py†L611-L637】
@@ -274,7 +274,7 @@ Beispielstruktur:
 log_storage/run_history/
 ├── agents/internal_research/internal_research.log
 ├── research/artifacts/
-│   ├── internal_research/<run_id>/crm_matching_company.json
+│   ├── internal_research/<run_id>/crm_match_<event_id>.json
 │   ├── dossier_research/<run_id>/<event_id>_company_detail_research.json
 │   ├── similar_companies_level1/<run_id>/...
 │   └── workflow_runs/<run_id>/summary.json

@@ -74,6 +74,9 @@ class MasterWorkflowAgent:
         if agent_overrides:
             resolved_overrides.update({k: v for k, v in agent_overrides.items() if v})
 
+        self.communication_backend = communication_backend
+        self.telemetry = getattr(communication_backend, "telemetry", None)
+
         self.event_agent = event_agent or create_agent(
             BasePollingAgent,
             resolved_overrides.get("polling"),
@@ -228,6 +231,99 @@ class MasterWorkflowAgent:
                 setattr(run_filter, "_run_id", self.run_id)
 
         logger.setLevel(logging.INFO)
+
+    def _emit_telemetry(
+        self,
+        level: str,
+        event: str,
+        payload: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Emit telemetry events with graceful fallback to logging."""
+
+        payload = dict(payload or {})
+        telemetry = getattr(self, "telemetry", None)
+        method = getattr(telemetry, level, None) if telemetry is not None else None
+        if callable(method):
+            try:
+                method(event, payload)
+                return
+            except Exception:  # pragma: no cover - defensive guard
+                logger.exception(
+                    "Telemetry delegate failed for event %s", event
+                )
+        log = logger.warning if level == "warn" else logger.info
+        log("telemetry.%s event=%s payload=%s", level, event, payload)
+
+    def _resolve_email_agent(self) -> Optional[Any]:
+        backend = getattr(self, "communication_backend", None)
+        if backend is None:
+            return None
+        return getattr(backend, "email", None)
+
+    def _require_email_agent(self) -> Any:
+        email_agent = self._resolve_email_agent()
+        if email_agent is None:
+            raise RuntimeError(
+                "HITL email backend is not configured; unable to dispatch request"
+            )
+        return email_agent
+
+    def trigger_hitl(self, run_id: str, context: dict, operator_email: str):
+        email_agent = self._require_email_agent()
+        self.human_agent.persist_pending_request(run_id, context)
+        message_id = self.human_agent.dispatch_request_email(
+            run_id=run_id,
+            operator_email=operator_email,
+            context=context,
+            email_agent=email_agent,
+        )
+        self._emit_telemetry(
+            "info",
+            "hitl_request_sent",
+            {"run_id": run_id, "msg_id": message_id},
+        )
+        return message_id
+
+    def on_hitl_decision(self, run_id: str, hitl_state: dict):
+        status = ""
+        extra_payload: Dict[str, Any] = {}
+        if isinstance(hitl_state, Mapping):
+            status = str(hitl_state.get("status") or "")
+            extra_raw = hitl_state.get("extra")
+            if isinstance(extra_raw, Mapping):
+                extra_payload = dict(extra_raw)
+            elif extra_raw:
+                try:
+                    extra_payload = dict(extra_raw)  # type: ignore[arg-type]
+                except Exception:
+                    extra_payload = {"value": extra_raw}
+
+        if status == "approved":
+            self._emit_telemetry("info", "hitl_approved", {"run_id": run_id})
+            advance = getattr(self, "_advance_after_approval", None)
+            if callable(advance):
+                advance(run_id)
+            return
+        if status == "change_requested":
+            self._emit_telemetry(
+                "info",
+                "hitl_change",
+                {"run_id": run_id, "extra": extra_payload},
+            )
+            requeue = getattr(self, "_requeue_research_with_changes", None)
+            if callable(requeue):
+                requeue(run_id, extra_payload)
+            return
+        if status == "declined":
+            self._emit_telemetry("info", "hitl_declined", {"run_id": run_id})
+            closer = getattr(self, "_close_run", None)
+            if callable(closer):
+                closer(run_id)
+            return
+
+        self._emit_telemetry(
+            "warn", "hitl_unknown_decision", {"run_id": run_id, "status": status}
+        )
 
     async def process_all_events(self) -> List[Dict[str, Any]]:
         logger.info("MasterWorkflowAgent: Processing events...")

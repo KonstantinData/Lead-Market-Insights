@@ -1,8 +1,11 @@
+import asyncio
 import inspect
+import json
 import logging
 import re
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence
 
 from agents.factory import register_agent
@@ -13,8 +16,31 @@ from reminders.reminder_escalation import ReminderEscalation
 from utils.audit_log import AuditLog
 from utils.domain_resolution import resolve_company_domain
 from utils.pii import mask_pii
+from utils.email_agent import EmailAgent
+from templates.loader import render_template
 
 logger = logging.getLogger(__name__)
+
+
+class _AsyncEmailAgentAdapter:
+    """Wrap synchronous email clients to expose ``send_email_async``."""
+
+    def __init__(self, delegate: Any) -> None:
+        self._delegate = delegate
+
+    async def send_email_async(self, recipient: str, subject: str, body: str) -> bool:
+        loop = asyncio.get_running_loop()
+
+        def _send() -> bool:
+            result = self._delegate.send_email(recipient, subject, body)
+            if isinstance(result, bool):
+                return result
+            return bool(result) if result is not None else True
+
+        return await loop.run_in_executor(None, _send)
+
+    def __getattr__(self, item: str) -> Any:
+        return getattr(self._delegate, item)
 
 
 class DossierConfirmationBackendUnavailable(RuntimeError):
@@ -42,6 +68,7 @@ class HumanInLoopAgent(BaseHumanAgent):
         communication_backend: Optional[Any] = None,
         *,
         reminder_policy: Optional["HumanInLoopAgent.DossierReminderPolicy"] = None,
+        settings_override: Optional[Any] = None,
     ) -> None:
         """
         Create the HITL agent.
@@ -56,12 +83,99 @@ class HumanInLoopAgent(BaseHumanAgent):
             an explicit error so production deployments cannot silently auto-approve.
         """
         self.communication_backend = communication_backend
+        self.settings = settings if settings_override is None else settings_override
         self.audit_log: Optional[AuditLog] = None
         self.workflow_log_manager: Optional[WorkflowLogManager] = None
         self.run_id: Optional[str] = None
         self.reminder_policy = reminder_policy or self.DossierReminderPolicy()
         self.reminder_escalation: Optional[ReminderEscalation] = None
+        self.reminder: Optional[ReminderEscalation] = None
+        self._hitl_dir = Path(self.settings.workflow_log_dir)
+        self._hitl_dir.mkdir(parents=True, exist_ok=True)
         self._ensure_reminder_escalation()
+
+    def _hitl_path(self, run_id: str) -> Path:
+        return self._hitl_dir / f"{run_id}_hitl.json"
+
+    def persist_pending_request(self, run_id: str, context: Dict[str, Any]) -> None:
+        payload = {
+            "run_id": run_id,
+            "status": "pending",
+            "context": context,
+            "reminders_sent": 0,
+            "escalated": False,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        target = self._hitl_path(run_id)
+        tmp = target.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+        tmp.replace(target)
+
+    def apply_decision(
+        self,
+        run_id: str,
+        decision: str,
+        actor: str,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        path = self._hitl_path(run_id)
+        if path.exists():
+            data = json.loads(path.read_text())
+        else:
+            data = {"run_id": run_id}
+        data.update(
+            {
+                "status": decision,
+                "actor": actor,
+                "decision_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        if extra:
+            data["extra"] = extra
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+        tmp.replace(path)
+        return data
+
+    def dispatch_request_email(
+        self,
+        run_id: str,
+        operator_email: str,
+        context: Dict[str, Any],
+        email_agent: EmailAgent,
+    ) -> str:
+        """Send a HITL approval request via email using templated content."""
+
+        safe_context = mask_pii(context)
+        template_context = {"run_id": run_id}
+        template_context.update({f"context.{key}": value for key, value in safe_context.items()})
+        subject = f"HITL Approval Request · {run_id}"
+        body = render_template("hitl_request_email.txt", template_context)
+        headers = {"X-Run-ID": run_id, "X-HITL": "1"}
+        return email_agent.send_email(operator_email, subject, body, headers=headers)
+
+    def schedule_reminders(self, run_id: str, operator_email: str, email_agent: Any) -> None:
+        """Schedule reminder emails when a HITL request remains pending."""
+
+        path = self._hitl_path(run_id)
+        try:
+            state = json.loads(path.read_text())
+        except FileNotFoundError:
+            logger.warning("HITL state missing for run %s; cannot schedule reminder", run_id)
+            return
+        except json.JSONDecodeError as exc:
+            logger.error("Invalid HITL state for run %s: %s", run_id, exc)
+            return
+
+        if state.get("status") != "pending":
+            return
+
+        async_email_agent = self._ensure_async_email_agent(email_agent)
+        self._ensure_reminder_escalation(email_agent=async_email_agent)
+        if not self.reminder:
+            logger.warning("Reminder service unavailable; skipping HITL reminder for %s", run_id)
+            return
+        self.reminder.schedule(operator_email, run_id)
 
     def set_audit_log(self, audit_log: AuditLog) -> None:
         """Attach an audit logger used to persist request/response metadata."""
@@ -80,6 +194,9 @@ class HumanInLoopAgent(BaseHumanAgent):
         if self.reminder_escalation:
             self.reminder_escalation.run_id = run_id
             self.reminder_escalation.workflow_log_manager = workflow_log_manager
+            if hasattr(self.reminder_escalation, "hitl_dir"):
+                self.reminder_escalation.hitl_dir = self._hitl_dir
+            self.reminder = self.reminder_escalation
         else:
             self._ensure_reminder_escalation()
 
@@ -516,17 +633,23 @@ class HumanInLoopAgent(BaseHumanAgent):
     # ------------------------------------------------------------------
     # Reminder orchestration helpers
     # ------------------------------------------------------------------
-    def _ensure_reminder_escalation(self) -> None:
-        if self.reminder_escalation:
+    def _ensure_reminder_escalation(self, email_agent: Optional[Any] = None) -> None:
+        resolved_agent = email_agent or self._resolve_email_agent_for_reminders()
+        if resolved_agent is None:
             return
-        email_agent = self._resolve_email_agent_for_reminders()
-        if email_agent is None:
+        if self.reminder_escalation:
+            self.reminder_escalation.email_agent = resolved_agent
+            if getattr(self.reminder_escalation, "hitl_dir", None) is None:
+                self.reminder_escalation.hitl_dir = self._hitl_dir
+            self.reminder = self.reminder_escalation
             return
         self.reminder_escalation = ReminderEscalation(
-            email_agent,
+            resolved_agent,
             workflow_log_manager=self.workflow_log_manager,
             run_id=self.run_id,
+            hitl_dir=self._hitl_dir,
         )
+        self.reminder = self.reminder_escalation
 
     def _resolve_email_agent_for_reminders(self) -> Optional[Any]:
         backend = self.communication_backend
@@ -538,6 +661,15 @@ class HumanInLoopAgent(BaseHumanAgent):
         if candidate is not None and hasattr(candidate, "send_email_async"):
             return candidate
         return None
+
+    def _ensure_async_email_agent(self, email_agent: Any) -> Any:
+        if hasattr(email_agent, "send_email_async"):
+            return email_agent
+        if hasattr(email_agent, "send_email"):
+            return _AsyncEmailAgentAdapter(email_agent)
+        raise ValueError(
+            "email_agent must expose either 'send_email' or 'send_email_async'"
+        )
 
     def _post_process_decision(
         self,

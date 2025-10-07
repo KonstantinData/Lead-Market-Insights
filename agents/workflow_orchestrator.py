@@ -31,6 +31,7 @@ from polling.inbox_agent import (
     parse_dossier_decision,
     parse_missing_info_key_values,
 )
+from human_in_the_loop.reply_parsers import extract_run_id, parse_hitl_reply
 from config.config import settings
 from utils.observability import (
     configure_observability,
@@ -42,6 +43,35 @@ from utils.reporting import convert_research_artifacts_to_pdfs
 from utils.workflow_steps import workflow_step_recorder  # NEU
 
 logger = logging.getLogger("WorkflowOrchestrator")
+
+
+class _TelemetryFacade:
+    """Fallback wrapper for optional telemetry emitters."""
+
+    def __init__(self, delegate: Optional[Any] = None) -> None:
+        self._delegate = delegate
+
+    def set_delegate(self, delegate: Optional[Any]) -> None:
+        self._delegate = delegate
+
+    def info(self, event: str, payload: Optional[Dict[str, Any]] = None) -> None:
+        self._emit("info", event, payload)
+
+    def warn(self, event: str, payload: Optional[Dict[str, Any]] = None) -> None:
+        self._emit("warn", event, payload)
+
+    def _emit(self, level: str, event: str, payload: Optional[Dict[str, Any]]) -> None:
+        payload = dict(payload or {})
+        delegate = self._delegate
+        method = getattr(delegate, level, None) if delegate is not None else None
+        if callable(method):
+            try:
+                method(event, payload)
+                return
+            except Exception:  # pragma: no cover - defensive logging fallback
+                logger.exception("Telemetry delegate failed for event %s", event)
+        log = logger.warning if level == "warn" else logger.info
+        log("telemetry.%s event=%s payload=%s", level, event, payload)
 
 DEFAULT_SHUTDOWN_TIMEOUT = 5.0
 
@@ -58,6 +88,7 @@ class WorkflowOrchestrator:
     ):
         self._init_error: Optional[Exception] = None
         self.alert_agent = alert_agent
+        self.telemetry = _TelemetryFacade()
         self.failure_threshold = max(1, failure_threshold)
         self._failure_key = "workflow_run"
         self._failure_counts: Dict[str, int] = {}
@@ -108,6 +139,7 @@ class WorkflowOrchestrator:
                 self._register_async_cleanup("master_agent", closer)
             if hasattr(self.master_agent, "on_pending_audit"):
                 self.master_agent.on_pending_audit = self.on_pending
+            self.telemetry.set_delegate(getattr(self.master_agent, "telemetry", None))
         except EnvironmentError as exc:
             logger.error("Failed to initialise MasterWorkflowAgent: %s", exc)
             self.master_agent = None
@@ -258,6 +290,7 @@ class WorkflowOrchestrator:
     ) -> None:
         audit_id = detected_audit_id or ""
         if not audit_id:
+            self._handle_hitl_message(message)
             return
         if audit_id in self._handled_audit_replies:
             logger.debug("Duplicate inbox reply detected for audit %s", audit_id)
@@ -300,6 +333,53 @@ class WorkflowOrchestrator:
             record["resolved"] = True
             self._pending_audits.pop(audit_id, None)
             self._resolved_audits.add(audit_id)
+
+    def _handle_hitl_message(self, message: InboxMessage) -> None:
+        if not self.master_agent:
+            logger.debug("Dropping HITL reply; master agent unavailable.")
+            return
+
+        run_id = extract_run_id(message)
+        if not run_id:
+            self.telemetry.warn(
+                "hitl_inbox_unmatched", {"subject": getattr(message, "subject", "")}
+            )
+            return
+
+        decision, extra = parse_hitl_reply(getattr(message, "body", ""))
+        if not decision:
+            self.telemetry.info("hitl_inbox_no_decision", {"run_id": run_id})
+            return
+
+        human_agent = getattr(self.master_agent, "human_agent", None)
+        apply_decision = getattr(human_agent, "apply_decision", None)
+        if not callable(apply_decision):
+            logger.warning(
+                "HITL decision for run %s dropped; human agent missing apply_decision.",
+                run_id,
+            )
+            return
+
+        actor = getattr(message, "from_", None) or getattr(message, "sender", "")
+        payload = apply_decision(
+            run_id=run_id,
+            decision=decision,
+            actor=actor,
+            extra=extra or None,
+        )
+        status = payload.get("status") if isinstance(payload, Mapping) else None
+        self.telemetry.info(
+            "hitl_decision_applied", {"run_id": run_id, "status": status or decision}
+        )
+
+        callback = getattr(self.master_agent, "on_hitl_decision", None)
+        if callable(callback):
+            try:
+                callback(run_id, payload)
+            except Exception:
+                logger.exception(
+                    "Failed to notify master agent about HITL decision for %s", run_id
+                )
 
     def _normalise_inbox_message(
         self, kind: str, message: InboxMessage

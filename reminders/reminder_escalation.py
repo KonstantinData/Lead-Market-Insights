@@ -1,6 +1,8 @@
 import asyncio
+import json
 import logging
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional, Set
 
 
@@ -16,6 +18,7 @@ class ReminderEscalation:
         task_scheduler: Optional[
             Callable[[asyncio.Task[Any]], asyncio.Task[Any]]
         ] = None,
+        hitl_dir: Optional[Path] = None,
     ):
         self.email_agent = email_agent
         self.workflow_log_manager = workflow_log_manager
@@ -23,6 +26,7 @@ class ReminderEscalation:
         self._task_scheduler = task_scheduler
         self._tasks: Set[asyncio.Task[Any]] = set()
         self._audit_tasks: Dict[str, Set[asyncio.Task[Any]]] = {}
+        self.hitl_dir: Optional[Path] = Path(hitl_dir) if hitl_dir else None
 
     # ------------------------------------------------------------------
     # Public API
@@ -213,6 +217,56 @@ class ReminderEscalation:
             self._tasks.discard(task)
 
     # ------------------------------------------------------------------
+    # HITL reminder scheduling helpers
+    # ------------------------------------------------------------------
+    def schedule(self, operator_email: str, run_id: str) -> None:
+        """Schedule an immediate HITL reminder and update run state on success."""
+
+        if not self.hitl_dir:
+            raise RuntimeError(
+                "ReminderEscalation requires 'hitl_dir' to schedule HITL reminders"
+            )
+
+        path = self._hitl_state_path(run_id)
+        try:
+            state = json.loads(path.read_text())
+        except FileNotFoundError:
+            logging.warning("HITL state missing for run %s; reminder skipped", run_id)
+            return
+        except json.JSONDecodeError as exc:
+            logging.error("Invalid HITL state for run %s: %s", run_id, exc)
+            return
+
+        if state.get("status") != "pending":
+            return
+
+        subject = self._build_subject(run_id, state)
+        body = self._build_body(run_id, state)
+        metadata = {
+            "run_id": run_id,
+            "workflow_step": "hitl_followup",
+        }
+
+        task = self.schedule_reminder(
+            operator_email,
+            subject,
+            body,
+            0,
+            metadata=metadata,
+        )
+
+        def _after(task_result: asyncio.Task[bool]) -> None:
+            try:
+                sent = task_result.result()
+            except Exception:  # pragma: no cover - defensive logging
+                logging.exception("HITL reminder task failed for run %s", run_id)
+                return
+            if sent:
+                self._increment_reminder_count(run_id)
+
+        task.add_done_callback(_after)
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
     def _schedule_action(
@@ -336,3 +390,63 @@ class ReminderEscalation:
         if not formatted:
             return ""
         return " [" + ", ".join(formatted) + "]"
+
+    # ------------------------------------------------------------------
+    # HITL helper utilities
+    # ------------------------------------------------------------------
+    def _hitl_state_path(self, run_id: str) -> Path:
+        if not self.hitl_dir:
+            raise RuntimeError("hitl_dir is not configured for ReminderEscalation")
+        return Path(self.hitl_dir) / f"{run_id}_hitl.json"
+
+    def _increment_reminder_count(self, run_id: str) -> None:
+        path = self._hitl_state_path(run_id)
+        try:
+            state = json.loads(path.read_text())
+        except (FileNotFoundError, json.JSONDecodeError):
+            return
+        if state.get("status") != "pending":
+            return
+        count = state.get("reminders_sent") or 0
+        try:
+            count_int = int(count)
+        except (TypeError, ValueError):  # pragma: no cover - defensive guard
+            count_int = 0
+        state["reminders_sent"] = count_int + 1
+        state["last_reminder_at"] = datetime.now(timezone.utc).isoformat()
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2))
+        tmp.replace(path)
+
+    def _build_subject(self, run_id: str, state: Dict[str, Any]) -> str:
+        return f"HITL Reminder · {run_id}"
+
+    def _build_body(self, run_id: str, state: Dict[str, Any]) -> str:
+        context = state.get("context") or {}
+        company = (
+            context.get("company_name")
+            or context.get("company")
+            or context.get("company_domain")
+            or "the company"
+        )
+        lines = [
+            "Hello,",
+            "",
+            f"This is a reminder regarding the pending HITL request for {company}.",
+            f"Run ID: {run_id}",
+        ]
+        missing = context.get("missing_fields")
+        if missing:
+            if isinstance(missing, (list, tuple, set)):
+                missing_text = ", ".join(str(item) for item in missing)
+            else:
+                missing_text = str(missing)
+            lines.extend(["", f"Missing fields: {missing_text}"])
+        lines.extend(
+            [
+                "",
+                "Please reply with APPROVE, DECLINE, or CHANGE instructions.",
+                "Thank you!",
+            ]
+        )
+        return "\n".join(lines)

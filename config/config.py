@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
@@ -104,6 +105,64 @@ def _get_path_env(name: str, default: Path) -> Path:
     if raw_value:
         return Path(raw_value).expanduser().resolve()
     return default
+
+
+@dataclass
+class SmtpSettings:
+    host: Optional[str]
+    port: int
+    username: Optional[str]
+    password: Optional[str]
+    use_tls: bool = True
+    sender: Optional[str] = None
+    from_address: Optional[str] = None
+
+
+@dataclass
+class InboxSettings:
+    imap_host: Optional[str]
+    imap_user: Optional[str]
+    imap_password: Optional[str]
+    folder: str = "INBOX"
+    port: int = 993
+    use_ssl: bool = True
+
+
+@dataclass
+class HitlSettings:
+    operator_email: Optional[str]
+    admin_email: Optional[str]
+    workflow_log_dir: str
+    escalation_email: Optional[str] = None
+
+
+def validate_email_settings(cfg: Any) -> None:
+    """Ensure SMTP configuration is present before continuing startup."""
+
+    smtp = getattr(cfg, "smtp", None)
+    if smtp is None:
+        raise RuntimeError("SMTP misconfigured; missing: host,port,username,password")
+
+    missing: list[str] = []
+
+    host = getattr(smtp, "host", None)
+    if not host or not str(host).strip():
+        missing.append("host")
+
+    port = getattr(smtp, "port", None)
+    if not isinstance(port, int) or port <= 0:
+        missing.append("port")
+
+    username = getattr(smtp, "username", None)
+    if not username or not str(username).strip():
+        missing.append("username")
+
+    password = getattr(smtp, "password", None)
+    if not password:
+        missing.append("password")
+
+    if missing:
+        raise RuntimeError(f"SMTP misconfigured; missing: {','.join(missing)}")
 
 
 def _read_agent_config_file(path: Path) -> Mapping[str, Any]:
@@ -524,6 +583,27 @@ class Settings:
         self.imap_user = self.imap_username
         self.imap_ssl = self.imap_use_ssl
 
+        self.smtp = SmtpSettings(
+            host=self.smtp_host,
+            port=self.smtp_port,
+            username=self.smtp_username,
+            password=self.smtp_password,
+            use_tls=self.smtp_secure,
+            sender=self.smtp_sender,
+            from_address=self.smtp_from,
+        )
+
+        self.inbox = InboxSettings(
+            imap_host=self.imap_host,
+            imap_user=self.imap_username,
+            imap_password=self.imap_password,
+            folder=self.imap_mailbox,
+            port=self.imap_port,
+            use_ssl=self.imap_use_ssl,
+        )
+
+        validate_email_settings(self)
+
     def _load_hitl_settings(self) -> None:
         """Load human-in-the-loop reminder configuration."""
 
@@ -532,12 +612,20 @@ class Settings:
         )
         self.hitl_timezone: str = _get_env_var("HITL_TIMEZONE") or "Europe/Berlin"
         self.hitl_admin_email: Optional[str] = _get_env_var("HITL_ADMIN_EMAIL")
+        self.hitl_operator_email: Optional[str] = _get_env_var("HITL_OPERATOR_EMAIL")
         self.hitl_escalation_email: Optional[str] = _get_env_var(
             "HITL_ESCALATION_EMAIL"
         )
         self.hitl_admin_reminder_hours: Tuple[float, ...] = self._parse_hitl_hours(
             _get_env_var("HITL_ADMIN_REMINDER_HOURS"),
             default=(24.0,),
+        )
+
+        self.hitl = HitlSettings(
+            operator_email=self.hitl_operator_email,
+            admin_email=self.hitl_admin_email,
+            workflow_log_dir=str(self.workflow_log_dir),
+            escalation_email=self.hitl_escalation_email,
         )
 
     def _parse_hitl_hours(

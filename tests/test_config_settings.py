@@ -12,6 +12,14 @@ def reload_settings():
     return config_module.settings
 
 
+def ensure_base_env(monkeypatch):
+    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
+    monkeypatch.setenv("GOOGLE_CALENDAR_ID", "calendar@example.com")
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("SMTP_USERNAME", "mailer")
+    monkeypatch.setenv("SMTP_PASSWORD", "secret")
+
+
 def test_google_calendar_id_required(monkeypatch):
     monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
     monkeypatch.delenv("GOOGLE_CALENDAR_ID", raising=False)
@@ -21,7 +29,7 @@ def test_google_calendar_id_required(monkeypatch):
 
 
 def test_log_storage_dir_defaults(monkeypatch):
-    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
+    ensure_base_env(monkeypatch)
     for key in [
         "LOG_STORAGE_DIR",
         "EVENT_LOG_DIR",
@@ -40,7 +48,7 @@ def test_log_storage_dir_defaults(monkeypatch):
 
 
 def test_log_storage_dir_respects_env(monkeypatch, tmp_path):
-    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
+    ensure_base_env(monkeypatch)
     target = tmp_path / "custom-root"
     monkeypatch.setenv("LOG_STORAGE_DIR", str(target))
     monkeypatch.setenv("EVENT_LOG_DIR", str(target / "events"))
@@ -52,7 +60,7 @@ def test_log_storage_dir_respects_env(monkeypatch, tmp_path):
 
 
 def test_research_and_agent_paths_default(monkeypatch):
-    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
+    ensure_base_env(monkeypatch)
     for key in [
         "AGENT_LOG_DIR",
         "RESEARCH_ARTIFACT_DIR",
@@ -69,7 +77,7 @@ def test_research_and_agent_paths_default(monkeypatch):
 
 
 def test_research_and_agent_paths_override(monkeypatch, tmp_path):
-    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
+    ensure_base_env(monkeypatch)
     monkeypatch.setenv("AGENT_LOG_DIR", str(tmp_path / "agents"))
     monkeypatch.setenv(
         "RESEARCH_ARTIFACT_DIR", str(tmp_path / "research" / "artifacts")
@@ -87,7 +95,7 @@ def test_research_and_agent_paths_override(monkeypatch, tmp_path):
 
 
 def test_crm_attachment_base_url(monkeypatch):
-    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
+    ensure_base_env(monkeypatch)
     monkeypatch.delenv("CRM_ATTACHMENT_BASE_URL", raising=False)
 
     settings = reload_settings()
@@ -101,7 +109,7 @@ def test_crm_attachment_base_url(monkeypatch):
 
 
 def test_compliance_defaults(monkeypatch):
-    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
+    ensure_base_env(monkeypatch)
     monkeypatch.delenv("COMPLIANCE_MODE", raising=False)
     monkeypatch.delenv("MASK_PII_IN_LOGS", raising=False)
     monkeypatch.delenv("MASK_PII_IN_MESSAGES", raising=False)
@@ -114,7 +122,7 @@ def test_compliance_defaults(monkeypatch):
 
 
 def test_strict_compliance_overrides(monkeypatch):
-    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
+    ensure_base_env(monkeypatch)
     monkeypatch.setenv("COMPLIANCE_MODE", "strict")
     monkeypatch.delenv("MASK_PII_IN_LOGS", raising=False)
     monkeypatch.delenv("MASK_PII_IN_MESSAGES", raising=False)
@@ -127,7 +135,7 @@ def test_strict_compliance_overrides(monkeypatch):
 
 
 def test_explicit_mask_overrides(monkeypatch):
-    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
+    ensure_base_env(monkeypatch)
     monkeypatch.setenv("MASK_PII_IN_LOGS", "0")
     monkeypatch.setenv("MASK_PII_IN_MESSAGES", "1")
 
@@ -138,7 +146,7 @@ def test_explicit_mask_overrides(monkeypatch):
 
 
 def test_custom_whitelist(monkeypatch):
-    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
+    ensure_base_env(monkeypatch)
     monkeypatch.setenv("PII_FIELD_WHITELIST", "custom_field,AnotherField")
 
     settings = reload_settings()
@@ -148,8 +156,7 @@ def test_custom_whitelist(monkeypatch):
 
 
 def test_email_and_hitl_settings_from_env(monkeypatch):
-    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
-    monkeypatch.setenv("GOOGLE_CALENDAR_ID", "calendar@example.com")
+    ensure_base_env(monkeypatch)
     env_values = {
         "SMTP_HOST": "smtp.example.com",
         "SMTP_PORT": "2525",
@@ -163,6 +170,7 @@ def test_email_and_hitl_settings_from_env(monkeypatch):
         "IMAP_PASSWORD": "imap-pass",
         "IMAP_MAILBOX": "support",
         "IMAP_USE_SSL": "false",
+        "HITL_OPERATOR_EMAIL": "operator@example.com",
         "HITL_INBOX_POLL_SECONDS": "42.5",
         "HITL_TIMEZONE": "UTC",
         "HITL_ADMIN_EMAIL": "admin@example.com",
@@ -181,6 +189,12 @@ def test_email_and_hitl_settings_from_env(monkeypatch):
     assert settings.smtp_password == "secret"
     assert settings.smtp_sender == "alerts@example.com"
     assert settings.smtp_secure is False
+    assert settings.smtp.host == "smtp.example.com"
+    assert settings.smtp.port == 2525
+    assert settings.smtp.username == "mailer"
+    assert settings.smtp.password == "secret"
+    assert settings.smtp.use_tls is False
+    assert settings.smtp.sender == "alerts@example.com"
 
     assert settings.imap_host == "imap.example.com"
     assert settings.imap_port == 1993
@@ -190,17 +204,26 @@ def test_email_and_hitl_settings_from_env(monkeypatch):
     assert settings.imap_mailbox == "support"
     assert settings.imap_use_ssl is False
     assert settings.imap_ssl is False
+    assert settings.inbox.imap_host == "imap.example.com"
+    assert settings.inbox.imap_user == "imap-user"
+    assert settings.inbox.imap_password == "imap-pass"
+    assert settings.inbox.folder == "support"
+    assert settings.inbox.port == 1993
+    assert settings.inbox.use_ssl is False
 
     assert settings.hitl_inbox_poll_seconds == pytest.approx(42.5)
     assert settings.hitl_timezone == "UTC"
     assert settings.hitl_admin_email == "admin@example.com"
     assert settings.hitl_escalation_email == "escalations@example.com"
     assert settings.hitl_admin_reminder_hours == (4.0, 12.0, 24.0)
+    assert settings.hitl.operator_email == "operator@example.com"
+    assert settings.hitl.admin_email == "admin@example.com"
+    assert settings.hitl.workflow_log_dir == str(settings.workflow_log_dir)
+    assert settings.hitl.escalation_email == "escalations@example.com"
 
 
 def test_email_and_hitl_defaults(monkeypatch):
-    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
-    monkeypatch.setenv("GOOGLE_CALENDAR_ID", "calendar@example.com")
+    ensure_base_env(monkeypatch)
     for key in [
         "SMTP_HOST",
         "SMTP_PORT",
@@ -229,35 +252,12 @@ def test_email_and_hitl_defaults(monkeypatch):
     ]:
         monkeypatch.delenv(key, raising=False)
 
-    settings = reload_settings()
-
-    assert settings.smtp_host is None
-    assert settings.smtp_port == 465
-    assert settings.smtp_username is None
-    assert settings.smtp_user is None
-    assert settings.smtp_password is None
-    assert settings.smtp_sender is None
-    assert settings.smtp_secure is True
-
-    assert settings.imap_host is None
-    assert settings.imap_port == 993
-    assert settings.imap_username is None
-    assert settings.imap_user is None
-    assert settings.imap_password is None
-    assert settings.imap_mailbox == "INBOX"
-    assert settings.imap_use_ssl is True
-    assert settings.imap_ssl is True
-
-    assert settings.hitl_inbox_poll_seconds == pytest.approx(60.0)
-    assert settings.hitl_timezone == "Europe/Berlin"
-    assert settings.hitl_admin_email is None
-    assert settings.hitl_escalation_email is None
-    assert settings.hitl_admin_reminder_hours == (24.0,)
+    with pytest.raises(RuntimeError, match="SMTP misconfigured"):
+        reload_settings()
 
 
 def test_invalid_hitl_admin_reminder_hours(monkeypatch):
-    monkeypatch.setenv("SETTINGS_SKIP_DOTENV", "1")
-    monkeypatch.setenv("GOOGLE_CALENDAR_ID", "calendar@example.com")
+    ensure_base_env(monkeypatch)
     monkeypatch.setenv("HITL_ADMIN_REMINDER_HOURS", "four")
 
     with pytest.raises(ValueError):

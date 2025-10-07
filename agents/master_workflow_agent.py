@@ -395,6 +395,27 @@ class MasterWorkflowAgent:
                 self._record_domain_guardrail(
                     event_result, event_id, info, domain_meta
                 )
+                follow_up = await self._collect_missing_info_via_hitl(
+                    event_result,
+                    event,
+                    extracted,
+                    event_id,
+                )
+                if not follow_up:
+                    continue
+
+                normalised_info = follow_up["info"]
+                domain_meta = follow_up["domain_meta"]
+                event_result["domain_resolution"] = domain_meta
+
+                info_payload = extracted.setdefault("info", {})
+                info_payload.update(normalised_info)
+
+                extracted["is_complete"] = bool(
+                    normalised_info.get("company_name")
+                    and normalised_info.get("company_domain")
+                )
+                is_complete = extracted["is_complete"]
 
             has_research_inputs = self._has_research_inputs(normalised_info)
             if has_research_inputs:
@@ -438,65 +459,35 @@ class MasterWorkflowAgent:
                     )
                     continue
                 else:
-                    with observe_operation(
-                        "hitl_missing_info",
-                        {"event.id": str(event_id)} if event_id else None,
-                    ):
-                        filled = self.request_info(
-                            event,
-                            extracted,
-                            event_id=event_id,
-                        )
-                    audit_id = filled.get("audit_id")
-                    status = filled.get("status")
-                    if status == "pending":
-                        record_hitl_outcome("missing_info", "pending")
-                        event_result["status"] = "missing_info_pending"
-                    elif filled.get("is_complete"):
-                        logger.info(
-                            "Missing info provided for event %s [audit_id=%s]",
-                            event_id,
-                            audit_id or "n/a",
-                        )
-                        workflow_step_recorder.record_step(
-                            self.run_id, event_id, "missing_optional_fields"
-                        )
-                        workflow_step_recorder.record_step(
-                            self.run_id, event_id, "fields_validated"
-                        )
-                        record_hitl_outcome("missing_info", "completed")
-                        filled_info, _ = self._normalise_info_for_research(
-                            filled.get("info", {}) or {}, event=event
-                        )
-                        refreshed_internal = await self._run_internal_research(
-                            event_result,
-                            event,
-                            filled_info,
-                            event_id,
-                            force=True,
-                        )
-                        refreshed_lookup = self._extract_crm_lookup(
-                            refreshed_internal
-                        )
-                        workflow_step_recorder.record_step(
-                            self.run_id, event_id, "internal_lookup_completed"
-                        )
-                        await self._handle_hard_trigger(
-                            event,
-                            filled_info,
-                            event_result,
-                            event_id,
-                            internal_result=refreshed_internal,
-                            crm_lookup=refreshed_lookup,
-                        )
-                    else:
-                        logger.warning(
-                            "Required info still missing for event %s [audit_id=%s]",
-                            event_id,
-                            audit_id or "n/a",
-                        )
-                        record_hitl_outcome("missing_info", "incomplete")
-                        event_result["status"] = "missing_info_incomplete"
+                    follow_up = await self._collect_missing_info_via_hitl(
+                        event_result,
+                        event,
+                        extracted,
+                        event_id,
+                    )
+                    if not follow_up:
+                        continue
+
+                    filled_info = follow_up["info"]
+                    refreshed_internal = await self._run_internal_research(
+                        event_result,
+                        event,
+                        filled_info,
+                        event_id,
+                        force=True,
+                    )
+                    refreshed_lookup = self._extract_crm_lookup(refreshed_internal)
+                    workflow_step_recorder.record_step(
+                        self.run_id, event_id, "internal_lookup_completed"
+                    )
+                    await self._handle_hard_trigger(
+                        event,
+                        filled_info,
+                        event_result,
+                        event_id,
+                        internal_result=refreshed_internal,
+                        crm_lookup=refreshed_lookup,
+                    )
                 continue
 
             if trigger_result.get("type") == "soft" and is_complete:
@@ -540,51 +531,23 @@ class MasterWorkflowAgent:
                         self._mask_for_logging(response.get("details")),
                     )
                     record_hitl_outcome("dossier", "approved")
-                    with observe_operation(
-                        "hitl_missing_info",
-                        {"event.id": str(event_id)} if event_id else None,
-                    ):
-                        filled = self.request_info(
-                            event,
-                            extracted,
-                            event_id=event_id,
-                        )
-                    fill_audit_id = filled.get("audit_id")
-                    fill_status = filled.get("status")
-                    if fill_status == "pending":
-                        record_hitl_outcome("missing_info", "pending")
-                        event_result["status"] = "missing_info_pending"
-                    elif filled.get("is_complete"):
-                        logger.info(
-                            "Missing info provided for event %s [audit_id=%s]",
-                            event_id,
-                            fill_audit_id or "n/a",
-                        )
-                        workflow_step_recorder.record_step(
-                            self.run_id, event_id, "missing_optional_fields"
-                        )
-                        workflow_step_recorder.record_step(
-                            self.run_id, event_id, "fields_validated"
-                        )
-                        record_hitl_outcome("missing_info", "completed")
-                        filled_info, _ = self._normalise_info_for_research(
-                            filled.get("info", {}) or {}, event=event
-                        )
-                        await self._process_crm_dispatch(
-                            event,
-                            filled_info,
-                            event_result,
-                            event_id,
-                            force_internal=True,
-                        )
-                    else:
-                        logger.warning(
-                            "Required info still missing after HITL for event %s [audit_id=%s]",
-                            event_id,
-                            fill_audit_id or "n/a",
-                        )
-                        record_hitl_outcome("missing_info", "incomplete")
-                        event_result["status"] = "missing_info_incomplete"
+                    follow_up = await self._collect_missing_info_via_hitl(
+                        event_result,
+                        event,
+                        extracted,
+                        event_id,
+                    )
+                    if not follow_up:
+                        continue
+
+                    filled_info = follow_up["info"]
+                    await self._process_crm_dispatch(
+                        event,
+                        filled_info,
+                        event_result,
+                        event_id,
+                        force_internal=True,
+                    )
                 else:
                     logger.info(
                         "Organizer declined dossier for event %s [audit_id=%s]: %s",
@@ -909,6 +872,71 @@ class MasterWorkflowAgent:
                     "Failed to register pending audit handler for %s", audit_id
                 )
         return result
+
+    async def _collect_missing_info_via_hitl(
+        self,
+        event_result: Dict[str, Any],
+        event: Dict[str, Any],
+        extracted: Dict[str, Any],
+        event_id: Optional[Any],
+    ) -> Optional[Dict[str, Any]]:
+        with observe_operation(
+            "hitl_missing_info", {"event.id": str(event_id)} if event_id else None
+        ):
+            follow_up = self.request_info(
+                event,
+                extracted,
+                event_id=event_id,
+            )
+
+        def _extract(key: str) -> Any:
+            if isinstance(follow_up, Mapping):
+                return follow_up.get(key)
+            if hasattr(follow_up, "get"):
+                try:
+                    return follow_up.get(key)
+                except Exception:  # pragma: no cover - defensive
+                    pass
+            if hasattr(follow_up, key):
+                return getattr(follow_up, key)
+            return None
+
+        audit_id = _extract("audit_id")
+        status = _extract("status")
+        info_payload = _extract("info") or {}
+
+        if status == "pending":
+            record_hitl_outcome("missing_info", "pending")
+            event_result["status"] = "missing_info_pending"
+            return None
+
+        is_complete = _extract("is_complete")
+        if is_complete:
+            logger.info(
+                "Missing info provided for event %s [audit_id=%s]",
+                event_id,
+                audit_id or "n/a",
+            )
+            self._record_missing_info_completion(event_id)
+            record_hitl_outcome("missing_info", "completed")
+            filled_info, domain_meta = self._normalise_info_for_research(
+                info_payload or {}, event=event
+            )
+            event_result["status"] = "missing_info_completed"
+            return {
+                "info": filled_info,
+                "domain_meta": domain_meta,
+                "audit_id": audit_id,
+            }
+
+        logger.warning(
+            "Required info still missing for event %s [audit_id=%s]",
+            event_id,
+            audit_id or "n/a",
+        )
+        record_hitl_outcome("missing_info", "incomplete")
+        event_result["status"] = "missing_info_incomplete"
+        return None
 
     def request_dossier_confirmation(
         self,

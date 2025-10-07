@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional
+from types import MethodType
 
 import pytest
 
@@ -257,6 +258,74 @@ async def test_soft_trigger_dossier_request_approved_status_only() -> None:
 
     assert len(agent._send_calls) == 1
     assert len(backend.requests) == 1
+
+
+async def test_missing_domain_guardrail_requests_info() -> None:
+    backend = DummyBackend({"status": "declined"})
+    event = {
+        "id": "event-missing-domain",
+        "summary": "Soft trigger session without domain",
+        "organizer": {"email": "organizer@example.com", "displayName": "Org"},
+    }
+    extracted = {
+        "info": {"company_name": "Example Corp", "web_domain": ""},
+        "is_complete": False,
+    }
+
+    agent = MasterWorkflowAgent(
+        communication_backend=backend,
+        event_agent=DummyEventAgent([event]),
+        trigger_agent=DummyTriggerAgent(
+            {
+                "trigger": True,
+                "type": "soft",
+                "matched_word": "briefing",
+                "matched_field": "summary",
+            }
+        ),
+        extraction_agent=DummyExtractionAgent(extracted),
+    )
+    agent._send_calls = []  # type: ignore[attr-defined]
+
+    async def _capture_send(
+        to_event: Dict[str, Any], event_info: Dict[str, Any]
+    ) -> None:
+        agent._send_calls.append({"event": to_event, "info": event_info})
+
+    agent._send_to_crm_agent = _capture_send  # type: ignore[assignment]
+
+    run_id = generate_run_id()
+    current_run_id_var.set(run_id)
+    agent.attach_run(run_id, agent.workflow_log_manager)
+
+    calls: List[Dict[str, Any]] = []
+
+    def _mock_request_info(
+        self, event_payload: Dict[str, Any], extracted_payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        calls.append({"event": event_payload, "extracted": extracted_payload})
+        return {
+            "info": {
+                "company_name": "Example Corp",
+                "web_domain": "example.ai",
+                "company_domain": "example.ai",
+            },
+            "is_complete": True,
+        }
+
+    agent.human_agent.request_info = MethodType(  # type: ignore[assignment]
+        _mock_request_info, agent.human_agent
+    )
+
+    results = await agent.process_all_events()
+
+    assert calls, "Missing-domain guardrail should escalate to HITL"
+    assert results[0]["status"] == "dossier_declined"
+    assert any(
+        err.get("type") == "missing_domain"
+        for err in results[0].get("research_errors", [])
+    )
+    assert backend.requests, "Organizer should receive dossier decision request"
 
 
 async def test_audit_log_records_missing_info_flow(tmp_path) -> None:

@@ -42,6 +42,17 @@ def test_validate_extraction_or_raise_normalises_inputs() -> None:
         validate_extraction_or_raise({"company_name": "Acme", "company_domain": "example.com"})
 
 
+def test_validate_extraction_or_raise_requires_core_fields() -> None:
+    with pytest.raises(InvalidExtractionError, match="company_name missing"):
+        validate_extraction_or_raise({"company_domain": "acme.io"})
+
+    with pytest.raises(InvalidExtractionError, match="company_domain missing"):
+        validate_extraction_or_raise({"company_name": "Acme"})
+
+    with pytest.raises(InvalidExtractionError, match="invalid web_domain"):
+        validate_extraction_or_raise({"company_name": "Acme", "company_domain": "invalid"})
+
+
 def test_validate_extraction_or_raise_normalises_salutations() -> None:
     validated = validate_extraction_or_raise(
         {
@@ -93,6 +104,11 @@ def test_normalize_similar_companies_handles_empty_results() -> None:
     assert populated["status"] == "completed"
     assert populated["result_count"] == 1
 
+    preserved_status = normalize_similar_companies(
+        {"results": [{"id": 2}], "status": "in_progress"}
+    )
+    assert preserved_status["status"] == "in_progress"
+
 
 def test_finalize_dossier_sets_status_flags() -> None:
     insufficient = finalize_dossier({"summary": "", "sources": []})
@@ -100,6 +116,11 @@ def test_finalize_dossier_sets_status_flags() -> None:
 
     complete = finalize_dossier({"summary": "Overview", "sources": ["https://acme.io"]})
     assert complete["status"] == "completed"
+
+    preserved = finalize_dossier(
+        {"summary": "Overview", "status": "pending", "sources": ["https://acme.io"]}
+    )
+    assert preserved["status"] == "pending"
 
 
 def test_atomic_write_json_validates_payload(tmp_path: Path) -> None:

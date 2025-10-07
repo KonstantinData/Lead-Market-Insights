@@ -6,6 +6,9 @@ import httpx
 import pytest
 from tenacity import wait_fixed
 
+from types import SimpleNamespace
+
+from utils import async_http
 from utils.async_http import AsyncHTTP
 
 
@@ -44,16 +47,16 @@ async def test_async_http_retries_on_http_error(monkeypatch, caplog):
 
 async def test_async_http_helper_methods_forward_to_request(monkeypatch):
     client = AsyncHTTP()
-    calls: list[str] = []
+    calls: list[tuple[str, bytes | None]] = []
 
     async def fake_request(method, url, **kwargs):
-        calls.append(method)
+        calls.append((method, kwargs.get("data")))
         return httpx.Response(204, request=httpx.Request(method, url))
 
     monkeypatch.setattr(client._client, "request", fake_request)
     monkeypatch.setattr(AsyncHTTP.request.retry, "wait", wait_fixed(0))
 
-    post_response = await client.post("/resource")
+    post_response = await client.post("/resource", data=b"payload")
     patch_response = await client.patch("/resource")
     delete_response = await client.delete("/resource")
 
@@ -62,6 +65,23 @@ async def test_async_http_helper_methods_forward_to_request(monkeypatch):
         204,
         204,
     ]
-    assert calls == ["POST", "PATCH", "DELETE"]
+    assert calls == [("POST", b"payload"), ("PATCH", None), ("DELETE", None)]
 
     await client.aclose()
+
+
+async def test_async_http_log_retry_emits_warning_on_subsequent_attempts(caplog):
+    first_attempt = SimpleNamespace(attempt_number=1)
+    second_attempt = SimpleNamespace(attempt_number=2)
+
+    with caplog.at_level("WARNING"):
+        async_http._log_retry(first_attempt)
+
+    assert not any("Retrying HTTP request" in rec.message for rec in caplog.records)
+
+    caplog.clear()
+
+    with caplog.at_level("WARNING"):
+        async_http._log_retry(second_attempt)
+
+    assert any("Retrying HTTP request" in rec.message for rec in caplog.records)

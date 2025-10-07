@@ -483,3 +483,361 @@ async def test_collect_missing_info_incomplete_sets_status(tmp_path) -> None:
         if agent is not None:
             agent.finalize_run_logs()
         settings.run_log_dir = original_run_dir
+
+
+async def test_request_info_records_pending_fields(tmp_path) -> None:
+    original_run_dir = settings.run_log_dir
+    temp_run_dir = tmp_path / "runs"
+    temp_run_dir.mkdir()
+    agent: Optional[MasterWorkflowAgent] = None
+    try:
+        settings.run_log_dir = temp_run_dir
+        agent = MasterWorkflowAgent(
+            communication_backend=None,
+            event_agent=DummyEventAgent([]),
+            trigger_agent=DummyTriggerAgent({"trigger": False}),
+            extraction_agent=DummyExtractionAgent({"info": {}, "is_complete": False}),
+        )
+
+        run_id = generate_run_id()
+        current_run_id_var.set(run_id)
+        agent.attach_run(run_id, agent.workflow_log_manager)
+
+        pending_calls: List[Dict[str, Any]] = []
+
+        def _capture_pending(request_type: str, audit_id: str, context: Dict[str, Any]) -> None:
+            pending_calls.append(
+                {
+                    "request_type": request_type,
+                    "audit_id": audit_id,
+                    "context": context,
+                }
+            )
+
+        agent.on_pending_audit = _capture_pending  # type: ignore[assignment]
+
+        def _fake_human_request_info(
+            self,
+            event_payload: Dict[str, Any],
+            extracted_payload: Dict[str, Any],
+        ) -> Dict[str, Any]:
+            return {
+                "status": "pending",
+                "audit_id": "audit-fields",
+                "info": {
+                    "company_name": "Widget Co",
+                    "web_domain": "",
+                },
+            }
+
+        agent.human_agent.request_info = MethodType(  # type: ignore[assignment]
+            _fake_human_request_info, agent.human_agent
+        )
+
+        event_payload = {"id": "event-fields", "summary": "Widget briefing"}
+        extracted_payload = {"info": {"company_name": "Widget Co"}, "is_complete": False}
+
+        result = agent.request_info(
+            event_payload,
+            extracted_payload,
+            event_id="event-fields",
+        )
+
+        assert result["status"] == "pending"
+        assert pending_calls and pending_calls[0]["audit_id"] == "audit-fields"
+        context = pending_calls[0]["context"]
+        assert context["event"]["id"] == "event-fields"
+        assert context["requested_fields"] == ["web_domain"]
+
+        pending_calls.clear()
+
+        def _fake_human_request_info_with_fields(
+            self,
+            event_payload: Dict[str, Any],
+            extracted_payload: Dict[str, Any],
+        ) -> Dict[str, Any]:
+            return {
+                "status": "pending",
+                "audit_id": "audit-explicit",
+                "info": {
+                    "company_name": "Widget Co",
+                    "web_domain": "",
+                },
+                "requested_fields": ["company_domain", "web_domain"],
+            }
+
+        agent.human_agent.request_info = MethodType(  # type: ignore[assignment]
+            _fake_human_request_info_with_fields, agent.human_agent
+        )
+
+        second_result = agent.request_info(
+            event_payload,
+            extracted_payload,
+            event_id="event-fields",
+        )
+
+        assert second_result["status"] == "pending"
+        assert pending_calls and pending_calls[0]["audit_id"] == "audit-explicit"
+        explicit_context = pending_calls[0]["context"]
+        assert explicit_context["requested_fields"] == [
+            "company_domain",
+            "web_domain",
+        ]
+    finally:
+        if agent is not None:
+            agent.finalize_run_logs()
+        settings.run_log_dir = original_run_dir
+
+
+async def test_continue_after_missing_info_dispatches_when_fields_complete(
+    tmp_path,
+) -> None:
+    original_run_dir = settings.run_log_dir
+    temp_run_dir = tmp_path / "runs"
+    temp_run_dir.mkdir()
+    agent: Optional[MasterWorkflowAgent] = None
+    try:
+        settings.run_log_dir = temp_run_dir
+        agent = MasterWorkflowAgent(
+            communication_backend=None,
+            event_agent=DummyEventAgent([]),
+            trigger_agent=DummyTriggerAgent({"trigger": False}),
+            extraction_agent=DummyExtractionAgent({"info": {}, "is_complete": False}),
+        )
+
+        run_id = generate_run_id()
+        current_run_id_var.set(run_id)
+        agent.attach_run(run_id, agent.workflow_log_manager)
+
+        completion_events: List[Any] = []
+
+        def _fake_record_completion(self, event_identifier: Any) -> None:
+            completion_events.append(event_identifier)
+
+        agent._record_missing_info_completion = MethodType(  # type: ignore[assignment]
+            _fake_record_completion, agent
+        )
+
+        dispatched: List[Dict[str, Any]] = []
+
+        async def _fake_process_dispatch(
+            self,
+            event_payload: Dict[str, Any],
+            info_payload: Dict[str, Any],
+            event_result_payload: Dict[str, Any],
+            event_identifier: Optional[Any],
+            *,
+            force_internal: bool,
+            internal_result: Optional[Dict[str, Any]] = None,
+            requires_dossier_override: Optional[bool] = None,
+        ) -> None:
+            dispatched.append(
+                {
+                    "event": event_payload,
+                    "info": dict(info_payload),
+                    "event_result": dict(event_result_payload),
+                    "event_id": event_identifier,
+                    "force_internal": force_internal,
+                }
+            )
+            event_result_payload["status"] = "crm_dispatched"
+
+        agent._process_crm_dispatch = MethodType(  # type: ignore[assignment]
+            _fake_process_dispatch, agent
+        )
+
+        context = {
+            "event": {
+                "id": "event-complete",
+                "summary": "Review plans for acme-industries.com",
+            },
+            "info": {"company_name": "Acme Industries"},
+            "event_id": "event-complete",
+        }
+
+        result = await agent.continue_after_missing_info(
+            "audit-complete",
+            {"company_domain": "Acme-Industries.COM"},
+            context,
+        )
+
+        assert result is not None
+        assert result["status"] == "crm_dispatched"
+        assert completion_events == ["event-complete"]
+        assert dispatched and dispatched[0]["force_internal"] is True
+        assert dispatched[0]["info"].get("company_domain") == "acme-industries.com"
+    finally:
+        if agent is not None:
+            agent.finalize_run_logs()
+        settings.run_log_dir = original_run_dir
+
+
+async def test_continue_after_missing_info_requests_followup_completion(
+    tmp_path,
+) -> None:
+    original_run_dir = settings.run_log_dir
+    temp_run_dir = tmp_path / "runs"
+    temp_run_dir.mkdir()
+    agent: Optional[MasterWorkflowAgent] = None
+    try:
+        settings.run_log_dir = temp_run_dir
+        agent = MasterWorkflowAgent(
+            communication_backend=None,
+            event_agent=DummyEventAgent([]),
+            trigger_agent=DummyTriggerAgent({"trigger": False}),
+            extraction_agent=DummyExtractionAgent({"info": {}, "is_complete": False}),
+        )
+
+        run_id = generate_run_id()
+        current_run_id_var.set(run_id)
+        agent.attach_run(run_id, agent.workflow_log_manager)
+
+        completion_events: List[Any] = []
+
+        def _fake_record_completion(self, event_identifier: Any) -> None:
+            completion_events.append(event_identifier)
+
+        agent._record_missing_info_completion = MethodType(  # type: ignore[assignment]
+            _fake_record_completion, agent
+        )
+
+        dispatched: List[Dict[str, Any]] = []
+
+        async def _fake_process_dispatch(
+            self,
+            event_payload: Dict[str, Any],
+            info_payload: Dict[str, Any],
+            event_result_payload: Dict[str, Any],
+            event_identifier: Optional[Any],
+            *,
+            force_internal: bool,
+            internal_result: Optional[Dict[str, Any]] = None,
+            requires_dossier_override: Optional[bool] = None,
+        ) -> None:
+            dispatched.append(
+                {
+                    "event": event_payload,
+                    "info": dict(info_payload),
+                    "event_result": dict(event_result_payload),
+                    "event_id": event_identifier,
+                    "force_internal": force_internal,
+                }
+            )
+            event_result_payload["status"] = "crm_dispatched"
+
+        agent._process_crm_dispatch = MethodType(  # type: ignore[assignment]
+            _fake_process_dispatch, agent
+        )
+
+        request_calls: List[Dict[str, Any]] = []
+
+        def _fake_request_info(
+            self,
+            event_payload: Dict[str, Any],
+            extracted_payload: Dict[str, Any],
+            *,
+            event_id: Optional[Any] = None,
+        ) -> Dict[str, Any]:
+            request_calls.append(
+                {"event": event_payload, "extracted": extracted_payload, "event_id": event_id}
+            )
+            return {
+                "is_complete": True,
+                "info": {
+                    "company_name": "Widget Co",
+                    "company_domain": "widgetco.org",
+                },
+            }
+
+        agent.request_info = MethodType(_fake_request_info, agent)  # type: ignore[assignment]
+
+        context = {
+            "event": {
+                "id": "event-followup",
+                "summary": "Strategy sync for widgetco.org",
+            },
+            "info": {"company_name": "Widget Co"},
+            "event_id": "event-followup",
+        }
+
+        result = await agent.continue_after_missing_info(
+            "audit-followup",
+            {},
+            context,
+        )
+
+        assert request_calls and request_calls[0]["event_id"] == "event-followup"
+        assert result is not None
+        assert result["status"] == "crm_dispatched"
+        assert completion_events == ["event-followup"]
+        assert dispatched and dispatched[0]["info"].get("company_domain") == "widgetco.org"
+    finally:
+        if agent is not None:
+            agent.finalize_run_logs()
+        settings.run_log_dir = original_run_dir
+
+
+async def test_collect_missing_info_preserves_hitl_domain(tmp_path) -> None:
+    original_run_dir = settings.run_log_dir
+    temp_run_dir = tmp_path / "runs"
+    temp_run_dir.mkdir()
+    agent: Optional[MasterWorkflowAgent] = None
+    try:
+        settings.run_log_dir = temp_run_dir
+        agent = MasterWorkflowAgent(
+            communication_backend=None,
+            event_agent=DummyEventAgent([]),
+            trigger_agent=DummyTriggerAgent({"trigger": False}),
+            extraction_agent=DummyExtractionAgent({"info": {}, "is_complete": False}),
+        )
+
+        run_id = generate_run_id()
+        current_run_id_var.set(run_id)
+        agent.attach_run(run_id, agent.workflow_log_manager)
+
+        completion_events: List[Any] = []
+
+        def _fake_record_completion(self, event_identifier: Any) -> None:
+            completion_events.append(event_identifier)
+
+        agent._record_missing_info_completion = MethodType(  # type: ignore[assignment]
+            _fake_record_completion, agent
+        )
+
+        def _fake_request_info(
+            self,
+            event_payload: Dict[str, Any],
+            extracted_payload: Dict[str, Any],
+            *,
+            event_id: Optional[Any] = None,
+        ) -> Dict[str, Any]:
+            return {
+                "audit_id": "audit-domain",
+                "is_complete": True,
+                "info": {
+                    "company_name": "Example Corp",
+                    "web_domain": "ExampleCorp.TEST",
+                },
+            }
+
+        agent.request_info = MethodType(_fake_request_info, agent)  # type: ignore[assignment]
+
+        event_result: Dict[str, Any] = {}
+        follow_up = await agent._collect_missing_info_via_hitl(
+            event_result,
+            {"id": "event-domain", "summary": "Quarterly sync"},
+            {"info": {"company_name": "Example Corp"}, "is_complete": False},
+            "event-domain",
+        )
+
+        assert completion_events == ["event-domain"]
+        assert event_result["status"] == "missing_info_completed"
+        assert follow_up is not None
+        assert follow_up["audit_id"] == "audit-domain"
+        assert follow_up["info"]["company_domain"] == "examplecorp.test"
+        assert follow_up["info"]["web_domain"] == "examplecorp.test"
+        assert follow_up["domain_meta"]["source"] == "hitl_provided"
+    finally:
+        if agent is not None:
+            agent.finalize_run_logs()
+        settings.run_log_dir = original_run_dir

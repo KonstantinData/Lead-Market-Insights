@@ -184,7 +184,7 @@ async def test_observability_records_metrics_and_traces(
 
         event = {
             "id": "evt-1",
-            "summary": "Soft trigger event",
+            "summary": "Soft trigger event about example.ai",
             "organizer": {"email": "user@example.com"},
         }
         extraction_payload = {

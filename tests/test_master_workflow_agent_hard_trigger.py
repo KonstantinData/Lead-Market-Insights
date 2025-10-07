@@ -38,7 +38,10 @@ class DummyExtractionAgent:
 async def test_hard_trigger_with_complete_info_dispatches_without_unhandled_state() -> (
     None
 ):
-    event = {"id": "event-001", "summary": "Hard trigger meeting"}
+    event = {
+        "id": "event-001",
+        "summary": "Hard trigger meeting about example.ai",
+    }
     info = {"company_name": "Example Corp", "company_domain": "example.ai"}
 
     agent = MasterWorkflowAgent(

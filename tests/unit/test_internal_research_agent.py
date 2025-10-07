@@ -286,9 +286,10 @@ def test_persist_crm_match_artifact_writes_full_payload(agent):
     contents = json.loads(path_obj.read_text(encoding="utf-8"))
     assert contents["run_id"] == "run-xyz"
     assert contents["event_id"] == "evt-123"
-    assert contents["company_name"] == "Hooli"
-    assert contents["company_domain"] == "hooli.com"
-    assert contents["crm_lookup"] == crm_lookup
+    assert contents["crm_payload"]["company_name"] == "Hooli"
+    assert contents["crm_payload"]["company_domain"] == "hooli.com"
+    assert contents["crm_payload"]["crm_lookup"] == crm_lookup
+    assert contents["crm_payload"]["request_payload"] == payload
     assert "written_at" in contents
 
 
@@ -311,7 +312,7 @@ def test_persist_crm_match_artifact_handles_missing_event(agent):
     assert path_obj.name.startswith("crm_match_run-xyz_")
     contents = json.loads(path_obj.read_text(encoding="utf-8"))
     assert contents["event_id"] is None
-    assert contents["company_domain"] == "umbrella.example"
+    assert contents["crm_payload"]["company_domain"] == "umbrella.example"
 
 
 @pytest.mark.asyncio

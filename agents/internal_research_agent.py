@@ -16,7 +16,7 @@ from integration.hubspot_integration import HubSpotIntegration
 from config.config import settings
 from logs.workflow_log_manager import WorkflowLogManager
 from reminders.reminder_escalation import ReminderEscalation
-from utils.crm_artifacts import build_crm_match_payload, persist_crm_match
+from utils.crm_artifacts import save_crm_match
 from utils.persistence import atomic_write_json
 
 NormalizedPayload = Dict[str, Any]
@@ -462,13 +462,12 @@ class InternalResearchAgent(BaseResearchAgent):
             or ""
         )
 
-        artifact_payload = build_crm_match_payload(
-            run_id=run_id,
-            event_id=event_id,
-            company_name=company_name,
-            company_domain=company_domain,
-            crm_lookup=dict(crm_lookup),
-        )
+        artifact_payload = {
+            "company_name": company_name,
+            "company_domain": company_domain,
+            "request_payload": dict(payload),
+            "crm_lookup": dict(crm_lookup),
+        }
 
         self.logger.info(
             "Persisting CRM match artifact for run %s event %s: %s",
@@ -477,10 +476,10 @@ class InternalResearchAgent(BaseResearchAgent):
             json.dumps(artifact_payload, ensure_ascii=False, sort_keys=True),
         )
 
-        artifact_path = persist_crm_match(
+        artifact_path = save_crm_match(
             self.research_artifact_dir,
             run_id,
-            event_id,
+            str(event_id) if event_id is not None else None,
             artifact_payload,
         )
         return artifact_path.as_posix()

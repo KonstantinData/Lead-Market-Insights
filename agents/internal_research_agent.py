@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +16,7 @@ from integration.hubspot_integration import HubSpotIntegration
 from config.config import settings
 from logs.workflow_log_manager import WorkflowLogManager
 from reminders.reminder_escalation import ReminderEscalation
+from utils.crm_artifacts import build_crm_match_payload, persist_crm_match
 from utils.persistence import atomic_write_json
 
 NormalizedPayload = Dict[str, Any]
@@ -119,11 +121,17 @@ class InternalResearchAgent(BaseResearchAgent):
                 event_id,
             )
 
-        crm_match_payload = self._build_crm_matching_payload(payload)
-        crm_artifact = self._write_artifact(
+        crm_summary = await self._lookup_crm_company(
+            payload,
             run_id,
-            "crm_matching_company.json",
-            crm_match_payload,
+            event_id,
+        )
+
+        crm_artifact = self._persist_crm_match_artifact(
+            run_id,
+            event_id,
+            payload,
+            crm_summary,
         )
         if crm_artifact:
             self._log_workflow(
@@ -132,12 +140,6 @@ class InternalResearchAgent(BaseResearchAgent):
                 f"Stored CRM matching details at {crm_artifact}.",
                 event_id,
             )
-
-        crm_summary = await self._lookup_crm_company(
-            payload,
-            run_id,
-            event_id,
-        )
 
         action = "COMPANY_LOOKUP_COMPLETED"
         self._log_workflow(
@@ -442,26 +444,46 @@ class InternalResearchAgent(BaseResearchAgent):
         atomic_write_json(artifact_path, data)
         return artifact_path.as_posix()
 
-    def _build_crm_matching_payload(
-        self, payload: Mapping[str, Any]
-    ) -> List[Dict[str, Any]]:
-        company_name = payload.get("company_name") or ""
-        company_domain = payload.get("company_domain") or ""
-        if not company_name and not company_domain:
-            return []
+    def _persist_crm_match_artifact(
+        self,
+        run_id: str,
+        event_id: Optional[str],
+        payload: Mapping[str, Any],
+        crm_lookup: Mapping[str, Any],
+    ) -> Optional[str]:
+        if not isinstance(crm_lookup, Mapping):
+            return None
 
-        optional_details = {
-            field: payload.get(field)
-            for field in self.DEFAULT_OPTIONAL_FIELDS
-        }
+        company_name = str(payload.get("company_name") or "")
+        company_domain = str(
+            payload.get("company_domain")
+            or payload.get("web_domain")
+            or payload.get("domain")
+            or ""
+        )
 
-        return [
-            {
-                "company_name": company_name,
-                "company_domain": company_domain,
-                **optional_details,
-            }
-        ]
+        artifact_payload = build_crm_match_payload(
+            run_id=run_id,
+            event_id=event_id,
+            company_name=company_name,
+            company_domain=company_domain,
+            crm_lookup=dict(crm_lookup),
+        )
+
+        self.logger.info(
+            "Persisting CRM match artifact for run %s event %s: %s",
+            run_id,
+            event_id or "<missing>",
+            json.dumps(artifact_payload, ensure_ascii=False, sort_keys=True),
+        )
+
+        artifact_path = persist_crm_match(
+            self.research_artifact_dir,
+            run_id,
+            event_id,
+            artifact_payload,
+        )
+        return artifact_path.as_posix()
 
     async def _lookup_crm_company(
         self,

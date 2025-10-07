@@ -15,8 +15,8 @@ Die folgende Übersicht dokumentiert, welche Komponenten die wichtigsten Dateien
 - **Bezug zum Laufkontext:** Ordner- und Dateinamen enthalten `run_id` und `event_id`, wodurch Artefakte eindeutig dem Workflow-Run zugeordnet sind.【F:agents/dossier_research_agent.py†L68-L205】
 
 ## `log_storage/run_history/research/artifacts/internal_research`
-- **Verantwortliche Komponente:** `InternalResearchAgent` persistiert ergänzende JSON-Artefakte (z. B. `level1_samples.json`, `crm_matching_company.json`) unterhalb von `<run_id>`.【F:agents/internal_research_agent.py†L81-L155】【F:agents/internal_research_agent.py†L464-L493】
-- **Inhalt & Datenstruktur:** Die Dateien enthalten Listen von Nachbarunternehmen bzw. CRM-Matching-Daten, die aus dem Trigger abgeleitet werden.【F:agents/internal_research_agent.py†L136-L195】【F:agents/internal_research_agent.py†L445-L493】
+- **Verantwortliche Komponente:** `InternalResearchAgent` persistiert ergänzende JSON-Artefakte (z. B. `level1_samples.json`, `crm_match_<event_id>.json`) unterhalb von `<run_id>`.【F:agents/internal_research_agent.py†L81-L155】【F:agents/internal_research_agent.py†L418-L493】
+- **Inhalt & Datenstruktur:** Die Dateien enthalten Listen von Nachbarunternehmen bzw. vollständige CRM-Lookup-Payloads (`crm_lookup` mit Flags, Attachments, Company-Objekt, Zeitstempel).【F:agents/internal_research_agent.py†L136-L195】【F:agents/internal_research_agent.py†L418-L493】
 - **Verwendungszweck im Workflow:** Die Pfade werden im normalisierten Agentenergebnis zurückgegeben (`payload.artifacts`), sodass der Master-Workflow sie in Audit-Trails und CRM-Workflows referenzieren kann.【F:agents/internal_research_agent.py†L178-L195】
 - **Bezug zum Laufkontext:** Unterordner nach `run_id` stellen sicher, dass mehrere Runs eines Unternehmens getrennt bleiben; Artefaktverweise tauchen im Run-Summary (`research`) wieder auf.【F:agents/internal_research_agent.py†L464-L472】【F:agents/workflow_orchestrator.py†L621-L635】
 

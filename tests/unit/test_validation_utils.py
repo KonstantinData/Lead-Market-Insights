@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from utils.persistence import ProcessedEventsState, atomic_write_json
 from utils.validation import (
     InvalidExtractionError,
+    _extract_domain_keyword,
     finalize_dossier,
     is_valid_business_domain,
     normalize_domain,
@@ -27,6 +28,7 @@ def test_is_valid_business_domain_filters_placeholders() -> None:
 
 def test_normalize_domain_strips_protocol_and_slashes() -> None:
     assert normalize_domain("HTTPS://Example.com/") == "example.com"
+    assert normalize_domain("example.org///") == "example.org"
     assert normalize_domain(None) == ""
 
 
@@ -108,6 +110,11 @@ def test_normalize_similar_companies_handles_empty_results() -> None:
         {"results": [{"id": 2}], "status": "in_progress"}
     )
     assert preserved_status["status"] == "in_progress"
+
+
+def test_extract_domain_keyword_ignores_www_labels() -> None:
+    assert _extract_domain_keyword("www.") == ""
+    assert _extract_domain_keyword("www.acme.test") == "acme"
 
 
 def test_finalize_dossier_sets_status_flags() -> None:

@@ -29,6 +29,7 @@ def test_mask_pii_strict_mode_redacts_numeric_fields():
     assert masked["details"]["account_number"] == "<redacted>"
     assert masked["details"]["count"] == "<redacted>"
 
+
 def test_mask_pii_handles_sets_and_sequences():
     payload = {
         "metadata": {

@@ -15,7 +15,10 @@ def _reset_mapping_cache() -> None:
 
 def test_resolve_company_domain_prefers_provided_domain() -> None:
     _reset_mapping_cache()
-    domain, source = dr.resolve_company_domain({"company_domain": "HTTPS://Acme.io/"})
+    domain, source = dr.resolve_company_domain(
+        {"company_domain": "HTTPS://Acme.io/"},
+        event={"summary": "Acme planning sync (https://acme.io)"},
+    )
 
     assert domain == "acme.io"
     assert source == "provided"
@@ -28,7 +31,10 @@ def test_resolve_company_domain_uses_mapping(tmp_path: Path, monkeypatch) -> Non
     monkeypatch.setattr(dr, "_DEFAULT_MAPPING_PATH", mapping_file)
     _reset_mapping_cache()
 
-    domain, source = dr.resolve_company_domain({"company_name": "Acme Corp"})
+    domain, source = dr.resolve_company_domain(
+        {"company_name": "Acme Corp"},
+        event={"description": "Agenda: deep dive at https://acme.test/platform"},
+    )
 
     assert domain == "acme.test"
     assert source == "mapping"
@@ -39,7 +45,9 @@ def test_resolve_company_domain_from_info_email(monkeypatch) -> None:
     _reset_mapping_cache()
 
     info = {"primary_email": "ceo@contoso.io"}
-    domain, source = dr.resolve_company_domain(info)
+    domain, source = dr.resolve_company_domain(
+        info, event={"summary": "Strategy review with contoso.io leadership"}
+    )
 
     assert domain == "contoso.io"
     assert source == "info_email"
@@ -51,18 +59,37 @@ def test_resolve_company_domain_from_event_contacts(monkeypatch) -> None:
 
     domain, source = dr.resolve_company_domain(
         info={},
-        event={"organizer": {"email": "host@sample.ai"}, "attendees": ["guest@ignored.com"]},
+        event={
+            "summary": "Kick-off with ACSYS Lastertechnik",
+            "organizer": {"email": "host@sample.ai"},
+            "attendees": ["guest@ignored.com"],
+        },
     )
 
-    assert domain == "sample.ai"
-    assert source == "contact_email"
+    assert domain is None
+    assert source is None
 
 
 def test_resolve_company_domain_heuristic_fallback(monkeypatch) -> None:
     monkeypatch.setattr(dr, "_DEFAULT_MAPPING_PATH", Path("/dev/null"))
     _reset_mapping_cache()
 
-    domain, source = dr.resolve_company_domain({"company_name": "Blue Ocean"})
+    domain, source = dr.resolve_company_domain(
+        {"company_name": "Blue Ocean"},
+        event={"description": "Exploration call - see blueocean.com for deck"},
+    )
 
     assert domain == "blueocean.com"
     assert source == "heuristic"
+
+
+def test_resolve_company_domain_rejects_domain_missing_from_event_text() -> None:
+    _reset_mapping_cache()
+
+    domain, source = dr.resolve_company_domain(
+        {"company_domain": "hidden.example"},
+        event={"summary": "Sync with Hidden Example"},
+    )
+
+    assert domain is None
+    assert source is None

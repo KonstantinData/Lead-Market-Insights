@@ -37,6 +37,37 @@ _GENERIC_EMAIL_PROVIDERS = {
 _HEURISTIC_TLDS = ("com", "io", "ai", "co")
 
 
+def _domain_in_event_text(
+    domain: Optional[str], event: Optional[Mapping[str, Any]]
+) -> bool:
+    if not domain:
+        return False
+    if not isinstance(event, Mapping):
+        return True
+
+    text_segments = []
+    for field in ("summary", "description"):
+        value = event.get(field)
+        if isinstance(value, str) and value.strip():
+            text_segments.append(value.lower())
+
+    if not text_segments:
+        return False
+
+    search_space = " ".join(text_segments)
+    domain_lower = domain.lower()
+    if domain_lower in search_space:
+        return True
+
+    if domain_lower.startswith("www."):
+        stripped = domain_lower[4:]
+        if stripped and stripped in search_space:
+            return True
+        return False
+
+    return f"www.{domain_lower}" in search_space
+
+
 def _normalise_company_key(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", name.strip().lower())
 
@@ -107,33 +138,6 @@ def _resolve_from_info(info: Mapping[str, Any]) -> Tuple[str | None, str | None]
     return None, None
 
 
-def _resolve_from_event(event: Optional[Mapping[str, Any]]) -> Tuple[str | None, str | None]:
-    if not isinstance(event, Mapping):
-        return None, None
-
-    def _iter_contacts() -> list[Any]:
-        contacts: list[Any] = []
-        for field in ("organizer", "creator"):
-            value = event.get(field)
-            if value is not None:
-                contacts.append(value)
-        attendees = event.get("attendees")
-        if isinstance(attendees, list):
-            contacts.extend(attendees)
-        return contacts
-
-    for contact in _iter_contacts():
-        if isinstance(contact, Mapping):
-            domain = _extract_email_domain(contact.get("email"))
-            if domain:
-                return domain, "contact_email"
-        else:
-            domain = _extract_email_domain(contact)
-            if domain:
-                return domain, "contact_email"
-    return None, None
-
-
 def _resolve_from_name(company_name: str | None) -> Tuple[str | None, str | None]:
     if not company_name:
         return None, None
@@ -158,24 +162,20 @@ def resolve_company_domain(
         or info.get("web_domain")
         or info.get("domain")
     )
-    if is_valid_business_domain(existing):
+    if is_valid_business_domain(existing) and _domain_in_event_text(existing, event):
         return existing, "provided"
 
     company_name = (info.get("company_name") or info.get("name") or "").strip()
     domain, source = _resolve_from_mapping(company_name)
-    if domain:
+    if domain and _domain_in_event_text(domain, event):
         return domain, source
 
     domain, source = _resolve_from_info(info)
-    if domain:
-        return domain, source
-
-    domain, source = _resolve_from_event(event)
-    if domain:
+    if domain and _domain_in_event_text(domain, event):
         return domain, source
 
     domain, source = _resolve_from_name(company_name)
-    if domain:
+    if domain and _domain_in_event_text(domain, event):
         return domain, source
 
     return None, None

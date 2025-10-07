@@ -136,4 +136,3 @@ def test_schedule_reminders_skips_when_not_pending(tmp_path):
     updated = json.loads(state_path.read_text())
     assert updated["reminders_sent"] == 0
     assert not email_agent.calls
-

@@ -73,6 +73,7 @@ class _TelemetryFacade:
         log = logger.warning if level == "warn" else logger.info
         log("telemetry.%s event=%s payload=%s", level, event, payload)
 
+
 DEFAULT_SHUTDOWN_TIMEOUT = 5.0
 
 

@@ -53,3 +53,11 @@ def test_mask_pii_applies_category_marker_to_string_fields():
     masked = mask_pii(payload)
 
     assert masked["details"]["phone"] == "<redacted-phone>"
+
+
+def test_mask_pii_forced_marker_applies_to_non_string_leaf():
+    payload = {"organizer": {"attendees": 123456}}
+
+    masked = mask_pii(payload)
+
+    assert masked["organizer"]["attendees"] == "<redacted>"

@@ -83,6 +83,47 @@ def test_convert_research_artifacts_names_follow_inputs(tmp_path: Path) -> None:
     assert similar_pdf.name == "similar_companies.pdf"
 
 
+def test_convert_research_artifacts_handles_hidden_file_names(tmp_path: Path) -> None:
+    dossier_artifact = tmp_path / ".json"
+    dossier_artifact.write_text(json.dumps({"company": "Example"}), encoding="utf-8")
+
+    result = convert_research_artifacts_to_pdfs(
+        dossier_artifact,
+        {"results": []},
+        output_dir=tmp_path,
+    )
+
+    dossier_pdf = Path(result["dossier_pdf"])
+    assert dossier_pdf.name == ".json.pdf"
+
+
+def test_convert_research_artifacts_triggers_page_break(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from utils import reporting
+
+    page_breaks: list[bool] = []
+    original_canvas = reporting.canvas.Canvas
+
+    class TrackingCanvas(original_canvas):  # type: ignore[misc]
+        def showPage(self) -> None:  # noqa: D401 - behaviour inherited
+            page_breaks.append(True)
+            super().showPage()
+
+    monkeypatch.setattr(reporting.canvas, "Canvas", TrackingCanvas)
+
+    dossier_payload = {"items": [f"entry {i}" for i in range(150)]}
+
+    result = convert_research_artifacts_to_pdfs(
+        dossier_payload,
+        {"results": []},
+        output_dir=tmp_path,
+    )
+
+    assert page_breaks, "Expected at least one page break for large payload"
+    assert Path(result["dossier_pdf"]).exists()
+
+
 def test_convert_research_artifacts_requires_reportlab(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr("utils.reporting._REPORTLAB_IMPORT_ERROR", ImportError("missing"))
 

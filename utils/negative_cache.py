@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from utils.datetime_formatting import format_cet_timestamp
 from utils.persistence import (
     NegativeCacheState,
     atomic_write_json,
@@ -83,6 +84,11 @@ class NegativeEventCache:
                 continue
 
             updated = entry.get("updated")
+            formatted_updated: Optional[str] = None
+            if isinstance(updated, (str, datetime, int, float)):
+                formatted_updated = format_cet_timestamp(updated)
+            if formatted_updated is None and isinstance(updated, str):
+                formatted_updated = updated
             last_seen = entry.get("last_seen")
 
             if not cls._is_entry_fresh(updated, last_seen, now):
@@ -90,7 +96,7 @@ class NegativeEventCache:
 
             entries[str(event_id)] = {
                 "fingerprint": fingerprint,
-                "updated": updated if isinstance(updated, str) else None,
+                "updated": formatted_updated,
                 "rule_hash": entry.get("rule_hash"),
                 "decision": entry.get("decision"),
                 "first_seen": entry.get("first_seen"),
@@ -199,13 +205,11 @@ class NegativeEventCache:
     def _fingerprint(self, event: Dict[str, Any]) -> tuple[str, Optional[str]]:
         event_id = str(event.get("id")) if event.get("id") is not None else ""
         updated = event.get("updated")
-        updated_str: Optional[str]
-        if isinstance(updated, str):
-            updated_str = updated
-        elif isinstance(updated, datetime):
-            updated_str = updated.astimezone(timezone.utc).isoformat()
-        else:
-            updated_str = None
+        updated_str: Optional[str] = None
+        if isinstance(updated, (str, datetime, int, float)):
+            updated_str = format_cet_timestamp(updated)
+            if updated_str is None and isinstance(updated, str):
+                updated_str = updated
 
         summary = self._normalise_text(event.get("summary"))
         description = self._normalise_text(event.get("description"))

@@ -7,10 +7,11 @@ import logging
 import threading
 import uuid
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
+from utils.datetime_formatting import format_cet_timestamp, now_cet_timestamp
 
 @dataclass
 class AuditRecord:
@@ -86,7 +87,7 @@ class AuditLog:
         entry_id = audit_id or uuid.uuid4().hex
         record = AuditRecord(
             audit_id=entry_id,
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=now_cet_timestamp(),
             event_id=event_id,
             request_type=request_type,
             stage=stage,
@@ -123,7 +124,13 @@ class AuditLog:
                 if not line:
                     continue
                 try:
-                    yield json.loads(line)
+                    entry = json.loads(line)
+                    timestamp = entry.get("timestamp")
+                    if isinstance(timestamp, (str, int, float, datetime)):
+                        formatted = format_cet_timestamp(timestamp)
+                        if formatted:
+                            entry["timestamp"] = formatted
+                    yield entry
                 except json.JSONDecodeError:
                     self.logger.warning(
                         "Skipping invalid audit log line in %s: %s", self.log_path, line

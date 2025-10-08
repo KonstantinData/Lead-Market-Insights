@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, MutableMapping, Optional, Tuple
 
 from agents.factory import create_agent
+from agents.hitl_decision_evaluator import HITLDecisionEvaluator
 from agents.human_in_loop_agent import DossierConfirmationBackendUnavailable
 
 # Ensure default agent implementations register themselves with the factory.
@@ -69,13 +70,32 @@ class MasterWorkflowAgent:
         human_agent: Optional[BaseHumanAgent] = None,
         crm_agent: Optional[BaseCrmAgent] = None,
         agent_overrides: Optional[Dict[str, str]] = None,
+        *,
+        settings_override: Optional[Any] = None,
     ) -> None:
-        resolved_overrides: Dict[str, str] = dict(settings.agent_overrides)
+        self.settings = settings if settings_override is None else settings_override
+
+        agent_override_source = getattr(self.settings, "agent_overrides", None)
+        if agent_override_source is None:
+            agent_override_source = getattr(settings, "agent_overrides", {})
+
+        resolved_overrides: Dict[str, str] = dict(agent_override_source)
         if agent_overrides:
             resolved_overrides.update({k: v for k, v in agent_overrides.items() if v})
 
         self.communication_backend = communication_backend
         self.telemetry = getattr(communication_backend, "telemetry", None)
+
+        threshold_value = getattr(self.settings, "HITL_CONFIDENCE_THRESHOLD", None)
+        if threshold_value is None:
+            threshold_value = getattr(self.settings, "hitl_confidence_threshold", 0.80)
+        try:
+            confidence_threshold = float(threshold_value)
+        except (TypeError, ValueError):
+            confidence_threshold = 0.80
+        self.hitl_evaluator = HITLDecisionEvaluator(
+            confidence_threshold=confidence_threshold
+        )
 
         self.event_agent = event_agent or create_agent(
             BasePollingAgent,
@@ -268,13 +288,56 @@ class MasterWorkflowAgent:
             )
         return email_agent
 
-    def trigger_hitl(self, run_id: str, context: dict, operator_email: str):
+    def trigger_hitl(
+        self,
+        run_id: str,
+        context: dict,
+        operator_email: Optional[str] = None,
+    ) -> Optional[str]:
+        context_payload = dict(context or {})
+
+        evaluator = getattr(self, "hitl_evaluator", None)
+        if evaluator is None:
+            evaluator = HITLDecisionEvaluator()
+            self.hitl_evaluator = evaluator
+
+        eval_ctx = {
+            "company_domain": context_payload.get("company_domain")
+            or context_payload.get("web_domain"),
+            "confidence_score": context_payload.get("confidence_score"),
+            "company_in_crm": context_payload.get("company_in_crm"),
+            "attachments_in_crm": context_payload.get("attachments_in_crm"),
+        }
+        hitl_required, reason = evaluator.evaluate(eval_ctx)
+
+        if not hitl_required:
+            self._emit_telemetry(
+                "info", "hitl_skipped", {"run_id": run_id, "reason": reason}
+            )
+            return None
+
         email_agent = self._require_email_agent()
-        self.human_agent.persist_pending_request(run_id, context)
+        target_email = operator_email
+        if not target_email:
+            current_settings = getattr(self, "settings", settings)
+            target_email = getattr(current_settings, "HITL_OPERATOR_EMAIL", None)
+            if not target_email:
+                target_email = getattr(current_settings, "hitl_operator_email", None)
+        if not target_email:
+            raise RuntimeError("HITL operator email is not configured")
+
+        hitl_context = dict(context_payload)
+        hitl_context["hitl_reason"] = reason
+
+        self._emit_telemetry(
+            "info", "hitl_required", {"run_id": run_id, "reason": reason}
+        )
+
+        self.human_agent.persist_pending_request(run_id, hitl_context)
         message_id = self.human_agent.dispatch_request_email(
             run_id=run_id,
-            operator_email=operator_email,
-            context=context,
+            operator_email=target_email,
+            context=hitl_context,
             email_agent=email_agent,
         )
         self._emit_telemetry(
@@ -1935,10 +1998,11 @@ class MasterWorkflowAgent:
             return True
 
     def _mask_for_logging(self, payload: Any) -> Any:
-        if not getattr(settings, "mask_pii_in_logs", False):
+        current_settings = getattr(self, "settings", settings)
+        if not getattr(current_settings, "mask_pii_in_logs", False):
             return payload
         return mask_pii(
             payload,
-            whitelist=getattr(settings, "pii_field_whitelist", None),
-            mode=getattr(settings, "compliance_mode", "standard"),
+            whitelist=getattr(current_settings, "pii_field_whitelist", None),
+            mode=getattr(current_settings, "compliance_mode", "standard"),
         )

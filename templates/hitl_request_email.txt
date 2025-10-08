@@ -5,6 +5,7 @@ Company: {{ context.company_name }}
 Domain: {{ context.company_domain }}
 Primary contact: {{ context.contact_email }}
 Missing fields: {{ context.missing_fields }}
+Reason: {{ context.hitl_reason }}
 
 Reply with one of:
 - APPROVE

@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, MutableMapping, Optional, Tuple
 
@@ -46,6 +47,7 @@ from utils.domain_resolution import resolve_company_domain
 from utils.negative_cache import NegativeEventCache
 from utils.processed_event_cache import ProcessedEventCache
 from utils.pii import mask_pii
+from utils.persistence import atomic_write_json
 from utils.trigger_loader import load_trigger_words
 from utils.validation import (
     InvalidExtractionError,
@@ -55,7 +57,8 @@ from utils.validation import (
     normalize_similar_companies,
     validate_extraction_or_raise,
 )
-from utils.workflow_steps import workflow_step_recorder  # NEU
+from utils.workflow_steps import workflow_step_recorder
+from utils.email_agent import EmailAgent as SmtpEmailAgent
 
 logger = logging.getLogger("MasterWorkflowAgent")
 
@@ -159,6 +162,7 @@ class MasterWorkflowAgent:
             self.storage_agent.base_dir / "state" / "processed_events.json"
         )
         self._processed_event_cache: Optional[ProcessedEventCache] = None
+        self._smtp_email_agent: Optional[SmtpEmailAgent] = None
 
         self.run_id: str = ""
         self.run_directory: Path = self.storage_agent.base_dir
@@ -194,7 +198,11 @@ class MasterWorkflowAgent:
             self.human_agent.set_audit_log(self.audit_log)
         if hasattr(self.human_agent, "set_run_context"):
             try:
-                self.human_agent.set_run_context(self.run_id, self.workflow_log_manager)
+                self.human_agent.set_run_context(
+                    self.run_id,
+                    self.workflow_log_manager,
+                    run_directory=self.run_directory,
+                )
             except Exception:
                 logger.exception("Failed to set run context on human agent")
 
@@ -277,8 +285,67 @@ class MasterWorkflowAgent:
     def _resolve_email_agent(self) -> Optional[Any]:
         backend = getattr(self, "communication_backend", None)
         if backend is None:
+            return self._smtp_email_agent or self._build_smtp_email_agent()
+        candidate = getattr(backend, "email", None)
+        if candidate is None:
+            candidate = getattr(backend, "email_agent", None)
+        if candidate is not None:
+            return candidate
+        if self._smtp_email_agent:
+            return self._smtp_email_agent
+        return self._build_smtp_email_agent()
+
+    def _build_smtp_email_agent(self) -> Optional[SmtpEmailAgent]:
+        smtp_settings = getattr(self.settings, "smtp", None)
+        host = None
+        port = None
+        username = None
+        password = None
+        use_tls: Any = True
+        timeout: Any = 30
+
+        if smtp_settings is not None:
+            host = getattr(smtp_settings, "host", None)
+            port = getattr(smtp_settings, "port", None)
+            username = getattr(smtp_settings, "username", None)
+            password = getattr(smtp_settings, "password", None)
+            use_tls = getattr(smtp_settings, "use_tls", True)
+            timeout = getattr(smtp_settings, "timeout", 30)
+
+        host = host or getattr(self.settings, "smtp_host", None)
+        port = port or getattr(self.settings, "smtp_port", None)
+        username = username or getattr(self.settings, "smtp_username", None)
+        password = password or getattr(self.settings, "smtp_password", None)
+
+        if isinstance(use_tls, str):
+            use_tls = use_tls.strip().lower() not in {"0", "false", "no", "off"}
+        else:
+            use_tls = bool(use_tls)
+
+        try:
+            timeout_value = int(float(timeout))
+        except (TypeError, ValueError):
+            timeout_value = 30
+        timeout_value = max(timeout_value, 1)
+
+        if not host or not port or not username or not password:
             return None
-        return getattr(backend, "email", None)
+
+        try:
+            port_number = int(port)
+        except (TypeError, ValueError):
+            return None
+
+        agent = SmtpEmailAgent(
+            host,
+            port_number,
+            username,
+            password,
+            use_tls=use_tls,
+            timeout=timeout_value,
+        )
+        self._smtp_email_agent = agent
+        return agent
 
     def _require_email_agent(self) -> Any:
         email_agent = self._resolve_email_agent()
@@ -287,6 +354,328 @@ class MasterWorkflowAgent:
                 "HITL email backend is not configured; unable to dispatch request"
             )
         return email_agent
+
+    def _extract_contact_metadata(self, event: Mapping[str, Any]) -> Dict[str, Optional[str]]:
+        organizer = {}
+        if isinstance(event, Mapping):
+            organizer = dict(event.get("organizer") or {})
+        creator = {}
+        if isinstance(event, Mapping):
+            creator = dict(event.get("creator") or {})
+
+        email = (
+            organizer.get("email")
+            or event.get("organizer_email")
+            if isinstance(event, Mapping)
+            else None
+        )
+        if not email and isinstance(creator, Mapping):
+            email = creator.get("email")
+
+        name = None
+        if isinstance(organizer, Mapping):
+            name = organizer.get("displayName") or organizer.get("name")
+        if not name and isinstance(creator, Mapping):
+            name = creator.get("displayName") or creator.get("name")
+
+        return {"email": email, "name": name}
+
+    @staticmethod
+    def _collect_missing_optional_fields(info: Mapping[str, Any]) -> List[str]:
+        if not isinstance(info, Mapping):
+            return []
+        optional_fields = ("industry_group", "industry", "description")
+        missing: List[str] = []
+        for key in optional_fields:
+            value = info.get(key)
+            if isinstance(value, str):
+                value = value.strip()
+            if not value:
+                missing.append(key)
+        return missing
+
+    @staticmethod
+    def _format_missing_fields(value: Any) -> str:
+        if isinstance(value, (list, tuple, set)):
+            entries = [str(item) for item in value if str(item).strip()]
+            if not entries:
+                return "None"
+            return ", ".join(entries)
+        if isinstance(value, str) and value.strip():
+            return value
+        return "None"
+
+    def _evaluate_hitl_condition(
+        self,
+        event_result: MutableMapping[str, Any],
+        context_payload: MutableMapping[str, Any],
+        event_id: Optional[Any],
+        dossier_result: Optional[Mapping[str, Any]] = None,
+        *,
+        event: Optional[Mapping[str, Any]] = None,
+        crm_result: Optional[Mapping[str, Any]] = None,
+    ) -> bool:
+        if dossier_result is not None and isinstance(dossier_result, Mapping):
+            research_store = event_result.setdefault("research", {})
+            research_store.setdefault("dossier_research", dossier_result)
+
+        if event_result.get("status") == "hitl_pending":
+            return True
+
+        eval_ctx = {
+            "company_domain": context_payload.get("company_domain")
+            or context_payload.get("web_domain"),
+            "confidence_score": context_payload.get("confidence_score"),
+            "company_in_crm": (
+                crm_result.get("company_in_crm")
+                if crm_result is not None
+                else context_payload.get("company_in_crm")
+            ),
+            "attachments_in_crm": (
+                crm_result.get("attachments_in_crm")
+                if crm_result is not None
+                else context_payload.get("attachments_in_crm")
+            ),
+            "missing_optional_fields": context_payload.get("missing_optional_fields", []),
+            "insufficient_context": bool(
+                str(
+                    event_result.get("research", {})
+                    .get("dossier_research", {})
+                    .get("status", "")
+                )
+                .lower()
+                .strip()
+                == "insufficient_context"
+            ),
+            "missing_fields": context_payload.get("missing_fields") or [],
+        }
+
+        requires_hitl = getattr(self.hitl_evaluator, "requires_hitl", None)
+        if callable(requires_hitl):
+            hitl_required, reason = requires_hitl(eval_ctx)
+        else:
+            hitl_required, reason = self.hitl_evaluator.evaluate(eval_ctx)
+
+        if not hitl_required:
+            return False
+
+        self._send_hitl_request(
+            event or {},
+            context_payload,
+            event_result,
+            event_id,
+            reason=reason,
+        )
+        return True
+
+    def _send_hitl_request(
+        self,
+        event: Mapping[str, Any],
+        context_payload: Mapping[str, Any],
+        event_result: MutableMapping[str, Any],
+        event_id: Optional[Any],
+        *,
+        reason: str,
+    ) -> None:
+        hitl_context = dict(context_payload or {})
+        hitl_context.setdefault("run_id", self.run_id)
+        if event_id is not None:
+            hitl_context.setdefault("event_id", str(event_id))
+
+        contact_meta = self._extract_contact_metadata(event)
+        if contact_meta.get("email"):
+            hitl_context.setdefault("contact_email", contact_meta.get("email"))
+        if contact_meta.get("name"):
+            hitl_context.setdefault("contact_name", contact_meta.get("name"))
+
+        missing_fields_value = hitl_context.get("missing_fields")
+        hitl_context["missing_fields"] = self._format_missing_fields(
+            missing_fields_value
+        )
+
+        company_name = hitl_context.get("company_name") or hitl_context.get(
+            "info.company_name"
+        )
+        if not company_name and isinstance(context_payload, Mapping):
+            company_name = context_payload.get("company_name")
+        if company_name:
+            hitl_context["company_name"] = company_name
+
+        email_agent = self._require_email_agent()
+        operator_email = getattr(self.settings, "HITL_OPERATOR_EMAIL", None) or getattr(
+            self.settings, "hitl_operator_email", None
+        )
+        if not operator_email:
+            raise RuntimeError("HITL operator email is not configured")
+
+        self._emit_telemetry(
+            "info", "hitl_required", {"run_id": self.run_id, "reason": reason}
+        )
+
+        hitl_context["hitl_reason"] = reason
+        reason_code = self._derive_reason_code(reason, hitl_context)
+        hitl_context["hitl_reason_code"] = reason_code
+        self.human_agent.persist_pending_request(self.run_id, hitl_context)
+        message_id = self.human_agent.dispatch_request_email(
+            run_id=self.run_id,
+            operator_email=operator_email,
+            context=hitl_context,
+            email_agent=email_agent,
+        )
+        self._schedule_hitl_reminders(
+            self.run_id,
+            operator_email,
+            email_agent,
+        )
+        self._write_hitl_artifact(
+            operator_email=operator_email,
+            event_id=event_id,
+            reason_code=reason_code,
+        )
+
+        self._emit_telemetry(
+            "info", "hitl_request_sent", {"run_id": self.run_id, "msg_id": message_id}
+        )
+
+        workflow_step_recorder.record_step(
+            self.run_id,
+            event_id,
+            "hitl_request_dispatched",
+            extra={"reason": reason},
+        )
+
+        event_result["status"] = "hitl_pending"
+        event_result["hitl_reason"] = reason
+        event_result["hitl_reason_code"] = reason_code
+        event_result["hitl_context"] = hitl_context
+        event_result["hitl_message_id"] = message_id
+
+    def _derive_reason_code(
+        self, reason: str, hitl_context: Mapping[str, Any]
+    ) -> str:
+        normalized = str(reason or "").strip().lower()
+        if "insufficient_context" in normalized:
+            return "insufficient_context"
+        if normalized.startswith("missing optional fields"):
+            return "missing_optional_fields"
+        if normalized.startswith("missing fields require"):
+            return "missing_fields"
+        if normalized.startswith("missing fields"):
+            return "missing_fields"
+        if normalized.startswith("low confidence"):
+            return "low_confidence"
+        if "attachments require" in normalized:
+            return "crm_attachments_review"
+        if "missing attachments" in normalized:
+            return "crm_missing_attachments"
+
+        if hitl_context.get("insufficient_context"):
+            return "insufficient_context"
+        missing_fields = hitl_context.get("missing_fields")
+        if missing_fields:
+            return "missing_fields"
+        if hitl_context.get("missing_optional_fields"):
+            return "missing_optional_fields"
+
+        sanitized = "".join(ch if ch.isalnum() else "_" for ch in normalized)
+        sanitized = "_".join(filter(None, sanitized.split("_")))
+        return sanitized or "hitl_required"
+
+    def _write_hitl_artifact(
+        self,
+        *,
+        operator_email: str,
+        event_id: Optional[Any],
+        reason_code: str,
+    ) -> None:
+        if not getattr(self, "run_directory", None):
+            logger.warning(
+                "Run directory not configured; skipping HITL artifact for run %s",
+                getattr(self, "run_id", "<unknown>"),
+            )
+            return
+        payload = {
+            "run_id": self.run_id,
+            "event_id": str(event_id) if event_id is not None else None,
+            "status": "pending",
+            "reason": reason_code,
+            "requested_at": datetime.now(timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            ),
+            "operator": operator_email,
+        }
+        try:
+            atomic_write_json(Path(self.run_directory) / "hitl.json", payload)
+        except Exception:  # pragma: no cover - audit persistence must not abort flow
+            logger.exception("Failed to persist HITL artifact for run %s", self.run_id)
+
+    def _schedule_hitl_reminders(
+        self,
+        run_id: Optional[str],
+        operator_email: str,
+        email_agent: Any,
+    ) -> None:
+        if not run_id:
+            return
+        scheduler = getattr(self.human_agent, "schedule_reminders", None)
+        if not callable(scheduler):
+            return
+        try:
+            scheduler(run_id, operator_email, email_agent)
+        except Exception:  # pragma: no cover - reminder scheduling should not abort flow
+            logger.exception(
+                "Failed to schedule HITL reminders for run %s", run_id
+            )
+
+
+    def _handle_dossier_insufficient_context(
+        self,
+        event: Mapping[str, Any],
+        context_payload: Mapping[str, Any],
+        event_result: MutableMapping[str, Any],
+        event_id: Optional[Any],
+        research_store: MutableMapping[str, Any],
+    ) -> bool:
+        dossier_result = research_store.get("dossier_research")
+        if not isinstance(dossier_result, Mapping):
+            return False
+
+        status = str(dossier_result.get("status") or "").strip().lower()
+        if status != "insufficient_context":
+            return False
+
+        hitl_context = dict(context_payload or {})
+        hitl_context["dossier_status"] = status
+        payload = dossier_result.get("payload")
+        if isinstance(payload, Mapping):
+            summary = payload.get("summary") or payload.get("company_summary")
+            if summary:
+                hitl_context.setdefault("dossier_summary", summary)
+            artifact = payload.get("artifact_path")
+            if artifact:
+                hitl_context.setdefault("dossier_artifact", artifact)
+        artifact_path = dossier_result.get("artifact_path")
+        if artifact_path and "dossier_artifact" not in hitl_context:
+            hitl_context["dossier_artifact"] = artifact_path
+
+        missing_fields = hitl_context.get("missing_fields")
+        if isinstance(missing_fields, (list, tuple, set)):
+            updated_missing: List[str] = list(missing_fields)
+        elif isinstance(missing_fields, str) and missing_fields.strip():
+            updated_missing = [missing_fields]
+        else:
+            updated_missing = []
+        updated_missing.append("dossier context")
+        hitl_context["missing_fields"] = updated_missing
+
+        self._send_hitl_request(
+            event,
+            hitl_context,
+            event_result,
+            event_id,
+            reason="Dossier research returned insufficient context",
+        )
+        return True
 
     def trigger_hitl(
         self,
@@ -307,8 +696,21 @@ class MasterWorkflowAgent:
             "confidence_score": context_payload.get("confidence_score"),
             "company_in_crm": context_payload.get("company_in_crm"),
             "attachments_in_crm": context_payload.get("attachments_in_crm"),
+            "missing_optional_fields": context_payload.get("missing_optional_fields"),
+            "dossier_status": context_payload.get("dossier_status"),
         }
-        hitl_required, reason = evaluator.evaluate(eval_ctx)
+        eval_ctx["insufficient_context"] = (
+            str(context_payload.get("dossier_status") or "")
+            .strip()
+            .lower()
+            == "insufficient_context"
+        )
+        eval_ctx["missing_fields"] = context_payload.get("missing_fields") or []
+        requires_hitl = getattr(evaluator, "requires_hitl", None)
+        if callable(requires_hitl):
+            hitl_required, reason = requires_hitl(eval_ctx)
+        else:
+            hitl_required, reason = evaluator.evaluate(eval_ctx)
 
         if not hitl_required:
             self._emit_telemetry(
@@ -327,7 +729,16 @@ class MasterWorkflowAgent:
             raise RuntimeError("HITL operator email is not configured")
 
         hitl_context = dict(context_payload)
+        hitl_context.setdefault("run_id", run_id)
+        missing_fields_value = hitl_context.get("missing_fields")
+        if missing_fields_value is None:
+            missing_fields_value = hitl_context.get("missing_optional_fields")
+        hitl_context["missing_fields"] = self._format_missing_fields(
+            missing_fields_value
+        )
         hitl_context["hitl_reason"] = reason
+        reason_code = self._derive_reason_code(reason, hitl_context)
+        hitl_context["hitl_reason_code"] = reason_code
 
         self._emit_telemetry(
             "info", "hitl_required", {"run_id": run_id, "reason": reason}
@@ -344,6 +755,12 @@ class MasterWorkflowAgent:
             "info",
             "hitl_request_sent",
             {"run_id": run_id, "msg_id": message_id},
+        )
+        self._schedule_hitl_reminders(run_id, target_email, email_agent)
+        self._write_hitl_artifact(
+            operator_email=target_email,
+            event_id=None,
+            reason_code=reason_code,
         )
         return message_id
 
@@ -1255,7 +1672,7 @@ class MasterWorkflowAgent:
                 "cached",
                 result=existing if isinstance(existing, dict) else None,
             )
-            # Kein zusätzlicher Step-Recorder-Eintrag → bereits geloggt
+            # No additional step recorder entry required; already logged
             return existing
 
         trigger = self._build_research_trigger(event, info, event_id)
@@ -1619,6 +2036,7 @@ class MasterWorkflowAgent:
         info: Dict[str, Any],
         event_id: Optional[Any],
         *,
+        context_payload: Mapping[str, Any],
         requires_dossier: bool,
     ) -> None:
         runners = []
@@ -1627,7 +2045,7 @@ class MasterWorkflowAgent:
             if self._can_run_dossier(info):
 
                 async def run_dossier() -> None:
-                    await self._run_research_agent(
+                    dossier_result = await self._run_research_agent(
                         self.dossier_research_agent,
                         "dossier_research",
                         event_result,
@@ -1635,6 +2053,13 @@ class MasterWorkflowAgent:
                         info,
                         event_id,
                         force=True,
+                    )
+                    self._evaluate_hitl_condition(
+                        event_result,
+                        context_payload,
+                        event_id,
+                        dossier_result,
+                        event=event,
                     )
 
                 runners.append(run_dossier)
@@ -1725,54 +2150,48 @@ class MasterWorkflowAgent:
 
         context_payload.setdefault("company_domain", prepared_info.get("company_domain"))
         context_payload.setdefault("web_domain", prepared_info.get("web_domain"))
+        context_payload.setdefault("company_name", prepared_info.get("company_name"))
+        context_payload["run_id"] = self.run_id
+        if event_id is not None:
+            context_payload["event_id"] = str(event_id)
+
+        contact_meta = self._extract_contact_metadata(event)
+        if contact_meta.get("email"):
+            context_payload.setdefault("contact_email", contact_meta.get("email"))
+        if contact_meta.get("name"):
+            context_payload.setdefault("contact_name", contact_meta.get("name"))
+
+        missing_optional_fields = self._collect_missing_optional_fields(prepared_info)
+        missing_field_labels: List[str] = list(missing_optional_fields)
+        context_payload["missing_optional_fields"] = missing_optional_fields
+        context_payload["missing_fields"] = list(missing_field_labels)
 
         if crm_result:
             context_payload["company_in_crm"] = crm_result.get("company_in_crm")
             context_payload["attachments_in_crm"] = crm_result.get("attachments_in_crm")
+        else:
+            context_payload.setdefault("company_in_crm", False)
+            context_payload.setdefault("attachments_in_crm", False)
 
-        eval_ctx = {
-            "company_domain": context_payload.get("company_domain")
-            or context_payload.get("web_domain"),
-            "confidence_score": context_payload.get("confidence_score"),
-            "company_in_crm": crm_result.get("company_in_crm") if crm_result else None,
-            "attachments_in_crm": crm_result.get("attachments_in_crm") if crm_result else None,
-        }
+        company_in_crm = bool(crm_result.get("company_in_crm")) if crm_result else False
+        attachments_in_crm = (
+            crm_result.get("attachments_in_crm") if crm_result else None
+        )
+        if company_in_crm and attachments_in_crm is False:
+            missing_field_labels.append("CRM attachments")
+            context_payload["crm_missing_attachments"] = True
+        else:
+            context_payload.setdefault("crm_missing_attachments", False)
 
-        hitl_required, reason = self.hitl_evaluator.evaluate(eval_ctx)
+        context_payload["missing_fields"] = list(missing_field_labels)
 
-        if hitl_required:
-            self._emit_telemetry(
-                "info", "hitl_required", {"run_id": self.run_id, "reason": reason}
-            )
-
-            hitl_context = dict(context_payload)
-            hitl_context["hitl_reason"] = reason
-
-            self.human_agent.persist_pending_request(self.run_id, hitl_context)
-
-            operator_email = getattr(self.settings, "HITL_OPERATOR_EMAIL", None) or getattr(
-                self.settings, "hitl_operator_email", None
-            )
-            if not operator_email:
-                raise RuntimeError("HITL operator email is not configured")
-
-            email_agent = self._require_email_agent()
-
-            msg_id = self.human_agent.dispatch_request_email(
-                run_id=self.run_id,
-                operator_email=operator_email,
-                context=hitl_context,
-                email_agent=email_agent,
-            )
-
-            self._emit_telemetry(
-                "info", "hitl_request_sent", {"run_id": self.run_id, "msg_id": msg_id}
-            )
-
-            event_result["status"] = "hitl_pending"
-            event_result["hitl_reason"] = reason
-            event_result["hitl_context"] = hitl_context
-            event_result["hitl_message_id"] = msg_id
+        if self._evaluate_hitl_condition(
+            event_result,
+            context_payload,
+            event_id,
+            event=event,
+            crm_result=crm_result,
+        ):
             return
         research_store = event_result.setdefault("research", {})
         if internal_result is not None:
@@ -1794,11 +2213,20 @@ class MasterWorkflowAgent:
             event,
             prepared_info,
             event_id,
+            context_payload=context_payload,
             requires_dossier=requires_dossier,
         )
 
         research_store = event_result.get("research")
         if isinstance(research_store, MutableMapping):
+            if self._handle_dossier_insufficient_context(
+                event,
+                context_payload,
+                event_result,
+                event_id,
+                research_store,
+            ):
+                return
             self._guard_before_crm_dispatch(research_store)
 
         crm_payload = dict(prepared_info)
@@ -1810,7 +2238,7 @@ class MasterWorkflowAgent:
         ):
             await self._send_to_crm_agent(event, crm_payload)
 
-        # Steps auf CRM-Pfad:
+        # CRM pipeline steps:
         workflow_step_recorder.record_step(
             self.run_id, event_id, "crm_matching_recorded"
         )

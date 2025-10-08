@@ -1,29 +1,52 @@
+from __future__ import annotations
+
+import pytest
+
 from agents.hitl_decision_evaluator import HITLDecisionEvaluator
 
 
-def test_hitl_required_missing_fields():
-    ev = HITLDecisionEvaluator()
-    hitl, reason = ev.evaluate({"company_domain": ""})
-    assert hitl is True and "Missing fields" in reason
+@pytest.fixture()
+def evaluator() -> HITLDecisionEvaluator:
+    return HITLDecisionEvaluator()
 
 
-def test_hitl_required_low_confidence():
-    ev = HITLDecisionEvaluator(confidence_threshold=0.9)
-    hitl, reason = ev.evaluate({"company_domain": "acme.test", "confidence_score": 0.5})
-    assert hitl is True and "Low confidence" in reason
+@pytest.mark.parametrize(
+    "payload, expected",
+    [
+        (
+            {
+                "company_domain": "acme.test",
+                "company_in_crm": True,
+                "attachments_in_crm": False,
+            },
+            "CRM company missing attachments",
+        ),
+        (
+            {"company_domain": "acme.test", "insufficient_context": True},
+            "Dossier research reported insufficient_context",
+        ),
+        (
+            {
+                "company_domain": "acme.test",
+                "missing_fields": ["industry_group", "description"],
+            },
+            "Missing fields require human input",
+        ),
+    ],
+)
+def test_hitl_required_core_rules(
+    evaluator: HITLDecisionEvaluator, payload: dict, expected: str
+) -> None:
+    hitl_required, reason = evaluator.requires_hitl(payload)
+
+    assert hitl_required is True
+    assert expected in reason
 
 
-def test_hitl_required_crm_attachments():
-    ev = HITLDecisionEvaluator()
-    hitl, reason = ev.evaluate({
-        "company_domain": "acme.test",
-        "company_in_crm": True,
-        "attachments_in_crm": True,
-    })
-    assert hitl is True and "attachments" in reason
+def test_hitl_not_required_when_context_valid(evaluator: HITLDecisionEvaluator) -> None:
+    hitl_required, reason = evaluator.requires_hitl(
+        {"company_domain": "acme.test", "confidence_score": 0.95}
+    )
 
-
-def test_no_hitl_all_good():
-    ev = HITLDecisionEvaluator()
-    hitl, reason = ev.evaluate({"company_domain": "acme.test", "confidence_score": 0.95})
-    assert hitl is False and reason == "All checks passed"
+    assert hitl_required is False
+    assert reason == "All checks passed"

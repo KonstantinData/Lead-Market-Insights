@@ -23,6 +23,9 @@ class DummySMTP:
     def __exit__(self, exc_type, exc, tb):
         return False
 
+    def ehlo(self):
+        return ("dummy", "ok")
+
     def starttls(self, *, context):
         self.started_tls = True
 

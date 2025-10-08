@@ -54,6 +54,7 @@ from utils.validation import (
     normalize_similar_companies,
     validate_extraction_or_raise,
 )
+from validators.domain_utils import is_placeholder, trigger_hitl_if_needed
 from utils.workflow_steps import workflow_step_recorder  # NEU
 
 logger = logging.getLogger("MasterWorkflowAgent")
@@ -486,32 +487,29 @@ class MasterWorkflowAgent:
                 "company": None,
             }
 
-            if not normalised_info.get("company_domain"):
-                event_result["status"] = "hitl_required"
+            domain_for_hitl = (
+                normalised_info.get("company_domain")
+                or normalised_info.get("web_domain")
+                or info.get("web_domain")
+            )
+            if is_placeholder(domain_for_hitl):
+                event_result["status"] = "hitl_dispatched"
                 self._record_domain_guardrail(
                     event_result, event_id, info, domain_meta
                 )
-                follow_up = await self._collect_missing_info_via_hitl(
-                    event_result,
-                    event,
-                    extracted,
-                    event_id,
+                dispatched = self._dispatch_prevalidation_hitl(
+                    event=event,
+                    extracted=extracted,
+                    event_id=event_id,
+                    company_name=normalised_info.get("company_name")
+                    or info.get("company_name"),
+                    company_domain=domain_for_hitl,
                 )
-                if not follow_up:
-                    continue
-
-                normalised_info = follow_up["info"]
-                domain_meta = follow_up["domain_meta"]
-                event_result["domain_resolution"] = domain_meta
-
-                info_payload = extracted.setdefault("info", {})
-                info_payload.update(normalised_info)
-
-                extracted["is_complete"] = bool(
-                    normalised_info.get("company_name")
-                    and normalised_info.get("company_domain")
-                )
-                is_complete = extracted["is_complete"]
+                if not dispatched:
+                    logger.warning(
+                        "Failed to dispatch HITL notification for event %s", event_id
+                    )
+                continue
 
             has_research_inputs = self._has_research_inputs(normalised_info)
             if has_research_inputs:
@@ -781,6 +779,55 @@ class MasterWorkflowAgent:
             logger.exception(
                 "Failed to record domain guardrail audit for event %s", event_id
             )
+
+    def _dispatch_prevalidation_hitl(
+        self,
+        *,
+        event: Dict[str, Any],
+        extracted: Dict[str, Any],
+        event_id: Optional[Any],
+        company_name: Optional[str],
+        company_domain: Optional[str],
+    ) -> bool:
+        operator_email = getattr(settings, "hitl_operator_email", None)
+        run_id = self.run_id or str(event_id or "unknown")
+
+        info_payload = dict(extracted.get("info", {}) or {})
+        if company_name is not None:
+            info_payload.setdefault("company_name", company_name)
+        if company_domain:
+            info_payload.setdefault("company_domain", company_domain)
+        info_payload.setdefault("missing_fields", ["web_domain"])
+
+        context = {
+            "event": event,
+            "info": info_payload,
+            "company_name": company_name,
+            "company_domain": company_domain or "",
+            "missing_fields": ["web_domain"],
+            "event_id": event_id,
+            "reason": "missing_or_placeholder_domain",
+        }
+
+        if operator_email:
+            try:
+                self.trigger_hitl(run_id, context, operator_email)
+                return True
+            except Exception:  # pragma: no cover - defensive
+                logger.exception(
+                    "Failed to dispatch HITL via configured backend for event %s",
+                    event_id,
+                )
+
+        try:
+            return trigger_hitl_if_needed(
+                str(event_id or run_id), company_name or "", company_domain
+            )
+        except Exception:  # pragma: no cover - defensive
+            logger.exception(
+                "Fallback HITL notification failed for event %s", event_id
+            )
+            return False
 
     def _infer_requested_fields(
         self, info: Optional[Dict[str, Any]]

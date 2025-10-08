@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 from types import MethodType
 
 import pytest
@@ -260,7 +260,7 @@ async def test_soft_trigger_dossier_request_approved_status_only() -> None:
     assert len(backend.requests) == 1
 
 
-async def test_missing_domain_guardrail_requests_info() -> None:
+async def test_missing_domain_guardrail_requests_info(monkeypatch) -> None:
     backend = DummyBackend({"status": "declined"})
     event = {
         "id": "event-missing-domain",
@@ -298,37 +298,31 @@ async def test_missing_domain_guardrail_requests_info() -> None:
     current_run_id_var.set(run_id)
     agent.attach_run(run_id, agent.workflow_log_manager)
 
-    calls: List[Dict[str, Any]] = []
+    monkeypatch.setenv("HITL_OPERATOR_EMAIL", "ops@example.com")
+    monkeypatch.setattr(settings, "hitl_operator_email", None)
+    sent_mail: List[Tuple[str, str, str]] = []
 
-    def _mock_request_info(
-        self, event_payload: Dict[str, Any], extracted_payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        calls.append({"event": event_payload, "extracted": extracted_payload})
-        return {
-            "info": {
-                "company_name": "Example Corp",
-                "web_domain": "example.ai",
-                "company_domain": "example.ai",
-            },
-            "is_complete": True,
-        }
+    def _fake_send_mail(to: str, subject: str, body: str) -> None:
+        sent_mail.append((to, subject, body))
 
-    agent.human_agent.request_info = MethodType(  # type: ignore[assignment]
-        _mock_request_info, agent.human_agent
-    )
+    monkeypatch.setattr("validators.domain_utils.send_mail", _fake_send_mail)
 
     results = await agent.process_all_events()
 
-    assert calls, "Missing-domain guardrail should escalate to HITL"
-    assert results[0]["status"] == "dossier_declined"
+    assert results and results[0]["status"] == "hitl_dispatched"
+    assert sent_mail, "Missing-domain guardrail should dispatch a HITL email"
+    recipient, subject, body = sent_mail[0]
+    assert recipient == "ops@example.com"
+    assert "Clarify domain" in subject
+    assert "event-missing-domain" in body
     assert any(
         err.get("type") == "missing_domain"
         for err in results[0].get("research_errors", [])
     )
-    assert backend.requests, "Organizer should receive dossier decision request"
+    assert backend.requests == [], "Dossier flow should be skipped for placeholder domains"
 
 
-async def test_audit_log_records_missing_info_flow(tmp_path) -> None:
+async def test_audit_log_records_missing_info_flow(tmp_path, monkeypatch) -> None:
     original_run_dir = settings.run_log_dir
     temp_run_dir = tmp_path / "runs"
     temp_run_dir.mkdir()
@@ -373,26 +367,24 @@ async def test_audit_log_records_missing_info_flow(tmp_path) -> None:
         current_run_id_var.set(run_id)
         agent.attach_run(run_id, agent.workflow_log_manager)
 
+        monkeypatch.setenv("HITL_OPERATOR_EMAIL", "ops@example.com")
+        monkeypatch.setattr(settings, "hitl_operator_email", None)
+        sent_mail: List[Tuple[str, str, str]] = []
+
+        def _fake_send_mail(to: str, subject: str, body: str) -> None:
+            sent_mail.append((to, subject, body))
+
+        monkeypatch.setattr("validators.domain_utils.send_mail", _fake_send_mail)
+
         await agent.process_all_events()
 
         entries = agent.audit_log.load_entries()
-        assert len(entries) == 3
-        assert {entry["request_type"] for entry in entries} == {"missing_info"}
-        system_entry = next(
-            entry for entry in entries if entry["stage"] == "system"
-        )
+        assert len(entries) == 1
+        system_entry = entries[0]
         assert system_entry["outcome"] == "hitl_required"
         payload = system_entry.get("payload") or {}
         assert payload.get("reason") == "web_domain missing or invalid; HITL required"
-        response_entry = next(
-            entry for entry in entries if entry["stage"] == "response"
-        )
-        assert response_entry["outcome"] == "completed"
-        assert response_entry["responder"] == "simulation"
-
-        log_contents = agent.log_file_path.read_text(encoding="utf-8")
-        assert response_entry["audit_id"] in log_contents
-        assert "[audit_id=n/a]" not in log_contents
+        assert sent_mail, "HITL notification should be emailed"
     finally:
         if agent is not None:
             agent.finalize_run_logs()

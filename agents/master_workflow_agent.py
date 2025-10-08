@@ -1712,6 +1712,68 @@ class MasterWorkflowAgent:
                 event_id,
                 force=force_internal,
             )
+
+        crm_result = self._extract_crm_lookup(internal_result)
+
+        context_payload: Dict[str, Any] = {}
+        extraction_payload = event_result.get("extraction")
+        if isinstance(extraction_payload, Mapping):
+            context_payload = dict(extraction_payload.get("info") or {})
+            confidence_score = extraction_payload.get("confidence")
+            if confidence_score is not None:
+                context_payload["confidence_score"] = confidence_score
+
+        context_payload.setdefault("company_domain", prepared_info.get("company_domain"))
+        context_payload.setdefault("web_domain", prepared_info.get("web_domain"))
+
+        if crm_result:
+            context_payload["company_in_crm"] = crm_result.get("company_in_crm")
+            context_payload["attachments_in_crm"] = crm_result.get("attachments_in_crm")
+
+        eval_ctx = {
+            "company_domain": context_payload.get("company_domain")
+            or context_payload.get("web_domain"),
+            "confidence_score": context_payload.get("confidence_score"),
+            "company_in_crm": crm_result.get("company_in_crm") if crm_result else None,
+            "attachments_in_crm": crm_result.get("attachments_in_crm") if crm_result else None,
+        }
+
+        hitl_required, reason = self.hitl_evaluator.evaluate(eval_ctx)
+
+        if hitl_required:
+            self._emit_telemetry(
+                "info", "hitl_required", {"run_id": self.run_id, "reason": reason}
+            )
+
+            hitl_context = dict(context_payload)
+            hitl_context["hitl_reason"] = reason
+
+            self.human_agent.persist_pending_request(self.run_id, hitl_context)
+
+            operator_email = getattr(self.settings, "HITL_OPERATOR_EMAIL", None) or getattr(
+                self.settings, "hitl_operator_email", None
+            )
+            if not operator_email:
+                raise RuntimeError("HITL operator email is not configured")
+
+            email_agent = self._require_email_agent()
+
+            msg_id = self.human_agent.dispatch_request_email(
+                run_id=self.run_id,
+                operator_email=operator_email,
+                context=hitl_context,
+                email_agent=email_agent,
+            )
+
+            self._emit_telemetry(
+                "info", "hitl_request_sent", {"run_id": self.run_id, "msg_id": msg_id}
+            )
+
+            event_result["status"] = "hitl_pending"
+            event_result["hitl_reason"] = reason
+            event_result["hitl_context"] = hitl_context
+            event_result["hitl_message_id"] = msg_id
+            return
         research_store = event_result.setdefault("research", {})
         if internal_result is not None:
             research_store.setdefault("internal_research", internal_result)

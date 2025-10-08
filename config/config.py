@@ -616,6 +616,11 @@ class Settings:
         self.hitl_escalation_email: Optional[str] = _get_env_var(
             "HITL_ESCALATION_EMAIL"
         )
+        self.hitl_confidence_threshold: float = _get_float_env(
+            "HITL_CONFIDENCE_THRESHOLD", 0.80
+        )
+        # Notes: Provide uppercase alias for legacy access patterns
+        self.HITL_CONFIDENCE_THRESHOLD = self.hitl_confidence_threshold
         self.hitl_admin_reminder_hours: Tuple[float, ...] = self._parse_hitl_hours(
             _get_env_var("HITL_ADMIN_REMINDER_HOURS"),
             default=(24.0,),

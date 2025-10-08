@@ -44,11 +44,22 @@ class DummyTelemetry:
         self.events.append(("warn", event, dict(payload)))
 
 
+class DummyEvaluator:
+    def __init__(self, result: Tuple[bool, str] = (True, "Manual review required")) -> None:
+        self.result = result
+        self.calls: List[Dict[str, Any]] = []
+
+    def evaluate(self, context: Dict[str, Any]) -> Tuple[bool, str]:
+        self.calls.append(dict(context))
+        return self.result
+
+
 def _build_master(
     human_agent: DummyHumanAgent,
     *,
     backend: Any = None,
     telemetry: Optional[DummyTelemetry] = None,
+    evaluator_result: Tuple[bool, str] = (True, "Manual review required"),
 ) -> MasterWorkflowAgent:
     agent = MasterWorkflowAgent.__new__(MasterWorkflowAgent)
     agent.human_agent = human_agent
@@ -58,6 +69,8 @@ def _build_master(
     else:
         if hasattr(agent, "telemetry"):
             delattr(agent, "telemetry")
+    agent.settings = SimpleNamespace(HITL_OPERATOR_EMAIL="ops@example.com")
+    agent.hitl_evaluator = DummyEvaluator(result=evaluator_result)
     return agent
 
 
@@ -69,20 +82,42 @@ def test_trigger_hitl_persists_and_dispatches() -> None:
 
     message_id = agent.trigger_hitl(
         "run-123",
-        {"company": "ACME"},
+        {"company": "ACME", "confidence_score": 0.5},
         "ops@example.com",
     )
 
     assert message_id == "msg-123"
-    assert human.persisted == [("run-123", {"company": "ACME"})]
+    assert human.persisted == [
+        (
+            "run-123",
+            {
+                "company": "ACME",
+                "confidence_score": 0.5,
+                "hitl_reason": "Manual review required",
+            },
+        )
+    ]
     assert human.dispatched and human.dispatched[0]["run_id"] == "run-123"
     assert human.dispatched[0]["operator"] == "ops@example.com"
     assert human.dispatched[0]["email_agent"] is backend.email
-    assert telemetry.events[-1] == (
+    assert telemetry.events[0] == (
+        "info",
+        "hitl_required",
+        {"run_id": "run-123", "reason": "Manual review required"},
+    )
+    assert telemetry.events[1] == (
         "info",
         "hitl_request_sent",
         {"run_id": "run-123", "msg_id": "msg-123"},
     )
+    assert agent.hitl_evaluator.calls == [
+        {
+            "company_domain": None,
+            "confidence_score": 0.5,
+            "company_in_crm": None,
+            "attachments_in_crm": None,
+        }
+    ]
 
 
 def test_trigger_hitl_without_email_backend_raises() -> None:

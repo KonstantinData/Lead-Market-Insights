@@ -58,6 +58,7 @@ from utils.validation import (
     validate_extraction_or_raise,
 )
 from utils.workflow_steps import workflow_step_recorder
+
 from utils.email_agent import EmailAgent as SmtpEmailAgent
 
 logger = logging.getLogger("MasterWorkflowAgent")

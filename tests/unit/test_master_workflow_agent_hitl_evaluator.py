@@ -1,52 +1,14 @@
-import json
+from __future__ import annotations
+
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
+from agents.hitl_decision_evaluator import HITLDecisionEvaluator
 from agents.master_workflow_agent import MasterWorkflowAgent
 
 
-class DummyHuman:
-    def __init__(self) -> None:
-        self.persist_calls: List[Tuple[str, Dict[str, Any]]] = []
-        self.dispatch_calls: List[Dict[str, Any]] = []
-        self.reminder_calls: List[Tuple[str, str, Any]] = []
-
-    def persist_pending_request(self, run_id: str, context: Dict[str, Any]) -> None:
-        self.persist_calls.append((run_id, dict(context)))
-
-    def dispatch_request_email(
-        self,
-        *,
-        run_id: str,
-        operator_email: str,
-        context: Dict[str, Any],
-        email_agent: Any,
-    ) -> str:
-        message_id = email_agent.send_email(
-            operator_email,
-            f"HITL request · {run_id}",
-            "body",
-            headers={"X-Run-ID": run_id, "X-HITL": "1"},
-        )
-        self.dispatch_calls.append(
-            {
-                "run_id": run_id,
-                "operator": operator_email,
-                "context": dict(context),
-                "email_agent": email_agent,
-                "message_id": message_id,
-            }
-        )
-        return message_id
-
-    def schedule_reminders(
-        self, run_id: str, operator_email: str, email_agent: Any
-    ) -> None:
-        self.reminder_calls.append((run_id, operator_email, email_agent))
-
-
-class DummyEmailAgent:
+class StubEmailAgent:
     def __init__(self) -> None:
         self.calls: List[Dict[str, Any]] = []
 
@@ -61,98 +23,111 @@ class DummyEmailAgent:
                 "headers": dict(headers or {}),
             }
         )
-        return "msg-1"
+        return "stub-message"
 
 
-class DummyTelemetry:
+class StubHumanAgent:
     def __init__(self) -> None:
-        self.events: List[Tuple[str, str, Dict[str, Any]]] = []
+        self.persisted: List[Dict[str, Any]] = []
+        self.dispatched: List[Dict[str, Any]] = []
+        self.reminders: List[Dict[str, Any]] = []
+
+    def persist_pending_request(self, run_id: str, context: Dict[str, Any]) -> None:
+        self.persisted.append({"run_id": run_id, "context": dict(context)})
+
+    def dispatch_request_email(
+        self,
+        *,
+        run_id: str,
+        operator_email: str,
+        context: Dict[str, Any],
+        email_agent: Any,
+    ) -> str:
+        message_id = email_agent.send_email(
+            operator_email,
+            f"HITL Approval · {run_id}",
+            "body",
+            headers={"X-Run-ID": run_id, "X-HITL": "1"},
+        )
+        self.dispatched.append(
+            {
+                "run_id": run_id,
+                "operator": operator_email,
+                "context": dict(context),
+                "message_id": message_id,
+            }
+        )
+        return message_id
+
+    def schedule_reminders(
+        self, run_id: str, operator_email: str, email_agent: Any
+    ) -> None:
+        self.reminders.append(
+            {
+                "run_id": run_id,
+                "operator": operator_email,
+                "email_agent": email_agent,
+            }
+        )
+
+
+class StubTelemetry:
+    def __init__(self) -> None:
+        self.events: List[Dict[str, Any]] = []
 
     def info(self, event: str, payload: Dict[str, Any]) -> None:
-        self.events.append(("info", event, dict(payload)))
+        self.events.append({"level": "info", "event": event, "payload": dict(payload)})
 
     def warn(self, event: str, payload: Dict[str, Any]) -> None:
-        self.events.append(("warn", event, dict(payload)))
+        self.events.append({"level": "warn", "event": event, "payload": dict(payload)})
 
 
-class RecordingEvaluator:
-    def __init__(self) -> None:
-        self.calls: List[Dict[str, Any]] = []
+def test_fake_event_triggers_hitl_request(tmp_path) -> None:
+    run_directory = Path(tmp_path)
+    email_agent = StubEmailAgent()
+    telemetry = StubTelemetry()
+    backend = SimpleNamespace(email=email_agent, telemetry=telemetry)
 
-    def requires_hitl(self, context: Dict[str, Any]) -> Tuple[bool, str]:
-        self.calls.append(dict(context))
-        return True, "Low confidence score: 0.5 < 0.9"
-
-    def evaluate(self, context: Dict[str, Any]) -> Tuple[bool, str]:  # pragma: no cover
-        return self.requires_hitl(context)
-
-
-def test_master_agent_invokes_evaluator_and_persists_reason(tmp_path) -> None:
-    settings = SimpleNamespace(
-        HITL_CONFIDENCE_THRESHOLD=0.9,
-        HITL_OPERATOR_EMAIL="ops@example.com",
-    )
-    email_agent = DummyEmailAgent()
-    backend = SimpleNamespace(email=email_agent, telemetry=DummyTelemetry())
     agent = MasterWorkflowAgent.__new__(MasterWorkflowAgent)
-    agent.settings = settings
+    agent.settings = SimpleNamespace(HITL_OPERATOR_EMAIL="ops@example.com")
     agent.communication_backend = backend
-    agent.human_agent = DummyHuman()
-    agent.telemetry = backend.telemetry
-    agent.hitl_evaluator = RecordingEvaluator()
-    agent.run_id = "run-eval-1"
-    agent.run_directory = Path(tmp_path)
+    agent.telemetry = telemetry
+    agent.human_agent = StubHumanAgent()
+    agent.hitl_evaluator = HITLDecisionEvaluator()
+    agent.run_id = "run-hitl-integration"
+    agent.run_directory = run_directory
 
-    message_id = agent.trigger_hitl(
-        "run-eval-1",
-        {"company_domain": "acme.test", "confidence_score": 0.5},
+    event_result = {"research": {}, "status": "received"}
+    context_payload = {
+        "company_domain": "acme.test",
+        "company_in_crm": True,
+        "attachments_in_crm": False,
+    }
+    event = {"organizer": {"email": "organizer@example.com"}}
+
+    triggered = agent._evaluate_hitl_condition(
+        event_result,
+        context_payload,
+        event_id="evt-1",
+        dossier_result=None,
+        event=event,
+        crm_result=None,
     )
 
-    assert message_id == "msg-1"
-    assert agent.hitl_evaluator.calls == [
+    assert triggered is True
+    assert event_result["status"] == "hitl_pending"
+    assert any(e["event"] == "hitl_request_sent" for e in telemetry.events)
+    assert email_agent.calls and email_agent.calls[0]["recipient"] == "ops@example.com"
+    assert agent.human_agent.reminders == [
         {
-            "company_domain": "acme.test",
-            "confidence_score": 0.5,
-            "company_in_crm": None,
-            "attachments_in_crm": None,
-            "missing_optional_fields": None,
-            "dossier_status": None,
-            "insufficient_context": False,
-            "missing_fields": [],
+            "run_id": "run-hitl-integration",
+            "operator": "ops@example.com",
+            "email_agent": email_agent,
         }
     ]
-    assert agent.human_agent.persist_calls == [
-        (
-            "run-eval-1",
-            {
-                "company_domain": "acme.test",
-                "confidence_score": 0.5,
-                "missing_fields": "None",
-                "hitl_reason": "Low confidence score: 0.5 < 0.9",
-                "hitl_reason_code": "low_confidence",
-                "run_id": "run-eval-1",
-            },
-        )
-    ]
-    assert agent.human_agent.dispatch_calls and agent.human_agent.dispatch_calls[0][
-        "context"
-    ]["hitl_reason"].startswith("Low confidence")
-    assert agent.telemetry.events[0] == (
-        "info",
-        "hitl_required",
-        {"run_id": "run-eval-1", "reason": "Low confidence score: 0.5 < 0.9"},
-    )
-    assert agent.telemetry.events[1] == (
-        "info",
-        "hitl_request_sent",
-        {"run_id": "run-eval-1", "msg_id": "msg-1"},
-    )
-    assert agent.human_agent.reminder_calls == [
-        ("run-eval-1", "ops@example.com", email_agent)
-    ]
-    artifact = Path(agent.run_directory) / "hitl.json"
-    assert artifact.exists(), "HITL artifact should be written"
-    payload = json.loads(artifact.read_text())
-    assert payload["run_id"] == "run-eval-1"
-    assert payload["reason"] == "low_confidence"
-    assert email_agent.calls and email_agent.calls[0]["recipient"] == "ops@example.com"
+
+    artifact = run_directory / "hitl.json"
+    assert artifact.exists()
+
+    persisted_context = agent.human_agent.persisted[0]["context"]
+    assert persisted_context["hitl_reason_code"] == "crm_missing_attachments"

@@ -59,6 +59,8 @@ from utils.validation import (
 )
 from utils.workflow_steps import workflow_step_recorder
 
+from utils.email_agent import EmailAgent as SmtpEmailAgent
+
 logger = logging.getLogger("MasterWorkflowAgent")
 
 
@@ -161,6 +163,7 @@ class MasterWorkflowAgent:
             self.storage_agent.base_dir / "state" / "processed_events.json"
         )
         self._processed_event_cache: Optional[ProcessedEventCache] = None
+        self._smtp_email_agent: Optional[SmtpEmailAgent] = None
 
         self.run_id: str = ""
         self.run_directory: Path = self.storage_agent.base_dir
@@ -283,8 +286,67 @@ class MasterWorkflowAgent:
     def _resolve_email_agent(self) -> Optional[Any]:
         backend = getattr(self, "communication_backend", None)
         if backend is None:
+            return self._smtp_email_agent or self._build_smtp_email_agent()
+        candidate = getattr(backend, "email", None)
+        if candidate is None:
+            candidate = getattr(backend, "email_agent", None)
+        if candidate is not None:
+            return candidate
+        if self._smtp_email_agent:
+            return self._smtp_email_agent
+        return self._build_smtp_email_agent()
+
+    def _build_smtp_email_agent(self) -> Optional[SmtpEmailAgent]:
+        smtp_settings = getattr(self.settings, "smtp", None)
+        host = None
+        port = None
+        username = None
+        password = None
+        use_tls: Any = True
+        timeout: Any = 30
+
+        if smtp_settings is not None:
+            host = getattr(smtp_settings, "host", None)
+            port = getattr(smtp_settings, "port", None)
+            username = getattr(smtp_settings, "username", None)
+            password = getattr(smtp_settings, "password", None)
+            use_tls = getattr(smtp_settings, "use_tls", True)
+            timeout = getattr(smtp_settings, "timeout", 30)
+
+        host = host or getattr(self.settings, "smtp_host", None)
+        port = port or getattr(self.settings, "smtp_port", None)
+        username = username or getattr(self.settings, "smtp_username", None)
+        password = password or getattr(self.settings, "smtp_password", None)
+
+        if isinstance(use_tls, str):
+            use_tls = use_tls.strip().lower() not in {"0", "false", "no", "off"}
+        else:
+            use_tls = bool(use_tls)
+
+        try:
+            timeout_value = int(float(timeout))
+        except (TypeError, ValueError):
+            timeout_value = 30
+        timeout_value = max(timeout_value, 1)
+
+        if not host or not port or not username or not password:
             return None
-        return getattr(backend, "email", None)
+
+        try:
+            port_number = int(port)
+        except (TypeError, ValueError):
+            return None
+
+        agent = SmtpEmailAgent(
+            host,
+            port_number,
+            username,
+            password,
+            use_tls=use_tls,
+            timeout=timeout_value,
+        )
+        self._smtp_email_agent = agent
+        return agent
 
     def _require_email_agent(self) -> Any:
         email_agent = self._resolve_email_agent()

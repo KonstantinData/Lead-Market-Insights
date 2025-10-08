@@ -134,6 +134,9 @@ class HitlSettings:
     admin_email: Optional[str]
     workflow_log_dir: str
     escalation_email: Optional[str] = None
+    reminder_delay_hours: float = 4.0
+    max_retries: int = 2
+    reminder_log_dir: Optional[str] = None
 
 
 def validate_email_settings(cfg: Any) -> None:
@@ -621,9 +624,16 @@ class Settings:
         )
         # Notes: Provide uppercase alias for legacy access patterns
         self.HITL_CONFIDENCE_THRESHOLD = self.hitl_confidence_threshold
+        self.hitl_reminder_delay_hours: float = max(
+            0.0, _get_float_env("HITL_REMINDER_DELAY", 4.0)
+        )
+        self.hitl_max_retries: int = max(0, _get_int_env("HITL_MAX_RETRIES", 2))
         self.hitl_admin_reminder_hours: Tuple[float, ...] = self._parse_hitl_hours(
             _get_env_var("HITL_ADMIN_REMINDER_HOURS"),
             default=(24.0,),
+        )
+        self.hitl_reminder_log_dir: Path = _get_path_env(
+            "HITL_REMINDER_LOG_DIR", self.log_storage_dir / "reminders"
         )
 
         self.hitl = HitlSettings(
@@ -631,6 +641,9 @@ class Settings:
             admin_email=self.hitl_admin_email,
             workflow_log_dir=str(self.workflow_log_dir),
             escalation_email=self.hitl_escalation_email,
+            reminder_delay_hours=self.hitl_reminder_delay_hours,
+            max_retries=self.hitl_max_retries,
+            reminder_log_dir=str(self.hitl_reminder_log_dir),
         )
 
     def _parse_hitl_hours(

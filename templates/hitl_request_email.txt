@@ -1,11 +1,14 @@
-Subject: HITL Approval Request · {{ run_id }}
-
 Run: {{ run_id }}
 Company: {{ context.company_name }}
 Domain: {{ context.company_domain }}
-Primary contact: {{ context.contact_email }}
-Missing fields: {{ context.missing_fields }}
+Primary contact email: {{ context.contact_email }}
+Primary contact name: {{ context.contact_name }}
 Reason: {{ context.hitl_reason }}
+Missing fields: {{ context.missing_fields }}
+CRM company present: {{ context.company_in_crm }}
+CRM attachments available: {{ context.attachments_in_crm }}
+CRM attachments missing: {{ context.crm_missing_attachments }}
+Dossier status: {{ context.dossier_status }}
 
 Reply with one of:
 - APPROVE

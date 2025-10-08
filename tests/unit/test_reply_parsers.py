@@ -58,3 +58,17 @@ def test_parse_hitl_reply_detects_change_requests() -> None:
 
     assert decision == "change_requested"
     assert extra == {"website": "example.com", "note": "test"}
+
+
+def test_parse_hitl_reply_handles_disapprove() -> None:
+    decision, extra = parse_hitl_reply("We disapprove of this proposal.")
+
+    assert decision == "declined"
+    assert extra == {}
+
+
+def test_parse_hitl_reply_ignores_embedded_keywords() -> None:
+    decision, extra = parse_hitl_reply("Let's plan an exchange of information.")
+
+    assert decision is None
+    assert extra == {}

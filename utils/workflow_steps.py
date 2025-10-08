@@ -7,11 +7,10 @@ logger = logging.getLogger(__name__)
 
 
 class WorkflowStepRecorder:
-    """
-    Zentrale Idempotenz für Workflow-Schritte und Run-Manifeste.
+    """Idempotent recorder for workflow steps and run manifests.
 
-    - Jeder (run_id, event_id, step)-Tripel wird höchstens einmal geloggt.
-    - Pro run_id wird das Manifest höchstens einmal ausgegeben.
+    - Each (run_id, event_id, step) tuple is logged at most once.
+    - Each run_id triggers at most one manifest write.
     """
 
     def __init__(self) -> None:

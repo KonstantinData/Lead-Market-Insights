@@ -5,6 +5,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional, Set
 
+from utils.persistence import atomic_write_json
+
 
 class ReminderEscalation:
     """Module for sending reminders and escalation notifications."""
@@ -19,6 +21,8 @@ class ReminderEscalation:
             Callable[[asyncio.Task[Any]], asyncio.Task[Any]]
         ] = None,
         hitl_dir: Optional[Path] = None,
+        reminder_log_dir: Optional[Path] = None,
+        run_directory: Optional[Path] = None,
     ):
         self.email_agent = email_agent
         self.workflow_log_manager = workflow_log_manager
@@ -27,6 +31,9 @@ class ReminderEscalation:
         self._tasks: Set[asyncio.Task[Any]] = set()
         self._audit_tasks: Dict[str, Set[asyncio.Task[Any]]] = {}
         self.hitl_dir: Optional[Path] = Path(hitl_dir) if hitl_dir else None
+        self._reminder_log_dir: Optional[Path] = None
+        self.set_reminder_log_dir(reminder_log_dir)
+        self._run_directory: Optional[Path] = Path(run_directory) if run_directory else None
 
     # ------------------------------------------------------------------
     # Public API
@@ -46,6 +53,17 @@ class ReminderEscalation:
                 metadata=metadata,
                 error="email_agent_missing",
             )
+            self._record_artifact(
+                "reminder.json",
+                {
+                    "timestamp": self._timestamp(),
+                    "status": "skipped",
+                    "recipient": recipient,
+                    "subject": subject,
+                    "metadata": self._safe_metadata(metadata),
+                    "error": "email_agent_missing",
+                },
+            )
             return False
 
         try:
@@ -61,6 +79,17 @@ class ReminderEscalation:
                 metadata=metadata,
                 error=error,
             )
+            self._record_artifact(
+                "reminder.json",
+                {
+                    "timestamp": self._timestamp(),
+                    "status": "sent" if sent else "failed",
+                    "recipient": recipient,
+                    "subject": subject,
+                    "metadata": self._safe_metadata(metadata),
+                    "error": error,
+                },
+            )
             return bool(sent)
         except Exception as exc:  # pragma: no cover - defensive logging
             logging.error("Error sending reminder: %s", exc)
@@ -69,6 +98,17 @@ class ReminderEscalation:
                 f"Exception during reminder to {recipient}: {exc}",
                 metadata=metadata,
                 error=str(exc),
+            )
+            self._record_artifact(
+                "reminder.json",
+                {
+                    "timestamp": self._timestamp(),
+                    "status": "exception",
+                    "recipient": recipient,
+                    "subject": subject,
+                    "metadata": self._safe_metadata(metadata),
+                    "error": str(exc),
+                },
             )
             raise
 
@@ -87,6 +127,17 @@ class ReminderEscalation:
                 metadata=metadata,
                 error="email_agent_missing",
             )
+            self._record_artifact(
+                "escalation.json",
+                {
+                    "timestamp": self._timestamp(),
+                    "status": "skipped",
+                    "recipient": admin_email,
+                    "subject": subject,
+                    "metadata": self._safe_metadata(metadata),
+                    "error": "email_agent_missing",
+                },
+            )
             return False
 
         try:
@@ -102,6 +153,17 @@ class ReminderEscalation:
                 metadata=metadata,
                 error=error,
             )
+            self._record_artifact(
+                "escalation.json",
+                {
+                    "timestamp": self._timestamp(),
+                    "status": "sent" if sent else "failed",
+                    "recipient": admin_email,
+                    "subject": subject,
+                    "metadata": self._safe_metadata(metadata),
+                    "error": error,
+                },
+            )
             return bool(sent)
         except Exception as exc:  # pragma: no cover - defensive logging
             logging.error("Error sending escalation: %s", exc)
@@ -110,6 +172,17 @@ class ReminderEscalation:
                 f"Exception during escalation to {admin_email}: {exc}",
                 metadata=metadata,
                 error=str(exc),
+            )
+            self._record_artifact(
+                "escalation.json",
+                {
+                    "timestamp": self._timestamp(),
+                    "status": "exception",
+                    "recipient": admin_email,
+                    "subject": subject,
+                    "metadata": self._safe_metadata(metadata),
+                    "error": str(exc),
+                },
             )
             raise
 
@@ -352,6 +425,17 @@ class ReminderEscalation:
             tracked.add_done_callback(_remove_from_audit)
         return tracked
 
+    def set_reminder_log_dir(self, directory: Optional[Path]) -> None:
+        if directory is None:
+            self._reminder_log_dir = None
+            return
+        path = Path(directory)
+        path.mkdir(parents=True, exist_ok=True)
+        self._reminder_log_dir = path
+
+    def set_run_directory(self, directory: Optional[Path]) -> None:
+        self._run_directory = Path(directory) if directory else None
+
     def _append_log(
         self,
         step: str,
@@ -360,15 +444,18 @@ class ReminderEscalation:
         metadata: Optional[Dict[str, Any]] = None,
         error: Optional[str] = None,
     ) -> None:
+        metadata = dict(metadata or {})
+        workflow_step = metadata.get("workflow_step")
+        self._write_jsonl_event(step, message, metadata, error, workflow_step)
+
+        workflow_metadata = dict(metadata)
+        if workflow_step is not None:
+            workflow_metadata.pop("workflow_step", None)
+
         if not (self.workflow_log_manager and self.run_id):
             return
 
-        workflow_step = None
-        if metadata is not None and "workflow_step" in metadata:
-            workflow_step = metadata.get("workflow_step")
-            metadata = dict(metadata)
-            metadata.pop("workflow_step", None)
-        suffix = self._format_metadata(metadata)
+        suffix = self._format_metadata(workflow_metadata)
         step_name = step
         if workflow_step:
             step_name = f"{workflow_step}_{step}"
@@ -378,6 +465,36 @@ class ReminderEscalation:
             f"{message}{suffix}",
             error=error,
         )
+
+    def _write_jsonl_event(
+        self,
+        step: str,
+        message: str,
+        metadata: Dict[str, Any],
+        error: Optional[str],
+        workflow_step: Optional[str],
+    ) -> None:
+        if not self._reminder_log_dir:
+            return
+
+        run_id = metadata.get("run_id") or self.run_id or "global"
+        record = {
+            "timestamp": self._timestamp(),
+            "run_id": run_id,
+            "step": step,
+            "workflow_step": workflow_step,
+            "message": message,
+            "metadata": metadata,
+            "error": error,
+        }
+
+        target = self._reminder_log_dir / f"{run_id}.jsonl"
+        try:
+            with target.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, ensure_ascii=False, default=str))
+                handle.write("\n")
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logging.error("Failed to write reminder log for %s: %s", run_id, exc)
 
     def _format_metadata(self, metadata: Optional[Dict[str, Any]]) -> str:
         if not metadata:
@@ -399,6 +516,60 @@ class ReminderEscalation:
             raise RuntimeError("hitl_dir is not configured for ReminderEscalation")
         return Path(self.hitl_dir) / f"{run_id}_hitl.json"
 
+    def _safe_metadata(self, metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        if not metadata:
+            return {}
+        try:
+            json.dumps(metadata)
+            return dict(metadata)
+        except TypeError:
+            return json.loads(json.dumps(metadata, default=str))
+
+    def _resolve_event_id(self) -> Optional[str]:
+        if not self.run_id or not self.hitl_dir:
+            return None
+        try:
+            state = json.loads(self._hitl_state_path(self.run_id).read_text())
+        except (FileNotFoundError, json.JSONDecodeError):
+            return None
+        context = state.get("context") or {}
+        event_id = context.get("event_id") or state.get("event_id")
+        return str(event_id) if event_id is not None else None
+
+    def _record_artifact(self, file_name: str, entry: Dict[str, Any]) -> None:
+        if not self._run_directory or not self.run_id:
+            return
+        try:
+            self._run_directory.mkdir(parents=True, exist_ok=True)
+        except Exception:  # pragma: no cover - defensive guard
+            return
+
+        event_id = self._resolve_event_id()
+        artifact_path = Path(self._run_directory) / file_name
+        payload: Dict[str, Any]
+        try:
+            if artifact_path.exists():
+                payload = json.loads(artifact_path.read_text())
+            else:
+                payload = {}
+        except json.JSONDecodeError:
+            payload = {}
+
+        payload.setdefault("run_id", self.run_id)
+        if event_id is not None:
+            payload.setdefault("event_id", event_id)
+        entries = payload.setdefault("entries", [])
+        if isinstance(entries, list):
+            entries.append(entry)
+        payload["entries"] = entries
+
+        try:
+            atomic_write_json(artifact_path, payload)
+        except Exception:  # pragma: no cover - defensive guard
+            logging.exception(
+                "Failed to persist %s for run %s", file_name, self.run_id
+            )
+
     def _increment_reminder_count(self, run_id: str) -> None:
         path = self._hitl_state_path(run_id)
         try:
@@ -413,10 +584,13 @@ class ReminderEscalation:
         except (TypeError, ValueError):  # pragma: no cover - defensive guard
             count_int = 0
         state["reminders_sent"] = count_int + 1
-        state["last_reminder_at"] = datetime.now(timezone.utc).isoformat()
+        state["last_reminder_at"] = self._timestamp()
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2))
         tmp.replace(path)
+
+    def _timestamp(self) -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def _build_subject(self, run_id: str, state: Dict[str, Any]) -> str:
         return f"HITL Reminder · {run_id}"

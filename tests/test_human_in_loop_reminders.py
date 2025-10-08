@@ -1,6 +1,9 @@
 import asyncio
+import json
 from datetime import timedelta
+from pathlib import Path
 from typing import Any, Dict
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,6 +12,41 @@ from agents.human_in_loop_agent import (
     HumanInLoopAgent,
 )
 from logs.workflow_log_manager import WorkflowLogManager
+
+
+def build_settings(tmp_path) -> SimpleNamespace:
+    workflow_dir = tmp_path / "workflows"
+    workflow_dir.mkdir(parents=True, exist_ok=True)
+    log_storage_dir = tmp_path / "logs"
+    log_storage_dir.mkdir(parents=True, exist_ok=True)
+    reminder_dir = log_storage_dir / "reminders"
+    reminder_dir.mkdir(parents=True, exist_ok=True)
+
+    admin_email = "ops@example.com"
+    escalation_email = "lead@example.com"
+
+    settings = SimpleNamespace(
+        workflow_log_dir=str(workflow_dir),
+        log_storage_dir=log_storage_dir,
+        hitl_admin_email=admin_email,
+        hitl_admin_reminder_hours=(24.0,),
+        hitl_reminder_delay_hours=0.0,
+        hitl_max_retries=2,
+        hitl_escalation_email=escalation_email,
+        hitl_reminder_log_dir=reminder_dir,
+    )
+
+    settings.hitl = SimpleNamespace(
+        operator_email=admin_email,
+        admin_email=admin_email,
+        workflow_log_dir=str(workflow_dir),
+        escalation_email=escalation_email,
+        reminder_delay_hours=0.0,
+        max_retries=2,
+        reminder_log_dir=str(reminder_dir),
+    )
+
+    return settings
 
 
 class FakeBackend:
@@ -55,11 +93,19 @@ async def test_pending_confirmation_triggers_reminders(tmp_path) -> None:
         escalation_delay=timedelta(seconds=0),
         escalation_recipient="ops@example.com",
     )
-    agent = HumanInLoopAgent(communication_backend=backend, reminder_policy=policy)
+    settings = build_settings(tmp_path)
+    agent = HumanInLoopAgent(
+        communication_backend=backend,
+        reminder_policy=policy,
+        settings_override=settings,
+    )
 
-    workflow_dir = tmp_path / "workflow"
-    workflow_dir.mkdir()
-    agent.set_run_context("run-123", WorkflowLogManager(workflow_dir))
+    workflow_dir = Path(settings.workflow_log_dir)
+    run_directory = workflow_dir / "run-123"
+    run_directory.mkdir(parents=True, exist_ok=True)
+    agent.set_run_context(
+        "run-123", WorkflowLogManager(workflow_dir), run_directory=run_directory
+    )
 
     event = {
         "id": "evt-1",
@@ -84,6 +130,21 @@ async def test_pending_confirmation_triggers_reminders(tmp_path) -> None:
     workflow_text = workflow_files[0].read_text(encoding="utf-8")
     assert "hitl_dossier_pending" in workflow_text
     assert "hitl_dossier_reminder_scheduled" in workflow_text
+
+    reminder_file = Path(settings.hitl_reminder_log_dir) / "run-123.jsonl"
+    assert reminder_file.exists(), "Reminder JSONL should be persisted"
+    reminder_entries = [json.loads(line) for line in reminder_file.read_text().splitlines()]
+    assert any(entry["step"] == "reminder_sent" for entry in reminder_entries)
+
+    reminder_artifact = run_directory / "reminder.json"
+    assert reminder_artifact.exists(), "Run-level reminder artifact should be created"
+    reminder_payload = json.loads(reminder_artifact.read_text())
+    assert reminder_payload["run_id"] == "run-123"
+    assert reminder_payload["entries"], "Reminder artifact should record entries"
+    escalation_artifact = run_directory / "escalation.json"
+    assert escalation_artifact.exists(), "Escalation artifact should be created"
+    escalation_payload = json.loads(escalation_artifact.read_text())
+    assert escalation_payload["entries"], "Escalation artifact should record entries"
 
     agent.shutdown()
 

@@ -62,6 +62,7 @@ class HumanInLoopAgent(BaseHumanAgent):
         follow_up_delays: Sequence[timedelta] = (timedelta(hours=24),)
         escalation_delay: Optional[timedelta] = timedelta(hours=48)
         escalation_recipient: Optional[str] = None
+        max_reminders: Optional[int] = None
 
     def __init__(
         self,
@@ -87,15 +88,62 @@ class HumanInLoopAgent(BaseHumanAgent):
         self.audit_log: Optional[AuditLog] = None
         self.workflow_log_manager: Optional[WorkflowLogManager] = None
         self.run_id: Optional[str] = None
-        self.reminder_policy = reminder_policy or self.DossierReminderPolicy()
+        self.reminder_policy = (
+            reminder_policy or self._build_default_reminder_policy()
+        )
         self.reminder_escalation: Optional[ReminderEscalation] = None
         self.reminder: Optional[ReminderEscalation] = None
         self._hitl_dir = Path(self.settings.workflow_log_dir)
         self._hitl_dir.mkdir(parents=True, exist_ok=True)
+        self._run_directory: Optional[Path] = None
         self._ensure_reminder_escalation()
 
     def _hitl_path(self, run_id: str) -> Path:
         return self._hitl_dir / f"{run_id}_hitl.json"
+
+    def _build_default_reminder_policy(
+        self,
+    ) -> "HumanInLoopAgent.DossierReminderPolicy":
+        delay_hours = getattr(self.settings, "hitl_reminder_delay_hours", 4.0) or 0.0
+        delay_hours = max(float(delay_hours), 0.0)
+        base_delay = timedelta(hours=delay_hours)
+
+        max_retries = getattr(self.settings, "hitl_max_retries", 3)
+        try:
+            reminder_count = int(max_retries)
+        except (TypeError, ValueError):
+            reminder_count = 3
+        reminder_count = max(reminder_count, 0)
+
+        follow_up_count = max(reminder_count - 1, 0)
+        follow_up_delays: tuple[timedelta, ...] = tuple(
+            base_delay for _ in range(follow_up_count)
+        )
+
+        escalation_multiplier = max(reminder_count + 1, 1)
+        escalation_delay = base_delay * escalation_multiplier
+
+        escalation_recipient = None
+        hitl_settings = getattr(self.settings, "hitl", None)
+        if hitl_settings is not None:
+            escalation_recipient = getattr(hitl_settings, "escalation_email", None)
+        if not escalation_recipient:
+            escalation_recipient = getattr(self.settings, "hitl_escalation_email", None)
+        if not escalation_recipient:
+            escalation_recipient = getattr(self.settings, "hitl_admin_email", None)
+
+        if escalation_recipient is None:
+            escalation_delay_value: Optional[timedelta] = escalation_delay
+        else:
+            escalation_delay_value = escalation_delay
+
+        return self.DossierReminderPolicy(
+            initial_delay=base_delay,
+            follow_up_delays=follow_up_delays,
+            escalation_delay=escalation_delay_value,
+            escalation_recipient=escalation_recipient,
+            max_reminders=reminder_count,
+        )
 
     def persist_pending_request(self, run_id: str, context: Dict[str, Any]) -> None:
         payload = {
@@ -151,7 +199,11 @@ class HumanInLoopAgent(BaseHumanAgent):
         template_context.update({f"context.{key}": value for key, value in safe_context.items()})
         subject = f"HITL Approval Request · {run_id}"
         body = render_template("hitl_request_email.txt", template_context)
-        headers = {"X-Run-ID": run_id, "X-HITL": "1"}
+        headers = {
+            "X-Run-ID": run_id,
+            "X-HITL": "1",
+            "Reply-To": operator_email,
+        }
         return email_agent.send_email(operator_email, subject, body, headers=headers)
 
     def schedule_reminders(self, run_id: str, operator_email: str, email_agent: Any) -> None:
@@ -186,16 +238,24 @@ class HumanInLoopAgent(BaseHumanAgent):
         self,
         run_id: str,
         workflow_log_manager: WorkflowLogManager,
+        *,
+        run_directory: Optional[Path] = None,
     ) -> None:
         """Set the workflow run context used for reminder/escalation logging."""
 
         self.run_id = run_id
         self.workflow_log_manager = workflow_log_manager
+        self._run_directory = Path(run_directory) if run_directory else None
         if self.reminder_escalation:
             self.reminder_escalation.run_id = run_id
             self.reminder_escalation.workflow_log_manager = workflow_log_manager
             if hasattr(self.reminder_escalation, "hitl_dir"):
                 self.reminder_escalation.hitl_dir = self._hitl_dir
+            if hasattr(self.reminder_escalation, "set_run_directory"):
+                self.reminder_escalation.set_run_directory(self._run_directory)
+            reminder_log_dir = self._resolve_reminder_log_dir()
+            if reminder_log_dir is not None:
+                self.reminder_escalation.set_reminder_log_dir(reminder_log_dir)
             self.reminder = self.reminder_escalation
         else:
             self._ensure_reminder_escalation()
@@ -635,21 +695,48 @@ class HumanInLoopAgent(BaseHumanAgent):
     # ------------------------------------------------------------------
     def _ensure_reminder_escalation(self, email_agent: Optional[Any] = None) -> None:
         resolved_agent = email_agent or self._resolve_email_agent_for_reminders()
-        if resolved_agent is None:
-            return
+        reminder_log_dir = self._resolve_reminder_log_dir()
+
         if self.reminder_escalation:
-            self.reminder_escalation.email_agent = resolved_agent
+            if resolved_agent is not None:
+                self.reminder_escalation.email_agent = resolved_agent
+            self.reminder_escalation.workflow_log_manager = self.workflow_log_manager
+            self.reminder_escalation.run_id = self.run_id
             if getattr(self.reminder_escalation, "hitl_dir", None) is None:
                 self.reminder_escalation.hitl_dir = self._hitl_dir
+            elif self.reminder_escalation.hitl_dir != self._hitl_dir:
+                self.reminder_escalation.hitl_dir = self._hitl_dir
+            if hasattr(self.reminder_escalation, "set_run_directory"):
+                self.reminder_escalation.set_run_directory(self._run_directory)
+            if reminder_log_dir is not None:
+                self.reminder_escalation.set_reminder_log_dir(reminder_log_dir)
             self.reminder = self.reminder_escalation
             return
+
         self.reminder_escalation = ReminderEscalation(
             resolved_agent,
             workflow_log_manager=self.workflow_log_manager,
             run_id=self.run_id,
             hitl_dir=self._hitl_dir,
+            reminder_log_dir=reminder_log_dir,
+            run_directory=self._run_directory,
         )
         self.reminder = self.reminder_escalation
+
+    def _resolve_reminder_log_dir(self) -> Optional[Path]:
+        hitl_settings = getattr(self.settings, "hitl", None)
+        candidate = None
+        if hitl_settings is not None:
+            candidate = getattr(hitl_settings, "reminder_log_dir", None)
+        if not candidate:
+            candidate = getattr(self.settings, "hitl_reminder_log_dir", None)
+        if not candidate and hasattr(self.settings, "log_storage_dir"):
+            candidate = Path(self.settings.log_storage_dir) / "reminders"
+        if not candidate:
+            return None
+        path = Path(candidate)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
 
     def _resolve_email_agent_for_reminders(self) -> Optional[Any]:
         backend = self.communication_backend
@@ -738,6 +825,7 @@ class HumanInLoopAgent(BaseHumanAgent):
             )
             return
 
+        self._ensure_reminder_escalation()
         if not self.reminder_escalation:
             self._log_workflow(
                 "hitl_dossier_reminder_skipped",
@@ -754,21 +842,34 @@ class HumanInLoopAgent(BaseHumanAgent):
             "contact": contact_email,
             "event_id": event.get("id"),
             "workflow_step": "hitl_dossier",
+            "run_id": self.run_id,
         }
 
-        cumulative_seconds = 0.0
-        initial_seconds = max(policy.initial_delay.total_seconds(), 0)
-        cumulative_seconds += initial_seconds
-        self.reminder_escalation.schedule_reminder(
-            contact_email,
-            self._build_reminder_subject(subject),
-            self._build_reminder_message(message, attempt=1, details=details),
-            cumulative_seconds,
-            metadata=metadata,
-        )
+        max_reminders = getattr(policy, "max_reminders", None)
+        if max_reminders is None:
+            follow_count = len(policy.follow_up_delays or ())
+            max_reminders = 1 + follow_count
+        try:
+            max_reminders = int(max_reminders)
+        except (TypeError, ValueError):
+            max_reminders = 0
 
-        for attempt_index, delay in enumerate(policy.follow_up_delays, start=2):
-            cumulative_seconds += max(delay.total_seconds(), 0)
+        if max_reminders <= 0:
+            self._log_workflow(
+                "hitl_dossier_reminder_disabled",
+                "Reminder scheduling disabled by configuration",
+            )
+        else:
+            cumulative_seconds = 0.0
+            attempt_index = 0
+            initial_seconds = max(policy.initial_delay.total_seconds(), 0)
+            cumulative_seconds += initial_seconds
+            attempt_index += 1
+            reminder_metadata = {
+                **metadata,
+                "attempt": attempt_index,
+                "max_reminders": max_reminders,
+            }
             self.reminder_escalation.schedule_reminder(
                 contact_email,
                 self._build_reminder_subject(subject),
@@ -778,8 +879,30 @@ class HumanInLoopAgent(BaseHumanAgent):
                     details=details,
                 ),
                 cumulative_seconds,
-                metadata=metadata,
+                metadata=reminder_metadata,
             )
+
+            for delay in policy.follow_up_delays or ():
+                if attempt_index >= max_reminders:
+                    break
+                cumulative_seconds += max(delay.total_seconds(), 0)
+                attempt_index += 1
+                reminder_metadata = {
+                    **metadata,
+                    "attempt": attempt_index,
+                    "max_reminders": max_reminders,
+                }
+                self.reminder_escalation.schedule_reminder(
+                    contact_email,
+                    self._build_reminder_subject(subject),
+                    self._build_reminder_message(
+                        message,
+                        attempt=attempt_index,
+                        details=details,
+                    ),
+                    cumulative_seconds,
+                    metadata=reminder_metadata,
+                )
 
         if policy.escalation_delay is not None:
             escalation_seconds = max(policy.escalation_delay.total_seconds(), 0)
@@ -796,6 +919,7 @@ class HumanInLoopAgent(BaseHumanAgent):
             escalation_metadata = {
                 **metadata,
                 "escalation_recipient": escalation_recipient,
+                "max_reminders": max_reminders,
             }
             self.reminder_escalation.schedule_escalation(
                 escalation_recipient,
@@ -805,7 +929,7 @@ class HumanInLoopAgent(BaseHumanAgent):
                 metadata=escalation_metadata,
             )
 
-            admin_email = settings.hitl_admin_email
+            admin_email = getattr(self.settings, "hitl_admin_email", None)
             admin_interval = self._admin_reminder_interval_hours()
             if admin_email and admin_interval:
                 admin_metadata = {
@@ -853,7 +977,7 @@ class HumanInLoopAgent(BaseHumanAgent):
         return "\n".join(lines)
 
     def _admin_reminder_interval_hours(self) -> Optional[float]:
-        intervals = getattr(settings, "hitl_admin_reminder_hours", ()) or ()
+        intervals = getattr(self.settings, "hitl_admin_reminder_hours", ()) or ()
         for value in intervals:
             try:
                 interval = float(value)

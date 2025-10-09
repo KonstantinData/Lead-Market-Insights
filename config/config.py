@@ -6,8 +6,7 @@
 # and provides validation, alias mapping, and type coercion.
 #
 # This file is fully compatible with ADR-0001 (HITL IMAP/SMTP
-# Integration) and adds complete support for HITL, IMAP, SMTP,
-# Google OAuth, HubSpot, and Observability.
+# Integration) and ADR-0002 (OpenAI Compatibility Shim).
 # ===================================================================
 
 import json
@@ -16,7 +15,7 @@ import yaml
 import logging
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 # ---------------------------------------------------------------
 # Environment Access Helpers
@@ -26,10 +25,7 @@ from typing import Any, Dict, List, Optional, Union
 def _get_env_var(
     key: str, default: Optional[str] = None, aliases: Optional[List[str]] = None
 ) -> Optional[str]:
-    """
-    Retrieve an environment variable with alias support.
-    The first non-empty alias found will be returned.
-    """
+    """Retrieve an environment variable with alias support."""
     aliases = aliases or []
     for name in [key, *aliases]:
         value = os.getenv(name)
@@ -41,10 +37,7 @@ def _get_env_var(
 def _get_bool_env(
     key: str, default: bool = False, aliases: Optional[List[str]] = None
 ) -> bool:
-    """
-    Convert an environment variable to a boolean.
-    Accepts variations such as "1", "true", "yes", "on".
-    """
+    """Convert an environment variable to a boolean."""
     val = _get_env_var(key, None, aliases)
     if val is None:
         return default
@@ -54,10 +47,7 @@ def _get_bool_env(
 def _get_int_env(
     key: str, default: int = 0, aliases: Optional[List[str]] = None
 ) -> int:
-    """
-    Convert an environment variable to an integer.
-    Returns a default value if conversion fails.
-    """
+    """Convert an environment variable to an integer."""
     val = _get_env_var(key, None, aliases)
     if val is None:
         return default
@@ -70,10 +60,7 @@ def _get_int_env(
 def _get_float_env(
     key: str, default: float = 0.0, aliases: Optional[List[str]] = None
 ) -> float:
-    """
-    Convert an environment variable to a float.
-    Returns a default value if conversion fails.
-    """
+    """Convert an environment variable to a float."""
     val = _get_env_var(key, None, aliases)
     if val is None:
         return default
@@ -86,9 +73,7 @@ def _get_float_env(
 def _get_path_env(
     key: str, default: Optional[Path] = None, aliases: Optional[List[str]] = None
 ) -> Path:
-    """
-    Retrieve a Path-type environment variable and ensure expansion of "~".
-    """
+    """Retrieve a Path-type environment variable and ensure expansion of '~'."""
     val = _get_env_var(key, None, aliases)
     if val is None:
         return default or Path()
@@ -189,25 +174,42 @@ class ObservabilitySettings:
     )
 
 
+@dataclass
+class OpenAISettings:
+    """OpenAI configuration and backward-compatibility shim."""
+
+    api_key: Optional[str] = field(
+        default_factory=lambda: _get_env_var("OPENAI_API_KEY")
+    )
+    api_base: str = field(
+        default_factory=lambda: _get_env_var(
+            "OPENAI_API_BASE",
+            default="https://api.openai.com/v1",
+            aliases=["OPENAI_API_URL"],
+        )
+    )
+
+
 # ---------------------------------------------------------------
 # Main Settings Class
 # ---------------------------------------------------------------
 
 
 class Settings:
-    """
-    Global configuration container that aggregates all sections.
-    Provides YAML/JSON override support and a consistent programmatic interface.
-    """
+    """Global configuration container that aggregates all sections."""
 
     def __init__(self):
-        # Load sub-config sections
         self.smtp = SmtpSettings()
         self.imap = ImapSettings()
         self.hitl = HitlSettings()
+        self.openai = OpenAISettings()
         self.observability = ObservabilitySettings()
 
-        # Additional integrations
+        # Maintain backward compatibility for legacy attributes
+        self.openai_api_base = self.openai.api_base
+        self.openai_api_key = self.openai.api_key
+
+        # External integrations
         self.hubspot_access_token: str = _get_env_var("HUBSPOT_ACCESS_TOKEN")
         self.hubspot_client_secret: str = _get_env_var("HUBSPOT_CLIENT_SECRET")
         self.hubspot_scopes: str = _get_env_var("HUBSPOT_SCOPES")
@@ -231,17 +233,14 @@ class Settings:
         )
         self.google_calendar_id: str = _get_env_var("GOOGLE_CALENDAR_ID")
 
-        # Load any YAML/JSON overrides from ./config/local_settings.yaml or .json
+        # Load optional YAML/JSON overrides
         self._load_local_overrides()
 
     # -----------------------------------------------------------
     # Local Config Loader
     # -----------------------------------------------------------
     def _load_local_overrides(self):
-        """
-        Load YAML or JSON overrides from the config/ directory if present.
-        These files can override any environment variable-based defaults.
-        """
+        """Load YAML or JSON overrides from config directory."""
         override_files = [
             Path("config/local_settings.yaml"),
             Path("config/local_settings.json"),
@@ -280,6 +279,10 @@ class Settings:
                 "enabled": self.hitl.enabled,
                 "operator_email": self.hitl.operator_email,
                 "poll_seconds": self.hitl.poll_seconds,
+            },
+            "openai": {
+                "api_base": self.openai.api_base,
+                "key_set": bool(self.openai.api_key),
             },
             "observability": {
                 "enable_otel": self.observability.enable_otel,

@@ -148,20 +148,66 @@ class HumanInLoopAgent(BaseHumanAgent):
 
         safe_context = mask_pii(context)
         template_context = {"run_id": run_id}
-        template_context.update({f"context.{key}": value for key, value in safe_context.items()})
+        template_context.update(
+            {f"context.{key}": value for key, value in safe_context.items()}
+        )
         subject = f"HITL Approval Request · {run_id}"
         body = render_template("hitl_request_email.txt", template_context)
         headers = {"X-Run-ID": run_id, "X-HITL": "1"}
         return email_agent.send_email(operator_email, subject, body, headers=headers)
 
-    def schedule_reminders(self, run_id: str, operator_email: str, email_agent: Any) -> None:
+    # NEW: dedicated missing-info request mail (no auto-fill)
+    def dispatch_missing_info_email(
+        self,
+        run_id: str,
+        recipient_email: str,
+        *,
+        event: Dict[str, Any],
+        current_info: Dict[str, Any],
+        requested_fields: Sequence[str],
+        email_agent: Any,
+    ) -> Any:
+        """Send a Missing-Info request via email and return backend response/result."""
+        summary = event.get("summary") or "event"
+        subject = f"Missing information required for {summary} · {run_id}"
+        lines = [
+            "Hello,",
+            "",
+            "we need a quick confirmation of the following details before we proceed.",
+            "Please reply with the missing fields:",
+            "",
+        ]
+        if requested_fields:
+            for f in requested_fields:
+                cur = current_info.get(f)
+                lines.append(f"- {f}: {cur if cur not in (None, '') else '<missing>'}")
+        else:
+            lines.append("- (no fields missing detected)")
+        lines += [
+            "",
+            "Thank you!",
+        ]
+        body = "\n".join(lines)
+        headers = {"X-Run-ID": run_id, "X-HITL": "missing_info"}
+        # try async if available
+        if hasattr(email_agent, "send_email_async"):
+            return asyncio.get_event_loop().run_until_complete(
+                email_agent.send_email_async(recipient_email, subject, body)
+            )
+        return email_agent.send_email(recipient_email, subject, body, headers=headers)
+
+    def schedule_reminders(
+        self, run_id: str, operator_email: str, email_agent: Any
+    ) -> None:
         """Schedule reminder emails when a HITL request remains pending."""
 
         path = self._hitl_path(run_id)
         try:
             state = json.loads(path.read_text())
         except FileNotFoundError:
-            logger.warning("HITL state missing for run %s; cannot schedule reminder", run_id)
+            logger.warning(
+                "HITL state missing for run %s; cannot schedule reminder", run_id
+            )
             return
         except json.JSONDecodeError as exc:
             logger.error("Invalid HITL state for run %s: %s", run_id, exc)
@@ -173,7 +219,9 @@ class HumanInLoopAgent(BaseHumanAgent):
         async_email_agent = self._ensure_async_email_agent(email_agent)
         self._ensure_reminder_escalation(email_agent=async_email_agent)
         if not self.reminder:
-            logger.warning("Reminder service unavailable; skipping HITL reminder for %s", run_id)
+            logger.warning(
+                "Reminder service unavailable; skipping HITL reminder for %s", run_id
+            )
             return
         self.reminder.schedule(operator_email, run_id)
 
@@ -204,30 +252,24 @@ class HumanInLoopAgent(BaseHumanAgent):
         self, event: Dict[str, Any], extracted: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Requests missing info from a human. This is a dummy implementation for demonstration.
-        In a real scenario, this could send an email, Slack message, or open a web form.
-        Here, it simulates a user providing the missing information.
-
-        Parameters
-        ----------
-        event: dict
-            The event dictionary (may include id, summary, etc.)
-        extracted: dict
-            The dictionary containing already extracted info, e.g. {'info': {...}, 'is_complete': False}
-
-        Returns
-        -------
-        dict
-            The extracted dictionary with all info fields completed.
+        Requests missing info from a human **via email**.
+        Demo auto-fill is disabled: we never populate values automatically.
+        We send an email, persist a 'pending' state and schedule reminders.
         """
         contact = self._extract_organizer_contact(event)
         masked_event = self._mask_for_message(event)
         masked_initial_info = self._mask_for_message(extracted.get("info", {}))
-        requested_fields = [
-            key
-            for key, value in extracted.get("info", {}).items()
-            if value in (None, "")
-        ]
+
+        # determine missing fields
+        info_payload = dict(extracted.get("info", {}) or {})
+        requested_fields = [k for k, v in info_payload.items() if v in (None, "")]
+        if not requested_fields:
+            # Nothing missing — keep existing behaviour
+            extracted["info"] = info_payload
+            extracted["is_complete"] = True
+            return extracted
+
+        # audit: request
         audit_id: Optional[str] = None
         if self.audit_log:
             audit_id = self.audit_log.record(
@@ -243,44 +285,99 @@ class HumanInLoopAgent(BaseHumanAgent):
                 },
             )
 
-        logger.info(
-            "Requesting missing info for event %s: %s",
-            masked_event.get("id", "<unknown>"),
-            masked_initial_info,
-        )
-        # Notes: Simulate human response for demo purposes.
-        info_payload = dict(extracted.get("info", {}) or {})
-        if not info_payload.get("company_name"):
-            info_payload["company_name"] = "Example Corp"
-        resolved_domain, _ = resolve_company_domain(info_payload, event)
-        if not resolved_domain:
-            slug = re.sub(r"[^a-z0-9]+", "", info_payload["company_name"].lower())
-            slug = slug or "resolved-company"
-            resolved_domain = f"{slug}.test"
-        info_payload["web_domain"] = resolved_domain
-        info_payload["company_domain"] = resolved_domain
-        extracted["info"] = info_payload
-        extracted["is_complete"] = True
+        # resolve an email-capable backend
+        email_agent = self._resolve_email_agent_for_reminders()
+        if email_agent is None:
+            # try direct backend if it can send mail
+            if hasattr(self.communication_backend, "send_email") or hasattr(
+                self.communication_backend, "send_email_async"
+            ):
+                email_agent = self.communication_backend
+            else:
+                raise RuntimeError(
+                    "Missing-info via email requested but no email-capable backend is configured."
+                )
 
+        # choose recipient (organizer preferred; fallback to operator)
+        to_email = (
+            (contact or {}).get("email")
+            or getattr(settings, "hitl_operator_email", None)
+            or getattr(settings, "smtp_sender", None)
+        )
+        if not to_email:
+            raise RuntimeError(
+                "No recipient address available for missing-info request."
+            )
+
+        # dispatch email
+        run_id = self.run_id or event.get("id") or "unassigned"
+        try:
+            self.dispatch_missing_info_email(
+                run_id,
+                to_email,
+                event=event,
+                current_info=info_payload,
+                requested_fields=requested_fields,
+                email_agent=email_agent,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Failed to send missing-info email for %s: %s", run_id, exc
+            )
+            # keep pending but log failure in audit
+            if self.audit_log:
+                self.audit_log.record(
+                    event_id=masked_event.get("id"),
+                    request_type="missing_info",
+                    stage="response",
+                    responder="email_backend",
+                    outcome="error",
+                    payload={"error": str(exc)},
+                    audit_id=audit_id,
+                )
+            # Do NOT auto-fill; return still incomplete
+            extracted["is_complete"] = False
+            extracted["pending_fields"] = requested_fields
+            if audit_id:
+                extracted["audit_id"] = audit_id
+            return extracted
+
+        # persist pending & schedule reminders
+        self.persist_pending_request(
+            run_id,
+            {
+                "type": "missing_info",
+                "requested_fields": requested_fields,
+                "event_id": event.get("id"),
+                "recipient": to_email,
+            },
+        )
+        try:
+            self.schedule_reminders(run_id, to_email, email_agent)
+        except Exception:  # defensive; reminders are best-effort
+            logger.exception("Failed to schedule missing-info reminders for %s", run_id)
+
+        # audit: response (still pending)
         if self.audit_log:
-            masked_completed_info = self._mask_for_message(extracted.get("info", {}))
-            response_payload = {
-                "info": masked_completed_info,
-                "is_complete": extracted.get("is_complete"),
-            }
-            outcome = "completed" if extracted.get("is_complete") else "incomplete"
-            audit_id = self.audit_log.record(
+            self.audit_log.record(
                 event_id=masked_event.get("id"),
                 request_type="missing_info",
                 stage="response",
-                responder="simulation",
-                outcome=outcome,
-                payload=response_payload,
+                responder="email_backend",
+                outcome="pending",
+                payload={
+                    "requested_fields": requested_fields,
+                    "recipient": mask_pii({"email": to_email}) if to_email else None,
+                },
                 audit_id=audit_id,
             )
-            if audit_id:
-                extracted["audit_id"] = audit_id
 
+        # Return unchanged info; mark incomplete and pending
+        extracted["info"] = info_payload
+        extracted["is_complete"] = False
+        extracted["pending_fields"] = requested_fields
+        if audit_id:
+            extracted["audit_id"] = audit_id
         return extracted
 
     def request_dossier_confirmation(
@@ -525,7 +622,9 @@ class HumanInLoopAgent(BaseHumanAgent):
 
         if reason == "attachments_review":
             attachment_count = context.get("attachment_count")
-            if attachment_count is None and isinstance(context.get("attachments"), list):
+            if attachment_count is None and isinstance(
+                context.get("attachments"), list
+            ):
                 attachment_count = len(context.get("attachments"))
             lines.append(
                 "We found an existing HubSpot company record with stored attachments."
@@ -556,9 +655,7 @@ class HumanInLoopAgent(BaseHumanAgent):
                 )
 
         lines.append("")
-        lines.append(
-            "Should we prepare a dossier for this event? Reply yes or no."
-        )
+        lines.append("Should we prepare a dossier for this event? Reply yes or no.")
         return "\n".join(lines)
 
     def _normalize_response(self, response: Any) -> Dict[str, Any]:

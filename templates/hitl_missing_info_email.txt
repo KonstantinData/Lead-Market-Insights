@@ -1,0 +1,20 @@
+Subject: [HITL] Additional Information Required – {{ company_name or "Unknown Entity" }}
+
+Dear {{ operator_name or "Operator" }},
+
+The workflow cannot proceed because certain mandatory fields are missing or incomplete.
+
+Missing Fields:
+{% for field in missing_fields %}
+  • {{ field }}
+{% endfor %}
+
+Context:
+  • Run ID: {{ run_id }}
+  • Audit ID: {{ audit_id }}
+
+Please reply with the corrected or additional information in plain text,
+or indicate if the workflow should be paused or discarded.
+
+Thank you for your assistance,
+Lead-Market-Insights Automation System

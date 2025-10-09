@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Human-in-the-Loop State",
+  "description": "Canonical versioned schema describing the persisted state of a HITL request.",
+  "type": "object",
+  "required": [
+    "version",
+    "run_id",
+    "status",
+    "created_at",
+    "context"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Schema version for forward-compatible migrations."
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Globally unique identifier for the workflow run (UUID or run-*)."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "approved", "declined", "resolved", "expired"],
+      "description": "Current lifecycle status of the HITL request."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp when the HITL request was first persisted."
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp of the most recent update to this record."
+    },
+    "context": {
+      "type": "object",
+      "description": "Arbitrary contextual metadata (e.g., company info, extracted fields, reason for HITL)."
+    },
+    "reminders_sent": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "How many reminder notifications were sent to the operator."
+    },
+    "escalated": {
+      "type": "boolean",
+      "default": false,
+      "description": "Indicates whether the request has been escalated to the admin operator."
+    },
+    "operator_email": {
+      "type": "string",
+      "format": "email",
+      "description": "Email address of the operator responsible for approval."
+    },
+    "admin_email": {
+      "type": "string",
+      "format": "email",
+      "description": "Email address for escalation and supervision."
+    },
+    "message_id": {
+      "type": "string",
+      "description": "Optional ID of the outbound HITL email (for threading correlation)."
+    },
+    "audit_id": {
+      "type": "string",
+      "description": "Identifier for audit correlation between logs and external systems."
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Optional timestamp after which the HITL request automatically expires."
+    }
+  },
+  "additionalProperties": false
+}

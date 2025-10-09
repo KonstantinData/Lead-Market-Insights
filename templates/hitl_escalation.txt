@@ -1,0 +1,17 @@
+Subject: [HITL] Escalation Notice – No Response from Operator
+
+Dear {{ admin_name or "Administrator" }},
+
+The following HITL request has exceeded the operator’s response window
+and is now being escalated for review.
+
+Context:
+  • Run ID: {{ run_id }}
+  • Operator: {{ operator_email }}
+  • Created At: {{ created_at }}
+  • Reminders Sent: {{ reminders_sent }}
+  • Last Reminder: {{ last_reminder_time }}
+
+Please follow up with the operator or intervene manually.
+
+— Lead-Market-Insights Automation System

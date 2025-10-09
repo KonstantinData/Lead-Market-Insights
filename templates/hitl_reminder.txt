@@ -1,0 +1,17 @@
+Subject: [HITL] Reminder – Pending Approval for {{ company_name or "Current Case" }}
+
+Dear {{ operator_name or "Operator" }},
+
+This is a friendly reminder that the following HITL request is still awaiting your response.
+
+  • Run ID: {{ run_id }}
+  • Requested Action: {{ requested_action or "Approval pending" }}
+  • Created: {{ created_at }}
+  • Deadline: {{ deadline }}
+
+Please reply to this email with APPROVE or DECLINE to proceed.
+
+If you’ve already replied, you can safely ignore this message.
+
+Kind regards,
+Lead-Market-Insights Automation System

@@ -1,0 +1,17 @@
+Subject: Action required for run {{ run_id }}
+
+
+Dear Operator,
+
+
+Please review the following context:
+{{ context | tojson(indent=2) }}
+
+
+Reply with one of:
+- APPROVE
+- DECLINE
+- CHANGE
+
+
+Optional key=value lines below the command, one per line.

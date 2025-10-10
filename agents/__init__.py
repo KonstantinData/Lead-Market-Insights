@@ -16,3 +16,10 @@ __all__ = [
     "factory",
     "interfaces",
 ]
+
+# Explanation: initialize HITL layer (isolated, local logging)
+self.hia = HumanInLoopAgent()
+self.hitl_orch = HitlOrchestrator()
+self.operator_email = getattr(
+    self, "operator_email", os.getenv("HITL_OPERATOR_EMAIL", "ops@example.com")
+)

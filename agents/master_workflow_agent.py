@@ -248,9 +248,7 @@ class MasterWorkflowAgent:
                 method(event, payload)
                 return
             except Exception:  # pragma: no cover - defensive guard
-                logger.exception(
-                    "Telemetry delegate failed for event %s", event
-                )
+                logger.exception("Telemetry delegate failed for event %s", event)
         log = logger.warning if level == "warn" else logger.info
         log("telemetry.%s event=%s payload=%s", level, event, payload)
 
@@ -353,12 +351,11 @@ class MasterWorkflowAgent:
             }
             processed_results.append(event_result)
 
-            if self._processed_event_cache and self._processed_event_cache.is_processed(
-                event
+            if (
+                self._processed_event_cache
+                and self._processed_event_cache.is_processed(event)
             ):
-                logger.info(
-                    "Prefilter skip (processed_cache) event_id=%s", event_id
-                )
+                logger.info("Prefilter skip (processed_cache) event_id=%s", event_id)
                 workflow_step_recorder.record_step(
                     self.run_id, event_id, "prefilter.processed_cache"
                 )
@@ -455,9 +452,7 @@ class MasterWorkflowAgent:
             extracted.setdefault("info", {})
             extracted["info"]["company_name"] = normalised_info.get("company_name")
             extracted["info"]["web_domain"] = normalised_info.get("company_domain")
-            extracted["info"]["company_domain"] = normalised_info.get(
-                "company_domain"
-            )
+            extracted["info"]["company_domain"] = normalised_info.get("company_domain")
             is_complete = bool(
                 normalised_info.get("company_name")
                 and normalised_info.get("company_domain")
@@ -488,9 +483,7 @@ class MasterWorkflowAgent:
 
             if not normalised_info.get("company_domain"):
                 event_result["status"] = "hitl_required"
-                self._record_domain_guardrail(
-                    event_result, event_id, info, domain_meta
-                )
+                self._record_domain_guardrail(event_result, event_id, info, domain_meta)
                 follow_up = await self._collect_missing_info_via_hitl(
                     event_result,
                     event,
@@ -782,9 +775,7 @@ class MasterWorkflowAgent:
                 "Failed to record domain guardrail audit for event %s", event_id
             )
 
-    def _infer_requested_fields(
-        self, info: Optional[Dict[str, Any]]
-    ) -> List[str]:
+    def _infer_requested_fields(self, info: Optional[Dict[str, Any]]) -> List[str]:
         if not info:
             return []
         return [key for key, value in info.items() if value in (None, "")]
@@ -1115,7 +1106,9 @@ class MasterWorkflowAgent:
             )
             raise
 
-    def _guard_before_crm_dispatch(self, research_store: MutableMapping[str, Any]) -> None:
+    def _guard_before_crm_dispatch(
+        self, research_store: MutableMapping[str, Any]
+    ) -> None:
         for key in ("similar_companies", "similar_companies_level1"):
             result = research_store.get(key)
             if not isinstance(result, MutableMapping):
@@ -1942,3 +1935,22 @@ class MasterWorkflowAgent:
             whitelist=getattr(settings, "pii_field_whitelist", None),
             mode=getattr(settings, "compliance_mode", "standard"),
         )
+
+
+# Explanation: decide whether HITL is required based on research_result
+def needs_hitl(self, research_result: dict) -> bool:
+    missing = (
+        research_result.get("missing_fields")
+        if isinstance(research_result, dict)
+        else []
+    )
+    return bool(missing)
+
+
+# Explanation: translate HITL decision to next workflow action
+def on_decision(self, decision: str) -> tuple[str, str]:
+    if decision == "APPROVED":
+        return ("proceed", "hitl_approved")
+    if decision == "CHANGE_REQUESTED":
+        return ("re_research", "hitl_change_requested")
+    return ("terminate", "hitl_declined")

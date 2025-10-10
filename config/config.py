@@ -29,6 +29,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from pydantic import BaseSettings, Field, model_validator  # <= add model_validator
 
 # Explanation:
 # Pydantic v2: BaseSettings kommt aus pydantic_settings, validator → field_validator.

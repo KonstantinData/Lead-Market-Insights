@@ -1,47 +1,46 @@
-"""
-Minimal PII masking utility for emails and phones.
-"""
+"""Simple redaction helpers shared by the standalone HITL toolkit."""
+
 from __future__ import annotations
-import re, hashlib
-from typing import Dict, Any
+
+import hashlib
+import re
+from typing import Any, Dict
+
 from .contracts import MaskedPayload
 from .logging_setup import get_logger
 
 
 log = get_logger("hitl.pii", "pii.log")
 
-
 EMAIL = re.compile(r"([A-Za-z0-9_.+-]+)@([A-Za-z0-9-]+\.[A-Za-z0-9-.]+)")
 PHONE = re.compile(r"\+?\d[\d\s().-]{6,}\d")
 
 
-# Explanation: SHA256 short token for pseudonymization
-
-
 def _hash(value: str) -> str:
-return hashlib.sha256(value.encode("utf-8")).hexdigest()[:10]
+    """Return a short deterministic token for the supplied *value*."""
 
-
-# Explanation: redact sensitive items and return MaskedPayload
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:10]
 
 
 def mask_pii(run_id: str, data: Dict[str, Any]) -> MaskedPayload:
-text = str(data)
+    """Redact emails and phone numbers and record the masking metadata."""
 
+    text = str(data)
 
-def _email_sub(m: re.Match) -> str:
-local, domain = m.group(1), m.group(2)
-return f"***+{_hash(local)}@{domain}"
+    def _email_sub(match: re.Match[str]) -> str:
+        local, domain = match.group(1), match.group(2)
+        return f"***+{_hash(local)}@{domain}"
 
+    def _phone_sub(match: re.Match[str]) -> str:
+        return f"+***-{_hash(match.group(0))}"
 
-def _phone_sub(m: re.Match) -> str:
-return f"+***-{_hash(m.group(0))}"
+    redacted = EMAIL.sub(_email_sub, text)
+    redacted = PHONE.sub(_phone_sub, redacted)
 
-
-redacted = EMAIL.sub(_email_sub, text)
-redacted = PHONE.sub(_phone_sub, redacted)
-
-
-masked = MaskedPayload(run_id=run_id, data={"redacted": redacted}, pii_redaction="v1")
-log.info("pii_masked", extra={"run_id": run_id})
-return masked
+    masked = MaskedPayload(
+        run_id=run_id,
+        data={"redacted": redacted},
+        pii_redaction="v1",
+    )
+    log.info("pii_masked", extra={"run_id": run_id})
+    return masked

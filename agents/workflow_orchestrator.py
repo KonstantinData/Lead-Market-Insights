@@ -1,18 +1,9 @@
-import os
 """WorkflowOrchestrator: central coordinator for research workflows.
 
 Requires externally provided ``run_id`` (generated in :mod:`main`). The
 orchestrator neither generates nor mutates the identifier; callers must provide
 the run id before instantiation to guarantee consistent telemetry correlation.
 """
-
-from src.hitl.human_in_loop_agent import HumanInLoopAgent
-from src.hitl.orchestrator import Orchestrator as HitlOrchestrator
-
-# nach dem ersten Block mit import / from ... import
-from src.hitl.human_in_loop_agent import HumanInLoopAgent
-from src.hitl.orchestrator import Orchestrator as HitlOrchestrator
-
 
 import asyncio
 import logging
@@ -94,7 +85,8 @@ class WorkflowOrchestrator:
         run_id: str,
         alert_agent: Optional[AlertAgent] = None,
         master_agent: Optional[MasterWorkflowAgent] = None,
-        failure_threshold: int =
+        failure_threshold: int = 3,
+    ):
         self._init_error: Optional[Exception] = None
         self.alert_agent = alert_agent
         self.telemetry = _TelemetryFacade()
@@ -160,11 +152,6 @@ class WorkflowOrchestrator:
             )
 
     @property
-# Explanation: initialize HITL layer (isolated, local logging)
-self.hia = HumanInLoopAgent()
-self.hitl_orch = HitlOrchestrator()
-self.operator_email = getattr(self, "operator_email", os.getenv("HITL_OPERATOR_EMAIL", "ops@example.com"))
- @property
     def audit_log(self) -> Optional[Any]:
         if not self.master_agent:
             return None
@@ -878,28 +865,3 @@ self.operator_email = getattr(self, "operator_email", os.getenv("HITL_OPERATOR_E
             self.storage_agent.reset_failure_count(key)
         elif key in self._failure_counts:
             del self._failure_counts[key]
-
-# Explanation: resume workflow after HITL decision without altering existing steps
-def continue_after_hitl(self, run_id: str, context: dict) -> None:
-    status = self.hitl_orch.status(run_id)
-    if not status or status == "pending":
-        return
-    action, _ = self.mwa.on_decision(status)
-    if action in ("proceed", "re_research"):
-        research = self.ira.research(company=context.get("company"), domain=context.get("domain"))
-        self._continue_automation(run_id, context, research)
-    elif action == "terminate":
-        return
-
-def continue_after_hitl(self, run_id: str, context: dict) -> None:
-    # Explanation: resume workflow after HITL decision without altering existing steps
-    status = self.hitl_orch.status(run_id)
-    if not status or status == "pending":
-        return
-    action, _ = self.mwa.on_decision(status)
-    if action in ("proceed", "re_research"):
-        research = self.ira.research(company=context.get("company"), domain=context.get("domain"))
-        self._continue_automation(run_id, context, research)
-    elif action == "terminate":
-        return
-

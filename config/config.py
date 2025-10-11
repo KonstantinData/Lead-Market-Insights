@@ -29,12 +29,18 @@ import json
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from pydantic import BaseSettings, Field, model_validator  # <= add model_validator
 
 # Explanation:
 # Pydantic v2: BaseSettings kommt aus pydantic_settings, validator → field_validator.
-from pydantic import BaseModel, EmailStr, Field, field_validator
-from pydantic_settings import BaseSettings
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
+
+try:  # pragma: no cover - optional dependency for settings
+    from pydantic_settings import BaseSettings
+except ImportError:  # pragma: no cover - fallback for minimal environments
+    class BaseSettings(BaseModel):
+        """Lightweight substitute when ``pydantic-settings`` isn't installed."""
+
+        model_config = ConfigDict(extra="ignore")
 
 
 # -----------------------------
@@ -275,8 +281,7 @@ class Settings(BaseSettings):
     #   - JSON or "k=v;k2=v2" formats supported
     agent_overrides: Dict[str, str] = Field(default_factory=dict)
 
-    class Config:
-        case_sensitive = False
+    model_config = ConfigDict(case_sensitive=False)
 
     # --- Post-init normalization (Pydantic v2) ---
 

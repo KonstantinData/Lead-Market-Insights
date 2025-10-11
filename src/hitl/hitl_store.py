@@ -1,79 +1,93 @@
-"""
-Append-only HITL state (JSONL) with in-memory index by run_id.
-"""
+"""Durable append-only store tracking HITL requests and decisions."""
+
 from __future__ import annotations
+
 import json
-from pathlib import Path
-from typing import Dict, Any, Optional
 from dataclasses import dataclass
-from .contracts import HitlRequest, HitlDecision
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+from .contracts import HitlDecision, HitlRequest
 from .logging_setup import get_logger
 
 
 DATA_DIR = Path("./data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+
 HITL_PATH = DATA_DIR / "hitl.jsonl"
 log = get_logger("hitl.store", "hitl_store.log")
 
 
-@dataclass
+@dataclass(slots=True)
 class HitlRecord:
-# Explanation: small index item for fast lookups
-run_id: str
-status: str
-
-
+    run_id: str
+    status: str
 
 
 class HitlStore:
-# Explanation: append-only writes; idempotent on pending
-def __init__(self, path: Path = HITL_PATH):
-self.path = path
-self._index: Dict[str, HitlRecord] = {}
-self._load_index()
+    """Append-only persistence layer with an in-memory index."""
 
+    def __init__(self, path: Path = HITL_PATH) -> None:
+        self.path = path
+        self._index: Dict[str, HitlRecord] = {}
+        self._load_index()
 
-def _load_index(self) -> None:
-if not self.path.exists():
-return
-with self.path.open("r", encoding="utf-8") as f:
-for line in f:
-try:
-obj = json.loads(line)
-if obj.get("type") == "request":
-rid = obj["data"]["run_id"]
-self._index[rid] = HitlRecord(rid, "pending")
-elif obj.get("type") == "decision":
-rid = obj["data"]["run_id"]
-self._index[rid] = HitlRecord(rid, obj["data"]["decision"])
-except Exception as e:
-log.error("index_load_error", extra={"error": str(e)})
+    def _load_index(self) -> None:
+        if not self.path.exists():
+            self._index.clear()
+            return
 
+        try:
+            index: Dict[str, HitlRecord] = {}
+            with self.path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    try:
+                        payload = json.loads(line)
+                    except json.JSONDecodeError:
+                        log.warning("discarding malformed HITL log entry", extra={"line": line})
+                        continue
 
-def write_request(self, req: HitlRequest) -> None:
-rec = self._index.get(req.run_id)
-if rec and rec.status != "pending":
-log.info("request_already_decided", extra={"run_id": req.run_id})
-return
-payload = {"type": "request", "data": req.model_dump(mode="json")}
-self._append(payload)
-self._index[req.run_id] = HitlRecord(req.run_id, "pending")
-log.info("request_written", extra={"run_id": req.run_id})
+                    data = payload.get("data") or {}
+                    run_id = data.get("run_id")
+                    if not run_id:
+                        continue
+                    if payload.get("type") == "request":
+                        index[run_id] = HitlRecord(run_id, "pending")
+                    elif payload.get("type") == "decision":
+                        status = data.get("decision") or "pending"
+                        index[run_id] = HitlRecord(run_id, status)
+            self._index = index
+        except OSError:
+            log.exception("failed to load HITL store index")
 
+    def write_request(self, request: HitlRequest) -> None:
+        existing = self._index.get(request.run_id)
+        if existing and existing.status != "pending":
+            log.info("request_already_resolved", extra={"run_id": request.run_id})
+            return
 
-def apply_decision(self, dec: HitlDecision) -> None:
-payload = {"type": "decision", "data": dec.model_dump(mode="json")}
-self._append(payload)
-self._index[dec.run_id] = HitlRecord(dec.run_id, dec.decision)
-log.info("decision_applied", extra={"run_id": dec.run_id, "decision": dec.decision})
+        payload = {"type": "request", "data": request.model_dump(mode="json")}
+        self._append(payload)
+        self._index[request.run_id] = HitlRecord(request.run_id, "pending")
+        log.info("request_persisted", extra={"run_id": request.run_id})
 
+    def apply_decision(self, decision: HitlDecision) -> None:
+        payload = {"type": "decision", "data": decision.model_dump(mode="json")}
+        self._append(payload)
+        self._index[decision.run_id] = HitlRecord(decision.run_id, decision.decision)
+        log.info(
+            "decision_persisted",
+            extra={"run_id": decision.run_id, "decision": decision.decision},
+        )
 
-def status(self, run_id: str) -> Optional[str]:
-rec = self._index.get(run_id)
-return rec.status if rec else None
+    def status(self, run_id: str) -> Optional[str]:
+        record = self._index.get(run_id)
+        if record is None:
+            self._load_index()
+            record = self._index.get(run_id)
+        return record.status if record else None
 
-
-def _append(self, obj: Dict[str, Any]) -> None:
-self.path.parent.mkdir(parents=True, exist_ok=True)
-with self.path.open("a", encoding="utf-8") as f:
-f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+    def _append(self, payload: Dict[str, Any]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False) + "\n")

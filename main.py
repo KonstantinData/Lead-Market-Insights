@@ -9,10 +9,57 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from config.config import settings
-from utils.email_agent import EmailAgent
 from agents.workflow_orchestrator import WorkflowOrchestrator
+from utils import observability
+from utils.email_agent import EmailAgent
 
 current_run_id_var: ContextVar[str] = ContextVar("current_run_id", default="unassigned")
+
+_run_id_filter_attached = False
+
+
+class _RunIdFilter(logging.Filter):
+    """Ensure every log record carries the current workflow run identifier."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.run_id = observability.get_current_run_id()
+        return True
+
+
+_run_id_filter = _RunIdFilter()
+
+
+def _init_logging() -> None:
+    """Configure structured logging once per process."""
+
+    global _run_id_filter_attached
+
+    root_logger = logging.getLogger()
+    if not root_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s %(levelname)s [run_id=%(run_id)s] %(name)s %(message)s"
+            )
+        )
+        root_logger.addHandler(handler)
+    else:
+        for handler in root_logger.handlers:
+            formatter = handler.formatter
+            if formatter is None or "%(run_id)" not in getattr(formatter, "_fmt", ""):
+                handler.setFormatter(
+                    logging.Formatter(
+                        "%(asctime)s %(levelname)s [run_id=%(run_id)s] %(name)s %(message)s"
+                    )
+                )
+
+    if not _run_id_filter_attached:
+        root_logger.addFilter(_run_id_filter)
+        for handler in root_logger.handlers:
+            handler.addFilter(_run_id_filter)
+        _run_id_filter_attached = True
+
+    root_logger.setLevel(logging.INFO)
 
 
 def _assign_new_run_id() -> str:
@@ -60,9 +107,7 @@ async def _run_once(run_id: str) -> None:
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
-    )
+    _init_logging()
     logging.info("Environment validation passed.")
     run_id = _assign_new_run_id()
     logging.info("Daemon cycle start for run.id=%s", run_id)
